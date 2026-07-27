@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Test Track 01 — Straight</title>
+<title>Circuit 01 — Pinewood</title>
 <style>
   :root{
     --ink:#0b0c0d;
@@ -14,7 +14,7 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--ink);overflow:hidden}
-  canvas{display:block;width:100%;height:100%}
+  canvas#c{display:block;width:100%;height:100%}
   #vignette{
     position:fixed;inset:0;pointer-events:none;
     background:radial-gradient(ellipse 120% 90% at 50% 45%, rgba(0,0,0,0) 45%, rgba(0,0,0,.42) 100%);
@@ -36,6 +36,7 @@
   #status{right:0;top:0;padding:16px 20px;text-align:right;font-size:10.5px;
           letter-spacing:.14em;text-transform:uppercase;opacity:.6;line-height:1.9}
   #status em{font-style:normal;color:var(--amber);opacity:.9}
+  #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
         background:var(--ink);color:var(--paper);font-family:var(--mono);z-index:9;
         transition:opacity .7s ease}
@@ -43,24 +44,25 @@
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
   #boot.gone{opacity:0;pointer-events:none}
-  @media (max-width:560px){ #keys{display:none} }
+  @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px} }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="vignette"></div>
 
-<div class="hud" id="tag"><b>Test Track 01</b><span>Straight · McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Hood</em><br>Detail <em id="qname">High</em></div>
+<div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Detail <em id="qname">High</em></div>
+<canvas id="map" width="372" height="372"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
-  <div><kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
-  <div>drag look · tap to reset · scroll zoom</div>
+  <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
+  <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
-<div id="boot"><p>Loading track</p><div id="bar"><i></i></div></div>
+<div id="boot"><p>Building circuit</p><div id="bar"><i></i></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="meshopt_decoder.js"></script>
@@ -105,35 +107,199 @@ function fbm(x,y,oct){
   return s/tot;
 }
 
-/* road geometry constants (metres) */
+/* road cross-section (metres, lateral offset from the centreline) */
 const ROAD_HALF   = 4.5;    // asphalt half width
 const LANE_EDGE   = 3.65;   // white edge line offset
 const SHOULDER    = 6.1;    // gravel outer edge
-const TREE_START  = 8.5;    // nearest trunk to centreline
-const PERIOD      = 1400;   // tree / terrain repeat length
-const MPERIOD     = PERIOD*4; // mountain repeat length (multiple of PERIOD)
-const TRACK_LEN   = 7000;   // asphalt strip length
-/* 180 m divides the asphalt tile (3), gravel (2.4), wear strip (60),
-   lane-dash cycle (9) and post spacing (45) — so recycling is seamless */
-const ROAD_SNAP   = 180;
+const TREE_CLEAR  = 15.0;   // nearest trunk to the centreline
+const LAP_TARGET  = 5000;   // circuit length, metres
 
-/* fbm that is exactly periodic in z with wavelength PERIOD, so the ground,
-   the trees and the hills can all be recycled as the car drives forever.
-   The last slice cross-fades back into the first — no seam, no jump.       */
-function pfbm(x,z,oct,fx,fz){
-  let zm=z%PERIOD; if(zm<0) zm+=PERIOD;
-  const w=smoothstep(PERIOD*0.72,PERIOD,zm);
-  const a=fbm(x*fx, zm*fz, oct);
-  if(w<=0) return a;
-  return a+(fbm(x*fx,(zm-PERIOD)*fz,oct)-a)*w;
+const shadowCasters=[];
+const treeCells=[];
+
+/* ================================================================= TRACK ==
+   The circuit is authored as a closed polyline in the units of the layout
+   sketch, run through a centripetal Catmull-Rom, then uniformly scaled so the
+   lap comes out at LAP_TARGET metres. Everything downstream — road ribbon,
+   kerbs, posts, trees, terrain flattening, the car itself — is placed in
+   (s, lateral) track space rather than world x/z, which is what lets the
+   straight road become a circuit at all.
+
+   Index 0 is the start of the main straight; index 4 is its far end.        */
+const TRACK_PX=[
+  [ 470,730],[ 620,730],[ 780,730],[ 900,730],[ 995,730],   // main straight
+  [1092,712],[1148,662],[1128,606],[1062,566],[1020,528],   // right-hand loop + tight left
+  [1058,486],[1116,442],[1148,414],[1132,370],[1052,330],   // back out and up
+  [ 958,312],[ 868,332],[ 778,368],[ 690,398],[ 640,412],   // long top sweep
+  [ 598,398],[ 558,352],[ 520,300],[ 458,282],[ 400,318],   // rise to the top-left crest
+  [ 379,390],[ 402,440],[ 452,488],[ 424,536],[ 390,590],   // left flank with the inward kink
+  [ 382,646],[ 406,692]                                     // final left onto the straight
+];
+const STRAIGHT_END_I = 4;
+
+let LAP=0, NSAMP=0, DS=1;
+let sx=null, sz=null, tanx=null, tanz=null, kap=null;
+let START_S=6, FINISH_S=0;
+let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
+
+(function buildTrack(){
+  const pts=TRACK_PX.map(p=>new THREE.Vector3(p[0],0,p[1]));
+  let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9;
+  pts.forEach(p=>{mnx=Math.min(mnx,p.x);mxx=Math.max(mxx,p.x);mnz=Math.min(mnz,p.z);mxz=Math.max(mxz,p.z);});
+  const cx=(mnx+mxx)/2, cz=(mnz+mxz)/2;
+  pts.forEach(p=>{p.x-=cx;p.z-=cz;});
+
+  // centripetal parameterisation: the tight kinks on the left flank and the
+  // right-hand loop would cusp or loop back under the uniform variant.
+  const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal',0.5);
+
+  const D=24000;
+  const px=new Float64Array(D+1), pz=new Float64Array(D+1), cum=new Float64Array(D+1);
+  const v=new THREE.Vector3();
+  for(let i=0;i<=D;i++){ curve.getPoint(i/D,v); px[i]=v.x; pz[i]=v.z; }
+  for(let i=0;i<D;i++) cum[i+1]=cum[i]+Math.hypot(px[i+1]-px[i],pz[i+1]-pz[i]);
+
+  // one uniform scale takes the sketch to metres; the lap is then exact
+  const SC=LAP_TARGET/cum[D];
+  for(let i=0;i<=D;i++){ px[i]*=SC; pz[i]*=SC; cum[i]*=SC; }
+  LAP=LAP_TARGET; NSAMP=Math.round(LAP); DS=LAP/NSAMP;
+
+  sx=new Float32Array(NSAMP); sz=new Float32Array(NSAMP);
+  let j=0;
+  for(let i=0;i<NSAMP;i++){
+    const t=i*DS;
+    while(j<D-1 && cum[j+1]<t) j++;
+    const f=(t-cum[j])/Math.max(cum[j+1]-cum[j],1e-9);
+    sx[i]=px[j]+(px[j+1]-px[j])*f;
+    sz[i]=pz[j]+(pz[j+1]-pz[j])*f;
+  }
+
+  // tangents by central difference on the arclength-uniform samples
+  tanx=new Float32Array(NSAMP); tanz=new Float32Array(NSAMP);
+  for(let i=0;i<NSAMP;i++){
+    const a=(i-1+NSAMP)%NSAMP, b=(i+1)%NSAMP;
+    let dx=sx[b]-sx[a], dz=sz[b]-sz[a];
+    const L=Math.hypot(dx,dz)||1;
+    tanx[i]=dx/L; tanz[i]=dz/L;
+  }
+  /* Signed curvature, +ve = turning left. theta = atan2(tx,tz) is the yaw about
+     +y, and increasing it swings +z toward +x — which is the driver's left,
+     because with forward = +z and up = +y the car's local +x points left.   */
+  const raw=new Float32Array(NSAMP);
+  for(let i=0;i<NSAMP;i++){
+    const b=(i+1)%NSAMP;
+    let d=Math.atan2(tanx[b],tanz[b])-Math.atan2(tanx[i],tanz[i]);
+    while(d> Math.PI) d-=Math.PI*2;
+    while(d<-Math.PI) d+=Math.PI*2;
+    raw[i]=d/DS;
+  }
+  // box-filter it: the raw signal is noisy enough to make the kerbs stutter
+  // and the steering wheel jitter on a straight.
+  kap=new Float32Array(NSAMP);
+  const R=7;
+  for(let i=0;i<NSAMP;i++){
+    let a=0;
+    for(let k=-R;k<=R;k++) a+=raw[(i+k+NSAMP)%NSAMP];
+    kap[i]=a/(R*2+1);
+  }
+
+  for(let i=0;i<NSAMP;i++){
+    if(sx[i]<TRK_MINX||i===0)TRK_MINX=sx[i];
+    if(sx[i]>TRK_MAXX||i===0)TRK_MAXX=sx[i];
+    if(sz[i]<TRK_MINZ||i===0)TRK_MINZ=sz[i];
+    if(sz[i]>TRK_MAXZ||i===0)TRK_MAXZ=sz[i];
+  }
+
+  // s of the far end of the main straight, found by matching the control point
+  const ex=(TRACK_PX[STRAIGHT_END_I][0]-cx)*SC, ez=(TRACK_PX[STRAIGHT_END_I][1]-cz)*SC;
+  let best=1e18, bi=0;
+  for(let i=0;i<NSAMP;i++){
+    const d=(sx[i]-ex)*(sx[i]-ex)+(sz[i]-ez)*(sz[i]-ez);
+    if(d<best){best=d;bi=i;}
+  }
+  // start/finish sits two thirds down the straight — past the middle, with
+  // enough road left to still be braking for turn one after it.
+  FINISH_S = bi*DS*0.68;
+  START_S  = 6;                      // lights out at the very start of the straight
+})();
+
+const _ta=new THREE.Vector2(), _td=new THREE.Vector2();
+function trackAt(s,out){
+  let u=s/DS; u%=NSAMP; if(u<0)u+=NSAMP;
+  const i=u|0, f=u-i, j=(i+1)%NSAMP;
+  out.x=sx[i]+(sx[j]-sx[i])*f;
+  out.y=sz[i]+(sz[j]-sz[i])*f;
+  return out;
+}
+/* tangent lerped as a vector then renormalised — interpolating the angle
+   instead would need wrap handling and still misbehave through pi. */
+function trackDir(s,out){
+  let u=s/DS; u%=NSAMP; if(u<0)u+=NSAMP;
+  const i=u|0, f=u-i, j=(i+1)%NSAMP;
+  let x=tanx[i]+(tanx[j]-tanx[i])*f, z=tanz[i]+(tanz[j]-tanz[i])*f;
+  const L=Math.hypot(x,z)||1;
+  out.x=x/L; out.y=z/L;
+  return out;
+}
+function trackK(s){
+  let u=s/DS; u%=NSAMP; if(u<0)u+=NSAMP;
+  const i=u|0, f=u-i, j=(i+1)%NSAMP;
+  return kap[i]+(kap[j]-kap[i])*f;
+}
+/* world point at (s, lateral) — +lateral is the driver's left */
+function trackPos(s,lat,y,out){
+  trackAt(s,_ta); trackDir(s,_td);
+  out.set(_ta.x+_td.y*lat, y, _ta.y-_td.x*lat);
+  return out;
 }
 
-/* terrain: dead flat at the road, rolling further out */
+/* ---- distance-to-centreline field -------------------------------------
+   Terrain flattening and tree rejection both need "how far is this world
+   point from the track", tens of thousands of times. A uniform bucket grid
+   over decimated centreline samples answers it in a fixed 7x7 cell scan,
+   which is exact out to 3 cells (120 m) and saturates beyond — and 120 m is
+   further than anything downstream cares about.                           */
+const DCELL=40, DRING=3;
+let dgX0=0, dgZ0=0, dgNX=0, dgNZ=0, dgBins=null;
+(function buildDistGrid(){
+  const pad=DCELL*(DRING+1);
+  dgX0=TRK_MINX-pad; dgZ0=TRK_MINZ-pad;
+  dgNX=Math.ceil((TRK_MAXX-TRK_MINX+pad*2)/DCELL);
+  dgNZ=Math.ceil((TRK_MAXZ-TRK_MINZ+pad*2)/DCELL);
+  dgBins=new Array(dgNX*dgNZ);
+  for(let i=0;i<NSAMP;i+=4){
+    const cx=Math.floor((sx[i]-dgX0)/DCELL), cz=Math.floor((sz[i]-dgZ0)/DCELL);
+    if(cx<0||cz<0||cx>=dgNX||cz>=dgNZ) continue;
+    const k=cz*dgNX+cx;
+    (dgBins[k]||(dgBins[k]=[])).push(i);
+  }
+})();
+const DFAR=1e6;
+function distToTrack(x,z){
+  const cx=Math.floor((x-dgX0)/DCELL), cz=Math.floor((z-dgZ0)/DCELL);
+  let best=DFAR;
+  for(let a=-DRING;a<=DRING;a++){
+    const gz=cz+a; if(gz<0||gz>=dgNZ) continue;
+    for(let b=-DRING;b<=DRING;b++){
+      const gx=cx+b; if(gx<0||gx>=dgNX) continue;
+      const bin=dgBins[gz*dgNX+gx]; if(!bin) continue;
+      for(let n=0;n<bin.length;n++){
+        const i=bin[n], dx=sx[i]-x, dz=sz[i]-z;
+        const d=dx*dx+dz*dz;
+        if(d<best) best=d;
+      }
+    }
+  }
+  return best===DFAR?DFAR:Math.sqrt(best);
+}
+
+/* terrain: dead flat across the whole circuit and its run-off, rolling only
+   once you are well clear of the track. The track surface itself is flat. */
 function terrainH(x,z){
-  const k = smoothstep(16,110,Math.abs(x));
+  const k=smoothstep(34,115,distToTrack(x,z));
   if(k<=0) return 0;
-  const big = (pfbm(x,z,4,0.0022,0.0022)-0.5)*46;
-  const mid = (pfbm(x,z,3,0.011, 0.011 )-0.5)*7;
+  const big=(fbm(x*0.0022,z*0.0022,4)-0.5)*46;
+  const mid=(fbm(x*0.011, z*0.011, 3)-0.5)*7;
   return (big+mid)*k;
 }
 
@@ -275,11 +441,12 @@ const MAXANISO = renderer.capabilities.getMaxAnisotropy();
 
 const scene  = new THREE.Scene();
 const HORIZON = 0xb9c9d6;
-// thin enough that the rock texture on the ridges still reads at 1 km
-scene.fog = new THREE.FogExp2(sRGB(HORIZON).getHex(), 0.00062);
+// thinner than the straight-road version: the world is finite now and the
+// mountain ring sits 1.3-2.8 km out, so it has to survive the haze.
+scene.fog = new THREE.FogExp2(sRGB(HORIZON).getHex(), 0.00046);
 scene.fog.color = sRGB(HORIZON);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.06, 5000);
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.06, 7000);
 
 /* ------------------------------------------------------------------- sky */
 const SUN_DIR = new THREE.Vector3(-0.62,0.44,0.65).normalize();
@@ -305,7 +472,7 @@ const skyMat = new THREE.ShaderMaterial({
       gl_FragColor=vec4(col,1.0);
     }`
 });
-const skyDome=new THREE.Mesh(new THREE.SphereGeometry(3000,32,18), skyMat);
+const skyDome=new THREE.Mesh(new THREE.SphereGeometry(3400,32,18), skyMat);
 skyDome.frustumCulled=false;
 scene.add(skyDome);
 
@@ -382,7 +549,6 @@ const texLeaf = texture(ASSETS.leaf, true);
 const texGround = new THREE.CanvasTexture(groundTexture());
 texGround.wrapS=texGround.wrapT=THREE.RepeatWrapping;
 texGround.anisotropy=MAXANISO; texGround.encoding=THREE.sRGBEncoding;
-texGround.repeat.set(1000,1000);   // 8 m tile — 1400 m recycle is exactly 175 tiles
 
 const texWear = new THREE.CanvasTexture(wearTexture());
 texWear.wrapS=THREE.ClampToEdgeWrapping; texWear.wrapT=THREE.RepeatWrapping;
@@ -391,7 +557,8 @@ texWear.anisotropy=MAXANISO;
 /* ---------------------------------------------------------------- terrain */
 const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
 (function buildTerrain(){
-  const SEG=200, SIZE=8000;
+  const SEG=300, SIZE=9000;
+  texGround.repeat.set(SIZE/8,SIZE/8);          // 8 m tile
   const g=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);
   g.rotateX(-Math.PI/2);
   const p=g.attributes.position, col=new Float32Array(p.count*3);
@@ -400,12 +567,18 @@ const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
   const c=new THREE.Color();
   for(let i=0;i<p.count;i++){
     const x=p.getX(i), z=p.getZ(i);
-    p.setY(i, terrainH(x,z));
-    const t=pfbm(x,z,3,0.006,0.006);
+    const d=distToTrack(x,z);
+    const k=smoothstep(34,115,d);
+    let h=0;
+    if(k>0){
+      h=((fbm(x*0.0022,z*0.0022,4)-0.5)*46 + (fbm(x*0.011,z*0.011,3)-0.5)*7)*k;
+    }
+    p.setY(i,h);
+    const t=fbm(x*0.006,z*0.006,3);
     c.copy(green).lerp(dry, clamp(t*1.5-0.25,0,1));
-    const verge=1-smoothstep(6,26,Math.abs(x));   // scuffed dirt beside the tarmac
+    const verge=1-smoothstep(7,32,d);            // scuffed dirt beside the tarmac
     c.lerp(dirt, verge*0.75);
-    const sh=0.82+pfbm(x,z,2,0.02,0.02)*0.4;
+    const sh=0.82+fbm(x*0.02,z*0.02,2)*0.4;
     col[i*3]=c.r*sh; col[i*3+1]=c.g*sh; col[i*3+2]=c.b*sh;
   }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
@@ -419,81 +592,217 @@ const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
 
 /* ------------------------------------------------------------------- road */
 const roadGroup=new THREE.Group(); scene.add(roadGroup);
+
+/* Every texture that runs along the track has to close on itself at the
+   start/finish, so each nominal tile length is rounded to the nearest whole
+   number of repeats per lap. Same idea as the old 180 m road snap, but now
+   the constraint is one lap instead of one recycle step. */
+const fitTile = L => LAP/Math.round(LAP/L);
+const ASPH_TILE = fitTile(3.0);
+const GRAV_TILE = fitTile(2.4);
+const WEAR_TILE = fitTile(60);
+
+const RSTEP = 2;                       // metres between ribbon rings
+const RN    = Math.round(LAP/RSTEP);
+
+/* A flat ribbon swept along the centreline between two lateral offsets.
+   la is the left edge, lb the right; winding is set so the face points up. */
+function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
+  const n=RN+1;                        // the closing ring repeats ring 0 at s=LAP
+  const pos=new Float32Array(n*2*3), nrm=new Float32Array(n*2*3),
+        uv =new Float32Array(n*2*2);
+  const aw = wear ? new Float32Array(n*2*2) : null;
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  for(let i=0;i<n;i++){
+    const s=i*RSTEP;
+    trackAt(s,p); trackDir(s,d);
+    const nx=d.y, nz=-d.x;             // unit left normal
+    const v=s/vTile;
+    for(let k=0;k<2;k++){
+      const lat=k?lb:la, o=(i*2+k);
+      pos[o*3  ]=p.x+nx*lat;
+      pos[o*3+1]=y;
+      pos[o*3+2]=p.y+nz*lat;
+      nrm[o*3+1]=1;
+      uv[o*2  ]=k?ub:ua;
+      uv[o*2+1]=v;
+      if(aw){ aw[o*2]=k?0:1; aw[o*2+1]=s/WEAR_TILE; }
+    }
+  }
+  // n*2 vertices; stay on 16-bit indices while that fits, so the ribbon does
+  // not silently depend on OES_element_index_uint
+  const idx=(n*2<=65536)?new Uint16Array(RN*6):new Uint32Array(RN*6);
+  for(let i=0;i<RN;i++){
+    const a=i*2, b=a+1, cc=a+2, dd=a+3;
+    idx[i*6  ]=a; idx[i*6+1]=b; idx[i*6+2]=cc;
+    idx[i*6+3]=b; idx[i*6+4]=dd; idx[i*6+5]=cc;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('normal',  new THREE.BufferAttribute(nrm,3));
+  g.setAttribute('uv',      new THREE.BufferAttribute(uv,2));
+  if(aw) g.setAttribute('aWear',new THREE.BufferAttribute(aw,2));
+  g.setIndex(new THREE.BufferAttribute(idx,1));
+  g.computeBoundingSphere();
+  return g;
+}
+
 (function buildRoad(){
-  texRoad.repeat.set(3.0, TRACK_LEN/3.0);   // 3 m tile: divides ROAD_SNAP exactly
+  texRoad.repeat.set(1,1);             // tiling is baked into the ribbon UVs
 
   const asphalt=new THREE.MeshStandardMaterial({
     map:texRoad, bumpMap:texRoad, bumpScale:0.035,
     roughnessMap:texRoad, roughness:0.97, metalness:0,
     color:sRGB(0xa8a8a8)
   });
+  /* The wear strip needs its own 0..1 cross-track coordinate (the asphalt uv.x
+     runs 0..3 for tiling) and its own much longer v period, so it rides on a
+     dedicated attribute rather than being derived from uv. */
   asphalt.onBeforeCompile=sh=>{
     sh.uniforms.uWear={value:texWear};
     sh.vertexShader=sh.vertexShader
-      .replace('#include <common>','#include <common>\nvarying vec2 vWear;')
-      .replace('#include <uv_vertex>','#include <uv_vertex>\nvWear=uv;');
+      .replace('#include <common>','#include <common>\nattribute vec2 aWear;\nvarying vec2 vWear;')
+      .replace('#include <uv_vertex>','#include <uv_vertex>\nvWear=aWear;');
     sh.fragmentShader=sh.fragmentShader
       .replace('#include <common>','#include <common>\nuniform sampler2D uWear;\nvarying vec2 vWear;')
       .replace('#include <map_fragment>',
-        '#include <map_fragment>\nvec3 wr=texture2D(uWear,vec2(vWear.x,vWear.y*'+(TRACK_LEN/60).toFixed(1)+')).rgb;\ndiffuseColor.rgb*=mix(vec3(1.0),wr,0.85);');
+        '#include <map_fragment>\nvec3 wr=texture2D(uWear,vWear).rgb;\ndiffuseColor.rgb*=mix(vec3(1.0),wr,0.85);');
   };
-  const road=new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF*2,TRACK_LEN,1,1),asphalt);
-  road.rotation.x=-Math.PI/2; road.position.y=0.12; road.receiveShadow=true;
+  const road=new THREE.Mesh(
+    ribbonGeo(ROAD_HALF,-ROAD_HALF, 0.12, 0,3, ASPH_TILE, true), asphalt);
+  road.receiveShadow=true; road.frustumCulled=false;
   roadGroup.add(road);
 
   // gravel shoulders
   const gravel=new THREE.MeshStandardMaterial({map:cloneTex(texRock),roughness:1,metalness:0,color:sRGB(0x8d8578)});
   gravel.map.wrapS=gravel.map.wrapT=THREE.RepeatWrapping;
-  gravel.map.repeat.set(1.1,TRACK_LEN/2.4); gravel.map.encoding=THREE.sRGBEncoding;
+  gravel.map.repeat.set(1,1); gravel.map.encoding=THREE.sRGBEncoding;
   gravel.map.anisotropy=MAXANISO;
-  [-1,1].forEach(s=>{
-    const w=SHOULDER-ROAD_HALF;
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,TRACK_LEN,1,1),gravel);
-    m.rotation.x=-Math.PI/2; m.position.set(s*(ROAD_HALF+w/2),0.10,0); m.receiveShadow=true;
+  [[SHOULDER,ROAD_HALF],[-ROAD_HALF,-SHOULDER]].forEach(([a,b])=>{
+    const m=new THREE.Mesh(ribbonGeo(a,b,0.10,0,1.1,GRAV_TILE,false),gravel);
+    m.receiveShadow=true; m.frustumCulled=false;
     roadGroup.add(m);
   });
 
-  // paint
+  // edge lines
   const paint=new THREE.MeshStandardMaterial({
     color:sRGB(0xdedbd0), roughness:0.7, metalness:0,
     polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4
   });
-  [-1,1].forEach(s=>{
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(0.15,TRACK_LEN,1,1),paint);
-    m.rotation.x=-Math.PI/2; m.position.set(s*LANE_EDGE,0.14,0);
+  [[LANE_EDGE+0.075,LANE_EDGE-0.075],[-LANE_EDGE+0.075,-LANE_EDGE-0.075]].forEach(([a,b])=>{
+    const m=new THREE.Mesh(ribbonGeo(a,b,0.14,0,1,ASPH_TILE,false),paint);
+    m.frustumCulled=false;
     roadGroup.add(m);
   });
-  const DASH=3, GAP=6, n=Math.floor(TRACK_LEN/(DASH+GAP));
-  const dashes=new THREE.InstancedMesh(new THREE.PlaneGeometry(0.15,DASH,1,1),paint,n);
-  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI/2,0,0));
-  const one=new THREE.Vector3(1,1,1);
-  for(let i=0;i<n;i++){
-    mtx.compose(new THREE.Vector3(0,0.14,-TRACK_LEN/2+i*(DASH+GAP)+DASH/2),q,one);
-    dashes.setMatrixAt(i,mtx);
-  }
-  dashes.instanceMatrix.needsUpdate=true; dashes.frustumCulled=false;
-  roadGroup.add(dashes);
 
-  // reflective marker posts
-  const postGeo=new THREE.BoxGeometry(0.11,1.05,0.07);
-  postGeo.translate(0,0.525,0);
+  /* Kerbs. Laid on the inside of anything tighter than a 150 m radius, as
+     alternating red and white slabs — two instanced meshes for the whole
+     circuit. The inside of a turn is the +lateral side when the signed
+     curvature is positive, which is exactly how kap is defined. */
+  const KSTEP=1.7, KW=1.15, KCEN=LANE_EDGE+0.10+KW/2;
+  const kerbGeo=new THREE.BoxGeometry(KW,0.09,KSTEP*0.94);
+  const redMat  =new THREE.MeshStandardMaterial({color:sRGB(0xb8321f),roughness:0.62});
+  const whiteMat=new THREE.MeshStandardMaterial({color:sRGB(0xe6e3d8),roughness:0.62});
+  const slots=[];
+  for(let s=0;s<LAP;s+=KSTEP){
+    const k=trackK(s+KSTEP*0.5);
+    if(Math.abs(k)<1/150) continue;
+    slots.push({s, side:k>0?1:-1, n:slots.length});
+  }
+  const nRed=Math.ceil(slots.length/2), nWhite=slots.length-nRed;
+  const redM  =new THREE.InstancedMesh(kerbGeo,redMat,  Math.max(nRed,1));
+  const whiteM=new THREE.InstancedMesh(kerbGeo,whiteMat,Math.max(nWhite,1));
+  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
+        v3=new THREE.Vector3(), one=new THREE.Vector3(1,1,1),
+        p2=new THREE.Vector2(), d2=new THREE.Vector2();
+  let ri=0, wi=0;
+  slots.forEach((sl,i)=>{
+    trackAt(sl.s,p2); trackDir(sl.s,d2);
+    const lat=sl.side*KCEN;
+    v3.set(p2.x+d2.y*lat, 0.155, p2.y-d2.x*lat);
+    q.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.atan2(d2.x,d2.y));
+    mtx.compose(v3,q,one);
+    if(i&1){ whiteM.setMatrixAt(wi++,mtx); } else { redM.setMatrixAt(ri++,mtx); }
+  });
+  // unused tail instances would otherwise render as unit cubes at the origin
+  mtx.compose(v3.set(0,-500,0),q.identity(),one);
+  for(let i=ri;i<redM.count;i++)   redM.setMatrixAt(i,mtx);
+  for(let i=wi;i<whiteM.count;i++) whiteM.setMatrixAt(i,mtx);
+  redM.instanceMatrix.needsUpdate=whiteM.instanceMatrix.needsUpdate=true;
+  redM.frustumCulled=whiteM.frustumCulled=false;
+  redM.receiveShadow=whiteM.receiveShadow=true;
+  roadGroup.add(redM,whiteM);
+
+  // reflective marker posts, outside the gravel on both sides
+  const postGeo=new THREE.BoxGeometry(0.11,1.05,0.07); postGeo.translate(0,0.525,0);
   const postMat=new THREE.MeshStandardMaterial({color:sRGB(0xe8e5da),roughness:0.6});
   const capMat =new THREE.MeshStandardMaterial({color:sRGB(0xb52d1c),roughness:0.45,
                                                 emissive:sRGB(0x521008),emissiveIntensity:.5});
   const capGeo=new THREE.BoxGeometry(0.09,0.16,0.075); capGeo.translate(0,0.86,0);
-  const cnt=Math.floor(TRACK_LEN/45)*2;
+  const cnt=Math.floor(LAP/45)*2;
   const posts=new THREE.InstancedMesh(postGeo,postMat,cnt);
   const caps =new THREE.InstancedMesh(capGeo, capMat, cnt);
   posts.castShadow=true;
   let k=0;
-  for(let i=0;i<cnt/2;i++) for(const s of [-1,1]){
-    const z=-TRACK_LEN/2+i*45+22.5;
-    mtx.compose(new THREE.Vector3(s*(SHOULDER+0.5),0.08,z),new THREE.Quaternion(),one);
+  for(let i=0;i<cnt/2;i++) for(const sgn of [-1,1]){
+    const s=i*45;
+    trackAt(s,p2); trackDir(s,d2);
+    const lat=sgn*(SHOULDER+0.5);
+    v3.set(p2.x+d2.y*lat, 0.02, p2.y-d2.x*lat);
+    q.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.atan2(d2.x,d2.y));
+    mtx.compose(v3,q,one);
     posts.setMatrixAt(k,mtx); caps.setMatrixAt(k,mtx); k++;
   }
   posts.instanceMatrix.needsUpdate=true; caps.instanceMatrix.needsUpdate=true;
   posts.frustumCulled=false; caps.frustumCulled=false;
+  posts.userData.casts=true; shadowCasters.push(posts);
   roadGroup.add(posts,caps);
+})();
+
+/* ---------------------------------------------------- start / finish line */
+(function buildStartLine(){
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  trackAt(FINISH_S,p); trackDir(FINISH_S,d);
+  const yaw=Math.atan2(d.x,d.y);
+
+  const g=new THREE.Group();
+  g.position.set(p.x,0,p.y);
+  g.rotation.y=yaw;
+  scene.add(g);
+  // inside the group, +z is along the track and +x is the driver's left
+
+  // painted line, run right across the asphalt
+  const lineMat=new THREE.MeshStandardMaterial({
+    color:sRGB(0xf0eee6), roughness:0.66, metalness:0,
+    polygonOffset:true, polygonOffsetFactor:-6, polygonOffsetUnits:-6
+  });
+  const line=new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF*2,0.55),lineMat);
+  line.rotation.x=-Math.PI/2; line.position.y=0.145;
+  g.add(line);
+
+  // gantry: two uprights outside the gravel and a beam over the road
+  const steel=new THREE.MeshStandardMaterial({color:sRGB(0x2b2f33),roughness:0.55,metalness:0.55});
+  const H=6.4, SPAN=(SHOULDER+1.1)*2;
+  [-1,1].forEach(s=>{
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.34,H,0.34),steel);
+    leg.position.set(s*(SHOULDER+1.1),H/2,0);
+    leg.castShadow=true; leg.userData.casts=true; shadowCasters.push(leg);
+    g.add(leg);
+  });
+  const beam=new THREE.Mesh(new THREE.BoxGeometry(SPAN,0.62,0.5),steel);
+  beam.position.y=H-0.31;
+  beam.castShadow=true; beam.userData.casts=true; shadowCasters.push(beam);
+  g.add(beam);
+
+  // five start lights, dark — decoration, not a sequence
+  const bulbGeo=new THREE.SphereGeometry(0.19,12,8);
+  const bulbMat=new THREE.MeshStandardMaterial({color:sRGB(0x2a0705),roughness:0.35,
+                                                emissive:sRGB(0x3d0b06),emissiveIntensity:0.6});
+  for(let i=0;i<5;i++){
+    const b=new THREE.Mesh(bulbGeo,bulbMat);
+    b.position.set((i-2)*0.62, H-0.66, 0.28);
+    g.add(b);
+  }
 })();
 
 /* -------------------------------------------------------------- mountains */
@@ -528,12 +837,12 @@ const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
     return g;
   }
 
-  function faceUVsAndColour(g,H,uvScale,uOff,vOff,snowLine,seed){
+  function faceUVsAndColour(g,H,uvScale,uOff,vOff,seed){
     g.computeVertexNormals();
     const p=g.attributes.position, nr=g.attributes.normal;
     const uv=new Float32Array(p.count*2), col=new Float32Array(p.count*3);
-    // Near-white tints so the photo supplies the colour. The old grey ramp
-    // multiplied the texture down to mush and the snow blend finished the job.
+    // Near-white tints so the photo supplies the colour. A grey ramp here
+    // multiplies the texture down to mush.
     const rock=new THREE.Color(1.14,1.09,1.02);   // sun-facing rock, slightly warm
     const dark=new THREE.Color(0.50,0.51,0.58);   // crevices, cool bounce light
     const c=new THREE.Color();
@@ -561,42 +870,43 @@ const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
     return g;
   }
 
-  // every peak is authored inside one MPERIOD-long slice, then the whole
-  // field is stamped three times so there is always rock ahead and behind.
   function place(x,z,R,H,seed){
     const rr=mulberry32(seed+7);
     const uvS=0.0030+rr()*0.0015, uo=rr()*20, vo=rr()*20;
-    const snow=0.74+rr()*0.20, ry=rr()*Math.PI*2;
-    for(let c=-1;c<=1;c++){
-      let g=pyramid(R,H,seed);
-      g=faceUVsAndColour(g,H,uvS,uo,vo,snow,seed+3);
-      g.rotateY(ry);
-      // sunk well below the rolling ground so no base ever pokes into view
-      g.translate(x, terrainH(x,z)-H*0.05-26, z+c*MPERIOD);
-      chunks.push(g); vTotal+=g.attributes.position.count;
-    }
+    let g=pyramid(R,H,seed);
+    g=faceUVsAndColour(g,H,uvS,uo,vo,seed+3);
+    g.rotateY(rr()*Math.PI*2);
+    // sunk well below the rolling ground so no base ever pokes into view
+    g.translate(x, terrainH(x,z)-H*0.05-26, z);
+    chunks.push(g); vTotal+=g.attributes.position.count;
   }
 
-  // two ridgelines flanking the road, plus foothills
-  for(let i=0;i<15;i++){
-    const s=i%2?1:-1;
-    const dist=900+rand()*700;
-    const z=i*(MPERIOD/15)+rand()*180;
-    place(s*dist, z, 140+rand()*190, 190+rand()*260, 1000+i);
+  /* A ring right around the circuit, offset from the track's own bounding box
+     so the peaks stay a consistent distance out on every side rather than
+     bunching at the narrow ends. */
+  const HX=(TRK_MAXX-TRK_MINX)/2, HZ=(TRK_MAXZ-TRK_MINZ)/2;
+  function ringPos(a,near,depth,r){
+    const g=near+r*depth;
+    return [Math.cos(a)*(HX+g), Math.sin(a)*(HZ+g)];
   }
-  for(let i=0;i<14;i++){
-    const s=rand()>.5?1:-1;
-    const dist=1700+rand()*900;
-    place(s*dist, rand()*MPERIOD, 190+rand()*240, 300+rand()*330, 2000+i);
+  // inner ridgeline — the peaks you actually see over the treetops
+  for(let i=0;i<30;i++){
+    const a=(i/30)*Math.PI*2+rand()*0.12;
+    const [x,z]=ringPos(a,560,420,rand());
+    place(x,z,150+rand()*170, 200+rand()*250, 1000+i);
   }
-  for(let i=0;i<16;i++){
-    const s=rand()>.5?1:-1;
-    place(s*(760+rand()*320), rand()*MPERIOD, 70+rand()*60, 55+rand()*110, 3000+i);
+  // outer wall — taller, hazier
+  for(let i=0;i<26;i++){
+    const a=(i/26)*Math.PI*2+0.11+rand()*0.14;
+    const [x,z]=ringPos(a,1080,900,rand());
+    place(x,z,220+rand()*260, 330+rand()*380, 2000+i);
   }
-  // a few sat right on the vanishing point
-  place(-980, 1200, 260, 400, 4001);
-  place( 1120, 600, 300, 460, 4002);
-  place(-1240, 3900, 280, 420, 4003);
+  // foothills tucked in front, breaking up the base of the ridge
+  for(let i=0;i<22;i++){
+    const a=rand()*Math.PI*2;
+    const [x,z]=ringPos(a,400,300,rand());
+    place(x,z,70+rand()*70, 55+rand()*110, 3000+i);
+  }
 
   // merge into one draw call
   const pos=new Float32Array(vTotal*3), nrm=new Float32Array(vTotal*3),
@@ -634,6 +944,7 @@ const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
 const STEER_AXIS=new THREE.Vector3(0,0.456,0.890).normalize();
 const CAR_LEN=5.60;                     // 2025-spec car length, metres
+const WHEELBASE=3.60;
 
 (function loadCar(){
   pending++;
@@ -655,9 +966,6 @@ const CAR_LEN=5.60;                     // 2025-spec car length, metres
       w.userData.steers = (n==='Wheel_FL'||n==='Wheel_FR');
       wheels.push(w);
     }
-    // The steering wheel keeps gltfpack's shared quantisation offset, so its
-    // mesh sits at the hub rather than at the node origin. Cancel that on the
-    // child, then the node rotates about the real column axis.
     /* gltfpack's shared quantisation grid leaves each mesh at its authored
        position, so a pivot node's child still carries the full offset.
        Cancel it and the node rotates about its own origin.                */
@@ -700,16 +1008,21 @@ const CAR_LEN=5.60;                     // 2025-spec car length, metres
 const _cp=new THREE.Vector3();
 function carPoint(x,y,z){
   _cp.set(x,y,z);
-  return carObj ? carObj.localToWorld(_cp) : _cp.set(0,y,carState.z+z);
+  if(carObj) return carObj.localToWorld(_cp);
+  return _cp.set(carGroup.position.x,y,carGroup.position.z);
 }
 
 /* ------------------------------------------------------------------ trees */
 const windU={value:0};
 const treeGroup=new THREE.Group(); scene.add(treeGroup);
 
+const TREE_MARGIN=650;                  // how far past the circuit the forest runs
+const TCELL=500;                        // culling bucket size
+
 function makeTrees(){
   const buf=GEO_BUF;
   const man=ASSETS.geoManifest;
+  if(!buf||!man) return;
 
   const barkMat=new THREE.MeshStandardMaterial({
     map:texBark, normalMap:texBarkN, roughness:0.94, metalness:0,
@@ -742,17 +1055,27 @@ function makeTrees(){
   const rand=mulberry32(20260727);
   const kinds=['small','medium','large'];
   const share={small:0.36, medium:0.36, large:0.28};
-  const PER=230, COPIES=3;
 
-  // one shared layout so the forest tiles perfectly every PERIOD metres
-  const layout={small:[],medium:[],large:[]};
-  for(let i=0;i<PER;i++){
-    const side=rand()>0.5?1:-1;
+  /* Rejection sampling over the whole map — inside the circuit as well as
+     outside it, exactly as the layout shows — with anything closer than
+     TREE_CLEAR to the centreline thrown away so the run-off stays open. */
+  const X0=TRK_MINX-TREE_MARGIN, X1=TRK_MAXX+TREE_MARGIN;
+  const Z0=TRK_MINZ-TREE_MARGIN, Z1=TRK_MAXZ+TREE_MARGIN;
+  const NX=Math.ceil((X1-X0)/TCELL), NZ=Math.ceil((Z1-Z0)/TCELL);
+
+  const cells=new Array(NX*NZ);
+  const WANT=7000;                      // ~1100/km2 — reads as forest, not scrub
+  let tries=0, made=0;
+  while(made<WANT && tries<WANT*6){
+    tries++;
+    const x=X0+rand()*(X1-X0), z=Z0+rand()*(Z1-Z0);
+    if(distToTrack(x,z)<TREE_CLEAR) continue;
     const r=rand();
-    const x=side*(TREE_START + Math.pow(rand(),1.7)*96);
-    const z=rand()*PERIOD;
     const kind = r<share.small?'small':(r<share.small+share.medium?'medium':'large');
-    layout[kind].push({
+    const cx=clamp(Math.floor((x-X0)/TCELL),0,NX-1);
+    const cz=clamp(Math.floor((z-Z0)/TCELL),0,NZ-1);
+    const k=cz*NX+cx;
+    (cells[k]||(cells[k]={small:[],medium:[],large:[]}))[kind].push({
       x, z,
       s:0.82+rand()*0.55,
       ry:rand()*Math.PI*2,
@@ -760,45 +1083,32 @@ function makeTrees(){
       tint:0.80+rand()*0.34,
       warm:(rand()-0.5)*0.16
     });
+    made++;
   }
+
+  const geos={};
+  kinds.forEach(k=>{ geos[k]={bark:buildGeometry(man[k].bark,buf), leaf:buildGeometry(man[k].leaf,buf)}; });
+  const leafDepth=new THREE.MeshDepthMaterial({
+    depthPacking:THREE.RGBADepthPacking, map:texLeaf, alphaTest:0.5
+  });
 
   const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(), e=new THREE.Euler(),
         v=new THREE.Vector3(), sc=new THREE.Vector3(), col=new THREE.Color();
 
-  // Slice the 3 copies into short z-buckets. Instanced meshes can't be frustum
-  // culled by three.js (the instance offsets aren't in the bounding sphere), so
-  // we bucket them and toggle .visible ourselves — roughly a 3x triangle saving.
-  const BUCKET=350;
-  const B0=-PERIOD, B1=(COPIES-1)*PERIOD;            // -1400 .. +2800
-  const NB=Math.round((B1-B0)/BUCKET);
-
-  kinds.forEach(kind=>{
-    const list=layout[kind];
-    if(!list.length) return;
-    const barkGeo=buildGeometry(man[kind].bark,buf);
-    const leafGeo=buildGeometry(man[kind].leaf,buf);
-    const casts=(kind!=='small');
-
-    // gather instance transforms per bucket first so we can size each mesh
-    const bins=[]; for(let b=0;b<NB;b++) bins.push([]);
-    for(let c=0;c<COPIES;c++){
-      const zBase=(c-1)*PERIOD;
-      for(const t of list){
-        const z=zBase+t.z;
-        const b=clamp(Math.floor((z-B0)/BUCKET),0,NB-1);
-        bins[b].push({t,z});
-      }
-    }
-
-    bins.forEach((items,b)=>{
-      if(!items.length) return;
-      const bark=new THREE.InstancedMesh(barkGeo, barkMat, items.length);
-      const leaf=new THREE.InstancedMesh(leafGeo, leafMat, items.length);
-      items.forEach(({t,z},n)=>{
+  for(let ci=0;ci<cells.length;ci++){
+    const cell=cells[ci]; if(!cell) continue;
+    const cx=X0+((ci%NX)+0.5)*TCELL, cz=Z0+(Math.floor(ci/NX)+0.5)*TCELL;
+    const meshes=[];
+    kinds.forEach(kind=>{
+      const list=cell[kind]; if(!list.length) return;
+      const casts=(kind!=='small');
+      const bark=new THREE.InstancedMesh(geos[kind].bark, barkMat, list.length);
+      const leaf=new THREE.InstancedMesh(geos[kind].leaf, leafMat, list.length);
+      list.forEach((t,n)=>{
         e.set(t.tilt,t.ry,t.tilt*0.6);
         q.setFromEuler(e);
         sc.set(t.s,t.s*(0.94+((t.tint*7)%1)*0.14),t.s);
-        v.set(t.x, terrainH(t.x,z)-0.06, z);
+        v.set(t.x, terrainH(t.x,t.z)-0.06, t.z);
         mtx.compose(v,q,sc);
         bark.setMatrixAt(n,mtx); leaf.setMatrixAt(n,mtx);
         col.setRGB(t.tint*(1+t.warm), t.tint, t.tint*(1-t.warm*0.7));
@@ -807,23 +1117,67 @@ function makeTrees(){
       bark.instanceMatrix.needsUpdate=true; leaf.instanceMatrix.needsUpdate=true;
       if(bark.instanceColor) bark.instanceColor.needsUpdate=true;
       if(leaf.instanceColor) leaf.instanceColor.needsUpdate=true;
+      // instance offsets never make it into the bounding sphere, so three.js
+      // cannot cull these itself -- we do it per cell in the frame loop
       bark.frustumCulled=false; leaf.frustumCulled=false;
-
-      // leaves must punch their alpha through the shadow map too
-      leaf.customDepthMaterial=new THREE.MeshDepthMaterial({
-        depthPacking:THREE.RGBADepthPacking, map:texLeaf, alphaTest:0.5
-      });
+      leaf.customDepthMaterial=leafDepth;   // leaves punch alpha through the shadow map
       bark.userData.casts=casts; leaf.userData.casts=casts;
       bark.castShadow=casts; leaf.castShadow=casts;
       bark.receiveShadow=true; leaf.receiveShadow=true;
       shadowCasters.push(bark,leaf);
       treeGroup.add(bark,leaf);
-      treeBuckets.push({z:B0+(b+0.5)*BUCKET, meshes:[bark,leaf]});
+      meshes.push(bark,leaf);
     });
-  });
+    if(meshes.length){
+      treeCells.push({
+        sphere:new THREE.Sphere(new THREE.Vector3(cx,12,cz), TCELL*0.708+24),
+        cx, cz, meshes, vis:true
+      });
+    }
+  }
 }
-const shadowCasters=[];
-const treeBuckets=[];
+
+/* ---------------------------------------------------------------- minimap */
+const mapCan=document.getElementById('map'), mapCtx=mapCan.getContext('2d');
+let mapBg=null, mapK=1, mapPX=0, mapPZ=0;
+function buildMap(){
+  const W=mapCan.width, H=mapCan.height, pad=22;
+  const bw=TRK_MAXX-TRK_MINX, bh=TRK_MAXZ-TRK_MINZ;
+  mapK=Math.min((W-pad*2)/bw,(H-pad*2)/bh);
+  mapPX=(W-bw*mapK)/2-TRK_MINX*mapK;
+  mapPZ=(H-bh*mapK)/2-TRK_MINZ*mapK;
+  const o=document.createElement('canvas'); o.width=W; o.height=H;
+  const g=o.getContext('2d');
+  g.lineJoin=g.lineCap='round';
+  g.beginPath();
+  for(let i=0;i<=NSAMP;i+=10){
+    const k=i%NSAMP, X=sx[k]*mapK+mapPX, Y=sz[k]*mapK+mapPZ;
+    i?g.lineTo(X,Y):g.moveTo(X,Y);
+  }
+  g.closePath();
+  g.strokeStyle='rgba(0,0,0,.45)'; g.lineWidth=11; g.stroke();
+  g.strokeStyle='rgba(236,234,228,.72)'; g.lineWidth=7; g.stroke();
+  // start/finish tick, drawn across the track
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  trackAt(FINISH_S,p); trackDir(FINISH_S,d);
+  g.strokeStyle='#f2a20c'; g.lineWidth=4;
+  g.beginPath();
+  g.moveTo((p.x+d.y*10)*mapK+mapPX,(p.y-d.x*10)*mapK+mapPZ);
+  g.lineTo((p.x-d.y*10)*mapK+mapPX,(p.y+d.x*10)*mapK+mapPZ);
+  g.stroke();
+  mapBg=o;
+}
+const _mp=new THREE.Vector2();
+function drawMap(){
+  if(!mapBg) return;
+  mapCtx.clearRect(0,0,mapCan.width,mapCan.height);
+  mapCtx.drawImage(mapBg,0,0);
+  const p=trackAt(carState.s,_mp);
+  mapCtx.beginPath();
+  mapCtx.arc(p.x*mapK+mapPX,p.y*mapK+mapPZ,7,0,6.2832);
+  mapCtx.fillStyle='#f2a20c'; mapCtx.fill();
+  mapCtx.lineWidth=3; mapCtx.strokeStyle='rgba(11,12,13,.85)'; mapCtx.stroke();
+}
 
 /* ----------------------------------------------------------------- audio */
 /* Four looping engine beds crossfaded on a 0.1 s ramp. Each state gets a
@@ -837,10 +1191,10 @@ function initAudio(){
   const AC=window.AudioContext||window.webkitAudioContext;
   if(!AC) return;
   actx=new AC();
-  const keys=['accel','idle','brake','coast'];
+  const ks=['accel','idle','brake','coast'];
   let done=0;
-  keys.forEach(k=>{
-    const fin=()=>{ if(++done===keys.length) audioOn=true; };
+  ks.forEach(k=>{
+    const fin=()=>{ if(++done===ks.length) audioOn=true; };
     fetch(ASSETS.snd[k]).then(r=>r.arrayBuffer())
       .then(ab=>actx.decodeAudioData(ab, b=>{ sbuf[k]=b; fin(); }, fin))
       .catch(fin);
@@ -880,18 +1234,18 @@ addEventListener('keydown',e=>{
   if(k==='o'){ orbit=!orbit; updateStatus(); }
   if(k==='q'){ setQuality(quality==='High'?'Low':'High'); }
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
-  auto=false;
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 
-/* Camera rig. p is a point in the car model's own space (metres before the
-   fit-to-5.6 m scale); aim z is relative to the car, aim y is world height. */
+/* Camera rig. Cockpit p is a point in the car model's own space (metres
+   before the fit-to-5.6 m scale). Chase rides the centreline behind the car. */
 const CAMS=[
   // Seated down in the tub: rim at 0.68 is just below the lens, the halo at
   // 0.87 arcs overhead, the wheel at 0.51-0.68 sits in the lower frame.
-  {name:'Cockpit', p:[0, 0.72, 0.11], aim:[0,0.79,44], fov:70, zoom:10, shake:1.3}
+  {name:'Cockpit', p:[0,0.72,0.11], fov:70, zoom:10, shake:1.30},
+  {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35}
 ];
-let orbit=false, camMode=0, auto=true, quality='High';
+let orbit=false, camMode=0, quality='High', shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent = orbit?'Orbit':CAMS[camMode].name;
   document.getElementById('qname').textContent   = quality;
@@ -899,15 +1253,19 @@ function updateStatus(){
 function setQuality(q){
   quality=q;
   const hi = q==='High';
+  shadowsOn=hi;
   renderer.shadowMap.enabled=hi;
   shadowCasters.forEach(m=>{ m.castShadow = hi && m.userData.casts!==false; });
+  // this just overrode the per-cell tree gating below, so make the cull loop
+  // reapply it on the next frame rather than leaving distant cells casting
+  treeCells.forEach(b=>{ b.cast=undefined; });
   renderer.setPixelRatio(Math.min(devicePixelRatio, hi?1.75:1.1));
   scene.traverse(o=>{ if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.needsUpdate=true); } });
   updateStatus();
 }
 
 // orbit drag
-let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=13;
+let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
   unlockAudio();
   dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
@@ -929,19 +1287,21 @@ canvas.addEventListener('pointermove',e=>{
   lastX=e.clientX; lastY=e.clientY;
   if(!orbit && moved>8){ orbit=true; updateStatus(); }
 });
-canvas.addEventListener('wheel',e=>{ if(orbit){ orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,220); e.preventDefault(); } },{passive:false});
+canvas.addEventListener('wheel',e=>{ if(orbit){ orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,900); e.preventDefault(); } },{passive:false});
 
 /* ------------------------------------------------------------ drive model */
-const carState={ z:-140, speed:30 };
+/* The car is still railed to the crown of the road -- what changed is that the
+   crown is now a curve, so s is distance along the lap instead of world z. */
+const carState={ s:START_S, speed:0 };
 let spin=0;                       // accumulated wheel angle, radians
-let steerIn=0, steerAng=0;        // input -1..1, and the damped angle it drives
+let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
-let pitch=0, spdPrev=0;           // body pitch (rad, +ve = nose down)
+let pitch=0, roll=0, spdPrev=0;   // body attitude
 const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
 const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of tyre
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
 const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
-const MAXSPEED=100;          // m/s = 360 km/h exactly
+const MAXSPEED=100;               // m/s = 360 km/h exactly
 const kmhEl=document.getElementById('kmh');
 
 function drive(dt){
@@ -950,10 +1310,9 @@ function drive(dt){
   const lft = keys['a']||keys['arrowleft'];
   const rgt = keys['d']||keys['arrowright'];
 
-  /* Steering is visual only -- the car stays on the crown of the road.
-     Two stages of easing: the input ramps toward the key state, then the
-     angle chases the input. Critically damped-ish, so it arrives smoothly
-     and settles instead of snapping or overshooting. */
+  /* Two stages of easing on the player's input: it ramps toward the key state,
+     then the wheel angle chases it. Critically damped-ish, so it arrives
+     smoothly and settles instead of snapping or overshooting. */
   const want = (lft?-1:0) + (rgt?1:0);
   const rate = want ? 3.4 : 5.0;                    // self-centres a bit quicker
   steerIn += (want-steerIn)*(1-Math.pow(0.0016,dt*rate/3.4));
@@ -968,31 +1327,43 @@ function drive(dt){
               : kph<300 ? 0.2667 : 0.25;
   lockF += (lockT-lockF)*(1-Math.pow(0.02,dt));
 
-  steerAng += (steerIn*STEER_LOCK*lockF - steerAng)*(1-Math.pow(0.0009,dt));
-  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
-
-  if(auto){ carState.speed += (58-carState.speed)*dt*0.35; }
-  else{
-    if(thr){
-      // drag rises with v^2, so: hard launch, progressive knee, flat top end.
-      // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
-      const v=carState.speed/MAXSPEED;
-      carState.speed += 26.0*(1.0 - v*v)*dt;
-    }
-    else if(brk) carState.speed -= 46*dt;
-    else carState.speed -= (0.8 + carState.speed*0.028)*dt;
+  if(thr){
+    // drag rises with v^2, so: hard launch, progressive knee, flat top end.
+    // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
+    const v=carState.speed/MAXSPEED;
+    carState.speed += 26.0*(1.0 - v*v)*dt;
   }
+  else if(brk) carState.speed -= 46*dt;
+  else carState.speed -= (0.8 + carState.speed*0.028)*dt;
   carState.speed=clamp(carState.speed,0,MAXSPEED);
 
-  /* Body pitch: dive on the brakes, squat under power, level when coasting.
-     Driven off actual longitudinal acceleration rather than the key state, so
-     it eases off by itself as accel tails away near top speed. Clamped, then
-     damped, so the shell rocks on its springs instead of snapping. */
+  carState.s += carState.speed*dt;
+  if(carState.s>=LAP) carState.s-=LAP;
+
+  /* Steering. The rack now has a real job: hold the tyres at whatever angle
+     the corner needs, from a bicycle model on the track's own curvature, a few
+     metres ahead so the wheels lead the car into the turn the way they should.
+     The player's A/D input rides on top of that and is still cosmetic --
+     the car cannot leave the crown of the road. */
+  const kNow=trackK(carState.s+6);
+  const dTyre=Math.atan(WHEELBASE*kNow);            // +ve = left
+  const target=clamp(-dTyre*STEER_RATIO + steerIn*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
+  steerAng += (target-steerAng)*(1-Math.pow(0.0009,dt));
+  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
+
+  /* Body attitude. Pitch is dive/squat off actual longitudinal acceleration
+     rather than the key state, so it eases off by itself near top speed. Roll
+     is lateral load, v^2 * curvature, leaning the shell to the outside of the
+     corner. Both clamped then damped, so it rocks on its springs. */
   const along=(carState.speed-spdPrev)/Math.max(dt,1e-4);
   spdPrev=carState.speed;
   const pitchT=clamp(-along*0.00045, -0.014, 0.021);   // -0.8 deg .. +1.2 deg
   pitch += (pitchT-pitch)*(1-Math.pow(0.01,dt));
-  if(carObj) carObj.rotation.x=pitch;
+
+  const alat=carState.speed*carState.speed*trackK(carState.s);
+  const rollT=clamp(alat*0.00085, -0.042, 0.042);      // up to ~2.4 deg
+  roll += (rollT-roll)*(1-Math.pow(0.03,dt));
+  if(carObj){ carObj.rotation.x=pitch; carObj.rotation.z=roll; }
 
   // Wheels roll at v/r -- faster car, faster spin, no slip.
   // Steer and roll are composed as quaternions on the axle node itself, in the
@@ -1014,11 +1385,6 @@ function drive(dt){
   if(wingL) wingL.quaternion.copy(_qSteer);
   if(wingR) wingR.quaternion.copy(_qSteer);
 
-  carState.z += carState.speed*dt;
-  // MPERIOD is a whole number of every layer's repeat length, so resetting the
-  // odometer here keeps float precision tight and is completely invisible.
-  if(carState.z > MPERIOD) carState.z -= MPERIOD;
-
   /* engine bed: idle when stopped, otherwise brake > throttle > coast.
      Lifting off the brake back onto the throttle while still rolling means
      the engine is already spinning, so pick the accel loop up halfway in
@@ -1034,6 +1400,8 @@ function drive(dt){
 
 /* ------------------------------------------------------------- main loop */
 const tmp=new THREE.Vector3();
+const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
+const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
 let last=performance.now(), t=0, frames=0, acc=0, checked=false;
 
 function frame(now){
@@ -1042,29 +1410,18 @@ function frame(now){
   drive(dt);
   windU.value=t;
 
-  // recycle each layer around the car. Every snap distance is an exact
-  // multiple of that layer's repeat length, so nothing visibly jumps.
-  const tSnap = Math.round(carState.z/PERIOD)*PERIOD;
-  treeGroup.position.z    = tSnap;
-  terrainGroup.position.z = tSnap;
-  mountainGroup.position.z= Math.round(carState.z/MPERIOD)*MPERIOD;
-  roadGroup.position.z    = Math.round(carState.z/ROAD_SNAP)*ROAD_SNAP;
-
-  // the car sits on the crown of the road; matrices must be current before
-  // carPoint() reads mount positions off the bodywork
-  carGroup.position.z = carState.z;
+  // put the car on the centreline, nose along the tangent. Matrices must be
+  // current before carPoint() reads mount positions off the bodywork.
+  trackAt(carState.s,_p2); trackDir(carState.s,_d2);
+  carGroup.position.set(_p2.x,0.125,_p2.y);
+  carGroup.rotation.y=Math.atan2(_d2.x,_d2.y);
   carGroup.updateMatrixWorld(true);
 
-  // show only the buckets of trees that can actually be on screen
-  const localZ = carState.z - tSnap;
-  const back = orbit ? -1500 : -500, fwd = orbit ? 1600 : 1250;
-  for(let i=0;i<treeBuckets.length;i++){
-    const b=treeBuckets[i], d=b.z-localZ, vis=(d>back && d<fwd);
-    if(b.vis!==vis){ b.vis=vis; b.meshes[0].visible=vis; b.meshes[1].visible=vis; }
-  }
+  const sp=carState.speed/MAXSPEED;
+  const C=CAMS[camMode];
 
   if(orbit){
-    const cx=0, cz=carState.z;
+    const cx=carGroup.position.x, cz=carGroup.position.z;
     camera.position.set(
       cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
       1.0+Math.sin(orbPitch)*orbDist,
@@ -1073,10 +1430,27 @@ function frame(now){
     camera.lookAt(cx,0.9,cz);
     camera.fov=52;
   }else{
-    const sp=carState.speed/MAXSPEED;
-    const C=CAMS[camMode];
-    // mount point is a real feature on the model, so it tracks the bodywork
-    const P=carPoint(C.p[0], C.p[1], C.p[2]);
+    /* The aim point rides the centreline ahead of the car rather than sitting
+       straight out of the nose, so the view leads into a corner the way a
+       driver's eyes do. Lookahead grows with speed. */
+    const LA=14+carState.speed*0.8;
+    trackAt(carState.s+LA,_p2);
+
+    if(C.chase){
+      trackAt(carState.s-C.back,_d2);
+      camera.position.set(_d2.x, C.up, _d2.y);
+      _aim.set(_p2.x, 1.1, _p2.y);
+      camera.up.set(0,1,0);
+      camera.lookAt(carGroup.position.x*0.55+_aim.x*0.45,
+                    1.15, carGroup.position.z*0.55+_aim.z*0.45);
+    }else{
+      // mount point is a real feature on the model, so it tracks the bodywork
+      const P=carPoint(C.p[0],C.p[1],C.p[2]);
+      camera.position.copy(P);
+      _aim.set(_p2.x, P.y+0.06, _p2.y);
+      camera.up.set(0,1,0);
+      camera.lookAt(_aim);
+    }
 
     /* Cockpit vibration. Short and hard rather than floaty: 11-19 Hz stacked
        buzz, kept under the 30 Hz Nyquist limit at 60 fps or it just aliases
@@ -1087,29 +1461,59 @@ function frame(now){
     const amp=(0.10 + sp*0.26 + sp*sp*0.68)*C.shake*0.66;
     const b1=Math.sin(t*119.4), b2=Math.sin(t*71.0+1.3), b3=Math.sin(t*94.2+2.7);
     const n1=vnoise(t*19.0,0.0)-0.5, n2=vnoise(t*27.0,7.3)-0.5;
-
-    camera.position.set(
-      P.x + (b2*0.50 + n2*1.40)*0.0030*amp,
-      P.y + (b1*0.50 + b3*0.32 + n1*1.50)*0.0042*amp,
-      P.z);
-    // aim point rides in the car's own space, so pitching the shell pitches
-    // the view with it. carPoint reuses one scratch vector -- position was
-    // already copied out by .set() above, so overwriting it here is safe.
-    const A=carPoint(C.aim[0], C.aim[1], C.aim[2]);
-    camera.lookAt(A);
-    camera.rotation.z += (b2*0.55 + n1*1.20)*0.0110*amp;   // roll
-    camera.rotation.x += (b1*0.50 + n2*1.30)*0.0090*amp;   // pitch
+    camera.position.x += (b2*0.50 + n2*1.40)*0.0030*amp;
+    camera.position.y += (b1*0.50 + b3*0.32 + n1*1.50)*0.0042*amp;
+    // lookAt zeroes the roll, so the body's lean and dive are folded back in
+    // here rather than being inherited from the shell
+    camera.rotation.z += roll*0.85 + (b2*0.55 + n1*1.20)*0.0110*amp;
+    camera.rotation.x += pitch*0.80 + (b1*0.50 + n2*1.30)*0.0090*amp;
     camera.fov = C.fov + sp*C.zoom;
   }
   camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
   skyDome.position.copy(camera.position);   // the dome is finite; keep it centred
 
+  // cull the forest a cell at a time -- instanced meshes carry no usable
+  // bounding sphere, so the test has to be ours
+  // renderer.render() is what normally refreshes matrixWorldInverse, and that
+  // runs after this loop -- so derive it here or the cull tests a stale (on the
+  // first frame, identity) view matrix.
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  _pmv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  _frustum.setFromProjectionMatrix(_pmv);
+  for(let i=0;i<treeCells.length;i++){
+    const b=treeCells[i];
+    const dx=b.cx-camera.position.x, dz=b.cz-camera.position.z;
+    const vis = (dx*dx+dz*dz < 1250*1250) && _frustum.intersectsSphere(b.sphere);
+    if(b.vis!==vis){
+      b.vis=vis;
+      for(let m=0;m<b.meshes.length;m++) b.meshes[m].visible=vis;
+    }
+    /* The shadow camera only spans 144 m around the car, so a distant cell
+       costs a full instanced draw in the shadow pass and contributes nothing.
+       Visibility alone will not save us here — the shadow pass walks the same
+       graph, it just ignores the view frustum. */
+    // the shadow box reaches 72 m from the car and a cell centre can sit 354 m
+    // from a tree inside it, so 480 m is the tightest radius that keeps every
+    // cell that could actually drop a shadow on the road
+    const near = (b.cx-carGroup.position.x)**2 + (b.cz-carGroup.position.z)**2 < 480*480;
+    const cast = shadowsOn && near;
+    if(b.cast!==cast){
+      b.cast=cast;
+      for(let m=0;m<b.meshes.length;m++){
+        const mesh=b.meshes[m];
+        mesh.castShadow = cast && mesh.userData.casts!==false;
+      }
+    }
+  }
+
   // sun rig follows the car so the shadow map stays tight
-  tmp.set(0,0,carState.z);
+  tmp.copy(carGroup.position);
   sun.target.position.copy(tmp);
   sun.position.copy(tmp).addScaledVector(SUN_DIR,190);
 
   renderer.render(scene,camera);
+  drawMap();
 
   // one-shot adaptive quality
   if(!checked){
@@ -1119,10 +1523,15 @@ function frame(now){
 }
 
 /* ------------------------------------------------------------------ boot */
+let booted=false;
 function ready(){
+  if(booted) return; booted=true;
   makeTrees();
+  buildMap();
   setQuality('High');
   updateStatus();
+  document.getElementById('tagsub').textContent =
+    (LAP/1000).toFixed(3)+' km · McLaren MCL39';
   document.getElementById('boot').classList.add('gone');
   requestAnimationFrame(frame);
 }
