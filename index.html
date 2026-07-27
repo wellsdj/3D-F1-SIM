@@ -59,7 +59,8 @@
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
-  <div>drag look · tap to cycle · scroll zoom</div>
+  <div><kbd>V</kbd> free look · <kbd>R</kbd><kbd>F</kbd> eye up · down · <kbd>X</kbd> recentre</div>
+  <div>drag look · scroll lean back · tap to cycle</div>
 </div>
 
 <div id="boot"><p>Building circuit</p><div id="bar"><i></i></div></div>
@@ -108,10 +109,11 @@ function fbm(x,y,oct){
 }
 
 /* road cross-section (metres, lateral offset from the centreline) */
-const ROAD_HALF   = 4.5;    // asphalt half width
-const LANE_EDGE   = 3.65;   // white edge line offset
-const SHOULDER    = 6.1;    // gravel outer edge
-const TREE_CLEAR  = 15.0;   // nearest trunk to the centreline
+const ROAD_HALF   = 7.6;    // asphalt half width — 15.2 m, wide modern F1 spec
+const LANE_EDGE   = 6.75;   // white edge line offset
+const KERB_W      = 2.0;    // kerb width, outboard of the edge line
+const SHOULDER    = 11.4;   // gravel outer edge
+const TREE_CLEAR  = 22.0;   // nearest trunk to the centreline
 const LAP_TARGET  = 5000;   // circuit length, metres
 
 const shadowCasters=[];
@@ -126,20 +128,30 @@ const treeCells=[];
    straight road become a circuit at all.
 
    Index 0 is the start of the main straight; index 4 is its far end.        */
+/* A Catmull-Rom segment is exactly a straight line only when all four points
+   it reads -- the two ends plus one either side -- are collinear. Eight
+   collinear points therefore buy an exactly straight run from index 1 to
+   index 6; the bends live entirely in the 0->1 and 6->7 segments, outside
+   the part of the straight you actually drive down. */
 const TRACK_PX=[
-  [ 470,730],[ 620,730],[ 780,730],[ 900,730],[ 995,730],   // main straight
-  [1092,712],[1148,662],[1128,606],[1062,566],[1020,528],   // right-hand loop + tight left
-  [1058,486],[1116,442],[1148,414],[1132,370],[1052,330],   // back out and up
-  [ 958,312],[ 868,332],[ 778,368],[ 690,398],[ 640,412],   // long top sweep
-  [ 598,398],[ 558,352],[ 520,300],[ 458,282],[ 400,318],   // rise to the top-left crest
-  [ 379,390],[ 402,440],[ 452,488],[ 424,536],[ 390,590],   // left flank with the inward kink
-  [ 382,646],[ 406,692]                                     // final left onto the straight
+  [ 430,735],[ 513,735],[ 596,735],[ 679,735],                // main straight,
+  [ 762,735],[ 845,735],[ 928,735],[1010,735],                // exactly collinear
+  [1103,716],[1152,660],                                      // sweep up the right end
+  [1125,600],[1062,563],[1022,527],                           // in to the tight notch
+  [1058,484],[1118,442],[1151,412],                           // back out to the far right
+  [1130,366],[1050,327],[ 957,311],                           // over the top-right crest
+  [ 866,332],[ 776,369],[ 688,399],[ 639,413],                // long top sweep to the saddle
+  [ 599,398],[ 557,351],[ 519,299],[ 457,281],                // rise to the top-left crest
+  [ 399,317],[ 378,389],                                      // down the left flank
+  [ 401,439],[ 452,489],                                      // the inward kink
+  [ 423,537],[ 389,591],[ 381,647],[ 399,701]                 // final left onto the straight
 ];
-const STRAIGHT_END_I = 4;
+const STRAIGHT_BEG_I = 1;
+const STRAIGHT_END_I = 6;
 
 let LAP=0, NSAMP=0, DS=1;
 let sx=null, sz=null, tanx=null, tanz=null, kap=null;
-let START_S=6, FINISH_S=0;
+let START_S=6, FINISH_S=0, STRAIGHT_S0=0, STRAIGHT_S1=0;
 let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
 
 (function buildTrack(){
@@ -210,17 +222,22 @@ let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
     if(sz[i]>TRK_MAXZ||i===0)TRK_MAXZ=sz[i];
   }
 
-  // s of the far end of the main straight, found by matching the control point
-  const ex=(TRACK_PX[STRAIGHT_END_I][0]-cx)*SC, ez=(TRACK_PX[STRAIGHT_END_I][1]-cz)*SC;
-  let best=1e18, bi=0;
-  for(let i=0;i<NSAMP;i++){
-    const d=(sx[i]-ex)*(sx[i]-ex)+(sz[i]-ez)*(sz[i]-ez);
-    if(d<best){best=d;bi=i;}
-  }
-  // start/finish sits two thirds down the straight — past the middle, with
-  // enough road left to still be braking for turn one after it.
-  FINISH_S = bi*DS*0.68;
-  START_S  = 6;                      // lights out at the very start of the straight
+  // s of a control point, found by matching its scaled position to a sample
+  const sOfPoint=i=>{
+    const ex=(TRACK_PX[i][0]-cx)*SC, ez=(TRACK_PX[i][1]-cz)*SC;
+    let best=1e18, bi=0;
+    for(let k=0;k<NSAMP;k++){
+      const d=(sx[k]-ex)*(sx[k]-ex)+(sz[k]-ez)*(sz[k]-ez);
+      if(d<best){best=d;bi=k;}
+    }
+    return bi*DS;
+  };
+  STRAIGHT_S0=sOfPoint(STRAIGHT_BEG_I);
+  STRAIGHT_S1=sOfPoint(STRAIGHT_END_I);
+  // start/finish sits about seven tenths down the straight — past the middle,
+  // with enough road left to still be braking for turn one after it.
+  FINISH_S = STRAIGHT_S0 + (STRAIGHT_S1-STRAIGHT_S0)*0.70;
+  START_S  = STRAIGHT_S0;            // lights out at the start of the dead-straight run
 })();
 
 const _ta=new THREE.Vector2(), _td=new THREE.Vector2();
@@ -427,6 +444,44 @@ function wearTexture(){
   return c;
 }
 
+/* Kerb stripes. Generated rather than photographed: every texture host in
+   reach is blocked here, and a procedural map tiles exactly along the kerb
+   (which a photo would not) so the stripes cannot drift or seam at the joins.
+   v runs along the kerb, u across it. */
+function kerbTexture(){
+  const W=128, H=256, c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d');
+  const rand=mulberry32(4242);
+  // two stripes per tile, so one tile = one red + one white block
+  const red='#b4291a', white='#e9e6dc';
+  for(let i=0;i<2;i++){
+    g.fillStyle = i?white:red;
+    g.fillRect(0, i*H/2, W, H/2);
+  }
+  // shade the outer third darker: that edge sits lower once the ramp tilts it
+  const gr=g.createLinearGradient(0,0,W,0);
+  gr.addColorStop(0,'rgba(0,0,0,0)');
+  gr.addColorStop(0.62,'rgba(0,0,0,0.05)');
+  gr.addColorStop(1,'rgba(0,0,0,0.30)');
+  g.fillStyle=gr; g.fillRect(0,0,W,H);
+  // rubber scrub along the inner edge, where the cars actually clip it
+  const gr2=g.createLinearGradient(0,0,W*0.34,0);
+  gr2.addColorStop(0,'rgba(24,20,20,0.44)');
+  gr2.addColorStop(1,'rgba(24,20,20,0)');
+  g.fillStyle=gr2; g.fillRect(0,0,W*0.34,H);
+  // grime and chipping, wrapped so the tile stays seamless
+  for(let i=0;i<260;i++){
+    const x=rand()*W, y=rand()*H, r=1+rand()*4.5;
+    g.globalAlpha=0.05+rand()*0.17;
+    g.fillStyle=rand()>0.45?'#000':'#fff';
+    wrapDrawRect(g,W,H,x,y,10,ctx=>{ctx.beginPath();ctx.arc(0,0,r,0,6.2832);ctx.fill();});
+  }
+  // crisp dark seam between the blocks so they read as separate slabs
+  g.globalAlpha=1; g.fillStyle='rgba(0,0,0,.34)';
+  g.fillRect(0,H/2-1.5,W,3); g.fillRect(0,0,W,1.5); g.fillRect(0,H-1.5,W,1.5);
+  return c;
+}
+
 /* --------------------------------------------------------------- renderer */
 const canvas   = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
@@ -553,6 +608,10 @@ texGround.anisotropy=MAXANISO; texGround.encoding=THREE.sRGBEncoding;
 const texWear = new THREE.CanvasTexture(wearTexture());
 texWear.wrapS=THREE.ClampToEdgeWrapping; texWear.wrapT=THREE.RepeatWrapping;
 texWear.anisotropy=MAXANISO;
+
+const texKerb = new THREE.CanvasTexture(kerbTexture());
+texKerb.wrapS=THREE.ClampToEdgeWrapping; texKerb.wrapT=THREE.RepeatWrapping;
+texKerb.anisotropy=MAXANISO; texKerb.encoding=THREE.sRGBEncoding;
 
 /* ---------------------------------------------------------------- terrain */
 const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
@@ -695,45 +754,89 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
     roadGroup.add(m);
   });
 
-  /* Kerbs. Laid on the inside of anything tighter than a 150 m radius, as
-     alternating red and white slabs — two instanced meshes for the whole
-     circuit. The inside of a turn is the +lateral side when the signed
-     curvature is positive, which is exactly how kap is defined. */
-  const KSTEP=1.7, KW=1.15, KCEN=LANE_EDGE+0.10+KW/2;
-  const kerbGeo=new THREE.BoxGeometry(KW,0.09,KSTEP*0.94);
-  const redMat  =new THREE.MeshStandardMaterial({color:sRGB(0xb8321f),roughness:0.62});
-  const whiteMat=new THREE.MeshStandardMaterial({color:sRGB(0xe6e3d8),roughness:0.62});
-  const slots=[];
-  for(let s=0;s<LAP;s+=KSTEP){
-    const k=trackK(s+KSTEP*0.5);
-    if(Math.abs(k)<1/150) continue;
-    slots.push({s, side:k>0?1:-1, n:slots.length});
+  /* Kerbs. Laid on the inside of anything tighter than a 170 m radius. The
+     inside of a turn is the +lateral side when the signed curvature is
+     positive, which is exactly how kap is defined.
+
+     Built as a swept ramp rather than a row of slabs: three lateral stations
+     (flush with the asphalt, raised mid, raised outer lip) so the profile
+     catches the light and reads as a real kerb from inside the cockpit. Each
+     corner run gets its stripe period rounded to a whole number of blocks so
+     the pattern starts and ends on a block edge instead of mid-stripe. */
+  const KERB_TH=1/170, KBLOCK=1.35;              // nominal red/white block length
+  const kerbRuns=[];
+  {
+    let cur=null;
+    for(let s=0;s<LAP;s+=1){
+      const k=trackK(s);
+      const on=Math.abs(k)>KERB_TH;
+      if(on){
+        const side=k>0?1:-1;
+        if(cur && cur.side!==side){ kerbRuns.push(cur); cur=null; }
+        if(!cur) cur={s0:s, side};
+        cur.s1=s;
+      } else if(cur){ kerbRuns.push(cur); cur=null; }
+    }
+    if(cur) kerbRuns.push(cur);
   }
-  const nRed=Math.ceil(slots.length/2), nWhite=slots.length-nRed;
-  const redM  =new THREE.InstancedMesh(kerbGeo,redMat,  Math.max(nRed,1));
-  const whiteM=new THREE.InstancedMesh(kerbGeo,whiteMat,Math.max(nWhite,1));
+  const KP=[                                     // lateral offset, height, u
+    [LANE_EDGE+0.02,        0.125, 0.00],
+    [LANE_EDGE+KERB_W*0.5,  0.215, 0.50],
+    [LANE_EDGE+KERB_W,      0.245, 1.00]
+  ];
+  {
+    const pos=[], nrm=[], uv=[], idx=[];
+    const p2=new THREE.Vector2(), d2=new THREE.Vector2();
+    let base=0;
+    kerbRuns.forEach(run=>{
+      const len=run.s1-run.s0;
+      if(len<6) return;                          // too short to read as a kerb
+      const blocks=Math.max(2,Math.round(len/KBLOCK));
+      const rings=blocks*3;                      // 3 rings per block keeps curves smooth
+      const stripes=blocks/2;                    // one texture tile = red + white
+      for(let i=0;i<=rings;i++){
+        const t=i/rings, s=run.s0+t*len;
+        trackAt(s,p2); trackDir(s,d2);
+        const nx=d2.y, nz=-d2.x;                 // unit left normal
+        for(let k=0;k<3;k++){
+          // mirror the profile for a right-hand kerb, and walk the stations in
+          // left-to-right order either way so the winding still faces up
+          const st=KP[run.side>0 ? 2-k : k];
+          const lat=run.side*st[0];
+          pos.push(p2.x+nx*lat, st[1], p2.y+nz*lat);
+          nrm.push(0,1,0);
+          // u follows the station, never the emission order: u=0 is the
+          // rubber-scrubbed track edge on both hands of kerb
+          uv.push(st[2], t*stripes);
+        }
+      }
+      for(let i=0;i<rings;i++) for(let k=0;k<2;k++){
+        const a=base+i*3+k, b=a+1, c=a+3, d=a+4;
+        idx.push(a,b,c, b,d,c);
+      }
+      base+=(rings+1)*3;
+    });
+    if(idx.length){
+      const G=new THREE.BufferGeometry();
+      G.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+      G.setAttribute('normal',  new THREE.Float32BufferAttribute(nrm,3));
+      G.setAttribute('uv',      new THREE.Float32BufferAttribute(uv,2));
+      G.setIndex(pos.length/3>65000 ? new THREE.Uint32BufferAttribute(idx,1)
+                                    : new THREE.Uint16BufferAttribute(idx,1));
+      G.computeVertexNormals();                  // the ramp faces need real normals
+      const kerbMat=new THREE.MeshStandardMaterial({
+        map:texKerb, roughness:0.58, metalness:0
+      });
+      const kerbMesh=new THREE.Mesh(G,kerbMat);
+      kerbMesh.frustumCulled=false; kerbMesh.receiveShadow=true;
+      roadGroup.add(kerbMesh);
+    }
+  }
+
+  // reflective marker posts, outside the gravel on both sides
   const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
         v3=new THREE.Vector3(), one=new THREE.Vector3(1,1,1),
         p2=new THREE.Vector2(), d2=new THREE.Vector2();
-  let ri=0, wi=0;
-  slots.forEach((sl,i)=>{
-    trackAt(sl.s,p2); trackDir(sl.s,d2);
-    const lat=sl.side*KCEN;
-    v3.set(p2.x+d2.y*lat, 0.155, p2.y-d2.x*lat);
-    q.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.atan2(d2.x,d2.y));
-    mtx.compose(v3,q,one);
-    if(i&1){ whiteM.setMatrixAt(wi++,mtx); } else { redM.setMatrixAt(ri++,mtx); }
-  });
-  // unused tail instances would otherwise render as unit cubes at the origin
-  mtx.compose(v3.set(0,-500,0),q.identity(),one);
-  for(let i=ri;i<redM.count;i++)   redM.setMatrixAt(i,mtx);
-  for(let i=wi;i<whiteM.count;i++) whiteM.setMatrixAt(i,mtx);
-  redM.instanceMatrix.needsUpdate=whiteM.instanceMatrix.needsUpdate=true;
-  redM.frustumCulled=whiteM.frustumCulled=false;
-  redM.receiveShadow=whiteM.receiveShadow=true;
-  roadGroup.add(redM,whiteM);
-
-  // reflective marker posts, outside the gravel on both sides
   const postGeo=new THREE.BoxGeometry(0.11,1.05,0.07); postGeo.translate(0,0.525,0);
   const postMat=new THREE.MeshStandardMaterial({color:sRGB(0xe8e5da),roughness:0.6});
   const capMat =new THREE.MeshStandardMaterial({color:sRGB(0xb52d1c),roughness:0.45,
@@ -771,38 +874,103 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
   scene.add(g);
   // inside the group, +z is along the track and +x is the driver's left
 
-  // painted line, run right across the asphalt
-  const lineMat=new THREE.MeshStandardMaterial({
-    color:sRGB(0xf0eee6), roughness:0.66, metalness:0,
-    polygonOffset:true, polygonOffsetFactor:-6, polygonOffsetUnits:-6
+  const white=sRGB(0xf2f0e8), dark=sRGB(0x121417);
+  const flat=(col,off)=>new THREE.MeshStandardMaterial({
+    color:col, roughness:0.62, metalness:0,
+    polygonOffset:true, polygonOffsetFactor:off, polygonOffsetUnits:off
   });
-  const line=new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF*2,0.55),lineMat);
-  line.rotation.x=-Math.PI/2; line.position.y=0.145;
-  g.add(line);
 
-  // gantry: two uprights outside the gravel and a beam over the road
-  const steel=new THREE.MeshStandardMaterial({color:sRGB(0x2b2f33),roughness:0.55,metalness:0.55});
-  const H=6.4, SPAN=(SHOULDER+1.1)*2;
+  /* A single painted stripe vanishes at racing speed, so the line is a broad
+     chequered band: a solid bar either side of a two-row chequer, run right
+     across the asphalt. Drawn as one instanced mesh of squares. */
+  const BAND=2.6, SQ=0.65, ROWS=2;
+  const cols=Math.floor(ROAD_HALF*2/SQ);
+  const sqGeo=new THREE.PlaneGeometry(SQ,SQ); sqGeo.rotateX(-Math.PI/2);
+  const darkSq=new THREE.InstancedMesh(sqGeo,flat(dark,-8),cols*ROWS);
+  const liteSq=new THREE.InstancedMesh(sqGeo,flat(white,-8),cols*ROWS);
+  const m4=new THREE.Matrix4(), qq=new THREE.Quaternion(), one=new THREE.Vector3(1,1,1);
+  const vv=new THREE.Vector3();
+  let di=0, li=0;
+  for(let r=0;r<ROWS;r++) for(let cI=0;cI<cols;cI++){
+    vv.set(-ROAD_HALF+SQ*0.5+cI*SQ, 0.150, (r-(ROWS-1)/2)*SQ);
+    m4.compose(vv,qq,one);
+    if((r+cI)&1) liteSq.setMatrixAt(li++,m4); else darkSq.setMatrixAt(di++,m4);
+  }
+  m4.compose(vv.set(0,-500,0),qq,one);
+  for(let i=di;i<darkSq.count;i++) darkSq.setMatrixAt(i,m4);
+  for(let i=li;i<liteSq.count;i++) liteSq.setMatrixAt(i,m4);
+  darkSq.instanceMatrix.needsUpdate=liteSq.instanceMatrix.needsUpdate=true;
+  darkSq.frustumCulled=liteSq.frustumCulled=false;
+  g.add(darkSq,liteSq);
+  // solid bars bracketing the chequer
   [-1,1].forEach(s=>{
-    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.34,H,0.34),steel);
-    leg.position.set(s*(SHOULDER+1.1),H/2,0);
+    const bar=new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF*2,0.42),flat(white,-8));
+    bar.rotation.x=-Math.PI/2;
+    bar.position.set(0,0.150,s*(BAND*0.5-0.21));
+    g.add(bar);
+  });
+
+  // gantry: two uprights outside the gravel and a deep beam over the road
+  const steel=new THREE.MeshStandardMaterial({color:sRGB(0x24282c),roughness:0.5,metalness:0.6});
+  const H=7.6, LEGX=SHOULDER+1.4, SPAN=LEGX*2+0.9;
+  [-1,1].forEach(s=>{
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.46,H,0.46),steel);
+    leg.position.set(s*LEGX,H/2,0);
     leg.castShadow=true; leg.userData.casts=true; shadowCasters.push(leg);
     g.add(leg);
+    const foot=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.35,1.5),steel);
+    foot.position.set(s*LEGX,0.175,0); g.add(foot);
   });
-  const beam=new THREE.Mesh(new THREE.BoxGeometry(SPAN,0.62,0.5),steel);
-  beam.position.y=H-0.31;
+  const beam=new THREE.Mesh(new THREE.BoxGeometry(SPAN,1.5,0.62),steel);
+  beam.position.y=H-0.75;
   beam.castShadow=true; beam.userData.casts=true; shadowCasters.push(beam);
   g.add(beam);
+  // chequered facing on the beam, on the approach side, so it reads head-on
+  const bcols=Math.floor(SPAN/0.75);
+  const face=new THREE.PlaneGeometry(0.75,0.5);
+  const fD=new THREE.InstancedMesh(face,new THREE.MeshStandardMaterial({color:dark,roughness:.6}),bcols*2);
+  const fL=new THREE.InstancedMesh(face,new THREE.MeshStandardMaterial({color:white,roughness:.6}),bcols*2);
+  let ai=0,bi=0;
+  for(let r=0;r<2;r++) for(let cI=0;cI<bcols;cI++){
+    vv.set(-SPAN/2+0.375+cI*0.75, H-0.35-r*0.5, -0.32);
+    m4.compose(vv,qq,one);
+    if((r+cI)&1) fL.setMatrixAt(bi++,m4); else fD.setMatrixAt(ai++,m4);
+  }
+  m4.compose(vv.set(0,-500,0),qq,one);
+  for(let i=ai;i<fD.count;i++) fD.setMatrixAt(i,m4);
+  for(let i=bi;i<fL.count;i++) fL.setMatrixAt(i,m4);
+  fD.instanceMatrix.needsUpdate=fL.instanceMatrix.needsUpdate=true;
+  fD.frustumCulled=fL.frustumCulled=false;
+  g.add(fD,fL);
 
   // five start lights, dark — decoration, not a sequence
-  const bulbGeo=new THREE.SphereGeometry(0.19,12,8);
+  const bulbGeo=new THREE.SphereGeometry(0.26,12,8);
   const bulbMat=new THREE.MeshStandardMaterial({color:sRGB(0x2a0705),roughness:0.35,
                                                 emissive:sRGB(0x3d0b06),emissiveIntensity:0.6});
   for(let i=0;i<5;i++){
     const b=new THREE.Mesh(bulbGeo,bulbMat);
-    b.position.set((i-2)*0.62, H-0.66, 0.28);
+    b.position.set((i-2)*0.95, H-1.75, -0.42);
     g.add(b);
   }
+
+  /* Boards either side of the line. Deliberately tall and close to the
+     asphalt: from the cockpit these flick past at the exact moment you cross,
+     which is what actually makes the line obvious at 300 kph. */
+  [-1,1].forEach(s=>{
+    const post=new THREE.Mesh(new THREE.BoxGeometry(0.18,2.7,0.18),steel);
+    post.position.set(s*(ROAD_HALF+1.5),1.35,0); g.add(post);
+    const board=new THREE.Mesh(new THREE.PlaneGeometry(2.4,1.25),
+      new THREE.MeshStandardMaterial({color:white,roughness:0.6,side:THREE.DoubleSide}));
+    board.position.set(s*(ROAD_HALF+1.5),2.6,0);
+    board.rotation.y=Math.PI/2;
+    board.castShadow=true; board.userData.casts=true; shadowCasters.push(board);
+    g.add(board);
+    const stripe=new THREE.Mesh(new THREE.PlaneGeometry(2.4,0.32),
+      new THREE.MeshStandardMaterial({color:sRGB(0xb4291a),roughness:0.6,side:THREE.DoubleSide}));
+    stripe.position.set(s*(ROAD_HALF+1.5)+0.02*s,2.6,0);
+    stripe.rotation.y=Math.PI/2;
+    g.add(stripe);
+  });
 })();
 
 /* -------------------------------------------------------------- mountains */
@@ -1230,9 +1398,14 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
-  if(k==='c'){ camMode=(camMode+1)%CAMS.length; orbit=false; updateStatus(); }
-  if(k==='o'){ orbit=!orbit; updateStatus(); }
+  if(k==='c'){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
+  if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='q'){ setQuality(quality==='High'?'Low':'High'); }
+  if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
+  if(k==='x'&&freeLook) resetFree();                 // recentre the head
+  // raise/lower the eye while free-looking
+  if(freeLook&&(k==='r'||k==='pageup'))   fUp=clamp(fUp+0.05,F_UP_MIN,F_UP_MAX);
+  if(freeLook&&(k==='f'||k==='pagedown')) fUp=clamp(fUp-0.05,F_UP_MIN,F_UP_MAX);
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
@@ -1247,7 +1420,8 @@ const CAMS=[
 ];
 let orbit=false, camMode=0, quality='High', shadowsOn=true;
 function updateStatus(){
-  document.getElementById('camname').textContent = orbit?'Orbit':CAMS[camMode].name;
+  document.getElementById('camname').textContent =
+    orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   document.getElementById('qname').textContent   = quality;
 }
 function setQuality(q){
@@ -1264,6 +1438,25 @@ function setQuality(q){
   updateStatus();
 }
 
+/* ------------------------------------------------------------- free look */
+/* Press V and the drag controls stop orbiting and start moving the driver's
+   head instead: drag to look around, wheel to slide the eye back. The eye is
+   clamped to a small envelope around its mount so you can lean back and
+   crane up or down for a better view of the road, but cannot reverse out of
+   the cockpit or push forward into the bodywork. Offsets are in the car's own
+   space, so they ride the shell through corners. */
+let freeLook=false;
+let fYaw=0, fPitch=0, fBack=0, fUp=0;
+const F_YAW=1.15, F_PITCH_UP=0.42, F_PITCH_DN=0.55;   // rad
+/* Deliberately tight. The tub around the driver's head is only so big: much
+   past a quarter of a metre back and the eye is inside the airbox looking at
+   the underside of the bodywork. Leaning back also lifts the eye slightly,
+   which is what keeps it clear of the headrest instead of buried in it. */
+const F_BACK_MIN=-0.04, F_BACK_MAX=0.28;              // m, +ve = further back
+const F_BACK_RISE=0.30;                               // m of lift per m back
+const F_UP_MIN=-0.12,  F_UP_MAX=0.26;                 // m
+function resetFree(){ fYaw=0; fPitch=0; fBack=0; fUp=0; }
+
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
@@ -1273,7 +1466,7 @@ canvas.addEventListener('pointerdown',e=>{
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
-  if(moved<8){                       // a tap, not a drag — cycle the view
+  if(moved<8 && !freeLook){          // a tap, not a drag — cycle the view
     if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
     updateStatus();
   }
@@ -1282,12 +1475,25 @@ canvas.addEventListener('pointermove',e=>{
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY;
   moved+=Math.abs(dx)+Math.abs(dy);
+  lastX=e.clientX; lastY=e.clientY;
+  if(freeLook){                      // look around from the seat
+    fYaw   = clamp(fYaw   - dx*0.0042, -F_YAW, F_YAW);
+    fPitch = clamp(fPitch - dy*0.0032, -F_PITCH_DN, F_PITCH_UP);
+    return;
+  }
   orbYaw   -= dx*0.005;
   orbPitch = clamp(orbPitch+dy*0.004,-0.12,1.15);
-  lastX=e.clientX; lastY=e.clientY;
   if(!orbit && moved>8){ orbit=true; updateStatus(); }
 });
-canvas.addEventListener('wheel',e=>{ if(orbit){ orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,900); e.preventDefault(); } },{passive:false});
+canvas.addEventListener('wheel',e=>{
+  if(freeLook){                      // slide the eye back and forth in the tub
+    fBack=clamp(fBack + e.deltaY*0.0012, F_BACK_MIN, F_BACK_MAX);
+    e.preventDefault();
+  } else if(orbit){
+    orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,900);
+    e.preventDefault();
+  }
+},{passive:false});
 
 /* ------------------------------------------------------------ drive model */
 /* The car is still railed to the crown of the road -- what changed is that the
@@ -1296,7 +1502,7 @@ const carState={ s:START_S, speed:0 };
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
-let pitch=0, roll=0, spdPrev=0;   // body attitude
+let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
 const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
 const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of tyre
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
@@ -1365,6 +1571,17 @@ function drive(dt){
   roll += (rollT-roll)*(1-Math.pow(0.03,dt));
   if(carObj){ carObj.rotation.x=pitch; carObj.rotation.z=roll; }
 
+  /* Head lean, taken off steerAng rather than off track curvature so it can
+     never disagree with the rim the driver is looking at: steerAng<0 is a left
+     turn (the front wheels get rotation.y = -steerAng/ratio, and +y rotation
+     swings the car's forward toward its local +x, which is the driver's left).
+     Positive camera roll tilts the view left, so the lean is -steerAng*k and
+     the head always falls into the corner the wheels are pointing at.
+     Curvature alone would leave the head dead level while you sawed at the
+     wheel on a straight. */
+  const leanT=clamp(-steerAng*0.075, -0.085, 0.085);   // up to ~4.9 deg
+  headLean += (leanT-headLean)*(1-Math.pow(0.02,dt));
+
   // Wheels roll at v/r -- faster car, faster spin, no slip.
   // Steer and roll are composed as quaternions on the axle node itself, in the
   // order steer-then-roll, so the roll axis follows the steered wheel the way a
@@ -1401,6 +1618,7 @@ function drive(dt){
 /* ------------------------------------------------------------- main loop */
 const tmp=new THREE.Vector3();
 const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
+const _fwd=new THREE.Vector3();
 const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
 let last=performance.now(), t=0, frames=0, acc=0, checked=false;
 
@@ -1443,6 +1661,23 @@ function frame(now){
       camera.up.set(0,1,0);
       camera.lookAt(carGroup.position.x*0.55+_aim.x*0.45,
                     1.15, carGroup.position.z*0.55+_aim.z*0.45);
+    }else if(freeLook){
+      /* Head moved and aimed in the car's own space, so it rides the shell.
+         The eye offset is clamped at source, and the aim is built from the
+         eye rather than from the centreline -- otherwise looking sideways
+         would still drag the view back to the road ahead. */
+      const ex=C.p[0], ey=C.p[1]+fUp+fBack*F_BACK_RISE, ez=C.p[2]-fBack;
+      camera.position.copy(carPoint(ex,ey,ez));
+      // aim: a model-space point 24 m ahead of the eye along the yawed and
+      // pitched gaze, then taken to world -- a point, so localToWorld is valid
+      const cy=Math.cos(fPitch), R=24;
+      _fwd.set(ex + Math.sin(fYaw)*cy*R,
+               ey + Math.sin(fPitch)*R,
+               ez + Math.cos(fYaw)*cy*R);
+      if(carObj) carObj.localToWorld(_fwd);
+      else _fwd.set(carGroup.position.x, ey, carGroup.position.z+R);
+      camera.up.set(0,1,0);
+      camera.lookAt(_fwd);
     }else{
       // mount point is a real feature on the model, so it tracks the bodywork
       const P=carPoint(C.p[0],C.p[1],C.p[2]);
@@ -1465,8 +1700,19 @@ function frame(now){
     camera.position.y += (b1*0.50 + b3*0.32 + n1*1.50)*0.0042*amp;
     // lookAt zeroes the roll, so the body's lean and dive are folded back in
     // here rather than being inherited from the shell
-    camera.rotation.z += roll*0.85 + (b2*0.55 + n1*1.20)*0.0110*amp;
-    camera.rotation.x += pitch*0.80 + (b1*0.50 + n2*1.30)*0.0090*amp;
+    /* lookAt zeroes the roll, so the head lean and the body's dive are folded
+       back in here rather than being inherited from the shell.
+
+       These MUST go through rotateX/rotateZ, which post-multiply the
+       quaternion about the camera's own axes. Adding to camera.rotation.x/.z
+       instead edits an XYZ Euler, and that decomposition hits gimbal lock
+       whenever the car heads near world +/-x: rotation.y pins to +/-90 deg,
+       rotation.z stops meaning roll and swallows the yaw, and the head then
+       tilts the wrong way -- or wildly -- on whichever parts of the lap point
+       that way. On the old straight-only road the car never turned, so the
+       bug could not show itself. */
+    camera.rotateX(pitch*0.80 + (b1*0.50 + n2*1.30)*0.0090*amp);
+    camera.rotateZ(headLean   + (b2*0.55 + n1*1.20)*0.0110*amp);
     camera.fov = C.fov + sp*C.zoom;
   }
   camera.updateProjectionMatrix();
