@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Test Track 01 — Straight</title>
+<style>
+  :root{
+    --ink:#0b0c0d;
+    --paper:#eceae4;
+    --amber:#f2a20c;
+    --line:rgba(236,234,228,.18);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--ink);overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
+  #vignette{
+    position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse 120% 90% at 50% 45%, rgba(0,0,0,0) 45%, rgba(0,0,0,.42) 100%);
+    mix-blend-mode:multiply;
+  }
+  .hud{position:fixed;pointer-events:none;font-family:var(--mono);color:var(--paper);
+       text-shadow:0 1px 3px rgba(0,0,0,.55)}
+  #tag{top:0;left:0;padding:16px 18px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;line-height:1.7}
+  #tag b{font-weight:600}
+  #tag span{opacity:.55;display:block;letter-spacing:.1em}
+  #speed{left:0;bottom:0;padding:14px 20px 20px;display:flex;align-items:baseline;gap:8px}
+  #kmh{font-size:clamp(44px,9vw,78px);font-weight:600;color:var(--amber);
+       font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:.9}
+  #unit{font-size:11px;letter-spacing:.22em;opacity:.65;text-transform:uppercase}
+  #keys{right:0;bottom:0;padding:16px 20px 20px;text-align:right;font-size:10.5px;
+        letter-spacing:.1em;line-height:2;opacity:.62;text-transform:uppercase}
+  #keys kbd{font:inherit;border:1px solid var(--line);border-radius:3px;padding:1px 5px;
+            background:rgba(0,0,0,.28);margin:0 1px}
+  #status{right:0;top:0;padding:16px 20px;text-align:right;font-size:10.5px;
+          letter-spacing:.14em;text-transform:uppercase;opacity:.6;line-height:1.9}
+  #status em{font-style:normal;color:var(--amber);opacity:.9}
+  #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
+        background:var(--ink);color:var(--paper);font-family:var(--mono);z-index:9;
+        transition:opacity .7s ease}
+  #boot p{margin:0;font-size:11px;letter-spacing:.28em;text-transform:uppercase;opacity:.7}
+  #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
+  #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
+  #boot.gone{opacity:0;pointer-events:none}
+  @media (max-width:560px){ #keys{display:none} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="vignette"></div>
+
+<div class="hud" id="tag"><b>Test Track 01</b><span>Straight · McLaren MCL39</span></div>
+<div class="hud" id="status">Camera <em id="camname">Hood</em><br>Detail <em id="qname">High</em></div>
+<div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
+<div class="hud" id="keys">
+  <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
+  <div><kbd>A</kbd><kbd>D</kbd> steering</div>
+  <div><kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
+  <div>drag look · tap to reset · scroll zoom</div>
+</div>
+
+<div id="boot"><p>Loading track</p><div id="bar"><i></i></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="meshopt_decoder.js"></script>
+<script src="GLTFLoader.js"></script>
+<script>
+const ASSETS = {
+  geoManifest: null,                       // filled by boot() from trees.json
+  geo:   "trees.bin",
+  bark:  "bark.jpg",
+  barkN: "barkn.jpg",
+  leaf:  "leaf.png",
+  road:  "road.jpg",
+  rock:  "rock.jpg",
+  car:   "car.glb",
+  snd:   { accel:"accel.mp3", idle:"idle.mp3",
+           brake:"brake.mp3", coast:"coast.mp3" }
+};
+</script>
+<script>
+(function(){
+"use strict";
+
+/* ---------------------------------------------------------------- helpers */
+const clamp = (v,a,b)=>v<a?a:(v>b?b:v);
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smoothstep = (e0,e1,x)=>{const t=clamp((x-e0)/(e1-e0),0,1);return t*t*(3-2*t);};
+const sRGB  = h=>new THREE.Color(h).convertSRGBToLinear();
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return ((t^t>>>14)>>>0)/4294967296;};}
+
+function hash2(x,y){const n=Math.sin(x*127.1+y*311.7)*43758.5453123;return n-Math.floor(n);}
+function vnoise(x,y){
+  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
+  const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1);
+  return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v;
+}
+function fbm(x,y,oct){
+  let s=0,amp=1,f=1,tot=0;
+  for(let i=0;i<(oct||4);i++){ s+=vnoise(x*f,y*f)*amp; tot+=amp; amp*=0.5; f*=2.03; }
+  return s/tot;
+}
+
+/* road geometry constants (metres) */
+const ROAD_HALF   = 4.5;    // asphalt half width
+const LANE_EDGE   = 3.65;   // white edge line offset
+const SHOULDER    = 6.1;    // gravel outer edge
+const TREE_START  = 8.5;    // nearest trunk to centreline
+const PERIOD      = 1400;   // tree / terrain repeat length
+const MPERIOD     = PERIOD*4; // mountain repeat length (multiple of PERIOD)
+const TRACK_LEN   = 7000;   // asphalt strip length
+/* 180 m divides the asphalt tile (3), gravel (2.4), wear strip (60),
+   lane-dash cycle (9) and post spacing (45) — so recycling is seamless */
+const ROAD_SNAP   = 180;
+
+/* fbm that is exactly periodic in z with wavelength PERIOD, so the ground,
+   the trees and the hills can all be recycled as the car drives forever.
+   The last slice cross-fades back into the first — no seam, no jump.       */
+function pfbm(x,z,oct,fx,fz){
+  let zm=z%PERIOD; if(zm<0) zm+=PERIOD;
+  const w=smoothstep(PERIOD*0.72,PERIOD,zm);
+  const a=fbm(x*fx, zm*fz, oct);
+  if(w<=0) return a;
+  return a+(fbm(x*fx,(zm-PERIOD)*fz,oct)-a)*w;
+}
+
+/* terrain: dead flat at the road, rolling further out */
+function terrainH(x,z){
+  const k = smoothstep(16,110,Math.abs(x));
+  if(k<=0) return 0;
+  const big = (pfbm(x,z,4,0.0022,0.0022)-0.5)*46;
+  const mid = (pfbm(x,z,3,0.011, 0.011 )-0.5)*7;
+  return (big+mid)*k;
+}
+
+/* ------------------------------------------------------------- decode geo */
+let GEO_BUF=null;      // trees.bin, fetched before the trees are built
+function buildGeometry(rec, buf){
+  const n=rec.count;
+  const qp=new Int16Array(buf, rec.pos, n*3);
+  const qn=new Int8Array (buf, rec.nrm, n*3);
+  const qu=new Uint16Array(buf, rec.uv,  n*2);
+  const pos=new Float32Array(n*3), nrm=new Float32Array(n*3), uv=new Float32Array(n*2);
+  const pmin=rec.pmin, prng=rec.prng, umin=rec.umin, urng=rec.urng;
+  for(let i=0;i<n;i++){
+    for(let a=0;a<3;a++){
+      const t=(qp[i*3+a]+32767)/65534;
+      pos[i*3+a]=pmin[a]+t*prng[a];
+      nrm[i*3+a]=qn[i*3+a]/127;
+    }
+    uv[i*2  ]=umin[0]+(qu[i*2  ]/65535)*urng[0];
+    uv[i*2+1]=umin[1]+(qu[i*2+1]/65535)*urng[1];
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('normal',  new THREE.BufferAttribute(nrm,3));
+  g.setAttribute('uv',      new THREE.BufferAttribute(uv,2));
+  // r128 only multiplies vColor into the fragment when USE_COLOR is defined --
+  // instanceColor alone is written in the vertex stage and then dropped. A
+  // neutral white colour attribute turns USE_COLOR on so the per-tree tint
+  // actually survives to the fragment. Without it every tree renders identical;
+  // with vertexColors but no attribute, every tree renders black.
+  const white=new Float32Array(n*3); white.fill(1);
+  g.setAttribute('color',   new THREE.BufferAttribute(white,3));
+  g.setIndex(new THREE.BufferAttribute(new Uint16Array(buf, rec.idx, rec.icount),1));
+  g.computeBoundingSphere();
+  return g;
+}
+
+/* ------------------------------------------------------- procedural maps */
+function wrapDrawRect(ctx,W,H,x,y,pad,fn){
+  for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+    if(dx&&Math.min(x,W-x)>pad) continue;
+    if(dy&&Math.min(y,H-y)>pad) continue;
+    ctx.save(); ctx.translate(x+dx*W, y+dy*H); fn(ctx); ctx.restore();
+  }
+}
+function wrapDraw(ctx,size,x,y,fn){ wrapDrawRect(ctx,size,size,x,y,24,fn); }
+function groundTexture(){
+  const S=512, c=document.createElement('canvas'); c.width=c.height=S;
+  const g=c.getContext('2d');
+  g.fillStyle='#545c30'; g.fillRect(0,0,S,S);
+  const rand=mulberry32(7);
+  const blotch=['#4a5329','#5d6634','#494f2a','#6a6f3c','#5b5330','#41482a'];
+  for(let i=0;i<520;i++){
+    const x=rand()*S,y=rand()*S,r=8+rand()*46;
+    g.globalAlpha=.16+rand()*.22; g.fillStyle=blotch[(rand()*blotch.length)|0];
+    wrapDraw(g,S,x,y,ctx=>{ctx.beginPath();ctx.ellipse(0,0,r,r*(.5+rand()*.8),rand()*6.28,0,6.28);ctx.fill();});
+  }
+  const blade=['#6e7a3c','#7d8846','#5a6430','#465027','#8a8f4e','#6b5f34'];
+  g.lineCap='round';
+  for(let i=0;i<9000;i++){
+    const x=rand()*S,y=rand()*S,a=rand()*6.283,len=2+rand()*6;
+    g.globalAlpha=.34+rand()*.5; g.strokeStyle=blade[(rand()*blade.length)|0];
+    g.lineWidth=.8+rand()*1.3;
+    wrapDraw(g,S,x,y,ctx=>{ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*len,Math.sin(a)*len);ctx.stroke();});
+  }
+  g.globalAlpha=1;
+  const id=g.getImageData(0,0,S,S), d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    const n=(rand()-.5)*26; d[i]+=n; d[i+1]+=n*1.05; d[i+2]+=n*.7;
+  }
+  g.putImageData(id,0,0);
+  return c;
+}
+/* multiplied over the asphalt: wheel polish, patch repairs, hairline cracks */
+function wearTexture(){
+  const W=256,H=1024, c=document.createElement('canvas'); c.width=W;c.height=H;
+  const g=c.getContext('2d');
+  g.fillStyle='#ffffff'; g.fillRect(0,0,W,H);
+  const rand=mulberry32(21);
+  const uOf = x => (x/(ROAD_HALF*2)+0.5)*W;  // metres from centre -> px
+  // polished wheel paths (lighter, worn smooth)
+  [-2.6,-0.85,0.85,2.6].forEach(m=>{
+    const gr=g.createLinearGradient(uOf(m-0.95),0,uOf(m+0.95),0);
+    gr.addColorStop(0,'rgba(255,255,255,0)');
+    gr.addColorStop(.5,'rgba(255,255,255,.85)');
+    gr.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=gr; g.globalCompositeOperation='lighten';
+    g.fillRect(uOf(m-0.95),0,uOf(m+0.95)-uOf(m-0.95),H);
+  });
+  g.globalCompositeOperation='source-over';
+  // dark centre grime + edge grime
+  [[0,0.55,.20],[-ROAD_HALF+0.4,0.9,.26],[ROAD_HALF-0.4,0.9,.26]].forEach(([m,w,a])=>{
+    const gr=g.createLinearGradient(uOf(m-w),0,uOf(m+w),0);
+    gr.addColorStop(0,'rgba(0,0,0,0)');
+    gr.addColorStop(.5,'rgba(0,0,0,'+a+')');
+    gr.addColorStop(1,'rgba(0,0,0,0)');
+    g.fillStyle=gr; g.fillRect(uOf(m-w),0,uOf(m+w)-uOf(m-w),H);
+  });
+  // patch repairs — drawn wrapped so the strip tiles end-to-end
+  for(let i=0;i<9;i++){
+    const x=rand()*W, y=rand()*H, w=30+rand()*90, h=40+rand()*160;
+    const al=.10+rand()*.13, fill=rand()>.5?'#000':'#fff';
+    wrapDrawRect(g,W,H,x,y,180,ctx=>{
+      ctx.globalAlpha=al; ctx.fillStyle=fill; ctx.fillRect(-w/2,-h/2,w,h);
+    });
+  }
+  // hairline cracks
+  g.globalAlpha=1;
+  for(let i=0;i<34;i++){
+    const x0=rand()*W, y0=rand()*H, lw=.6+rand()*1.1;
+    const steps=6+(rand()*10|0), pts=[[0,0]];
+    let px=0,py=0;
+    for(let s=0;s<steps;s++){ px+=(rand()-.5)*34; py+=(rand()-.35)*40; pts.push([px,py]); }
+    wrapDrawRect(g,W,H,x0,y0,420,ctx=>{
+      ctx.strokeStyle='rgba(0,0,0,.30)'; ctx.lineWidth=lw;
+      ctx.beginPath(); ctx.moveTo(0,0);
+      for(const p of pts) ctx.lineTo(p[0],p[1]);
+      ctx.stroke();
+    });
+  }
+  // longitudinal seam where the two paving lanes meet
+  g.globalAlpha=1;
+  g.strokeStyle='rgba(0,0,0,.34)'; g.lineWidth=2.2;
+  g.beginPath(); g.moveTo(uOf(0),0); g.lineTo(uOf(0),H); g.stroke();
+  return c;
+}
+
+/* --------------------------------------------------------------- renderer */
+const canvas   = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.setSize(innerWidth,innerHeight,false);
+renderer.outputEncoding   = THREE.sRGBEncoding;
+renderer.toneMapping      = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.02;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+const MAXANISO = renderer.capabilities.getMaxAnisotropy();
+
+const scene  = new THREE.Scene();
+const HORIZON = 0xb9c9d6;
+// thin enough that the rock texture on the ridges still reads at 1 km
+scene.fog = new THREE.FogExp2(sRGB(HORIZON).getHex(), 0.00062);
+scene.fog.color = sRGB(HORIZON);
+
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.06, 5000);
+
+/* ------------------------------------------------------------------- sky */
+const SUN_DIR = new THREE.Vector3(-0.62,0.44,0.65).normalize();
+const skyMat = new THREE.ShaderMaterial({
+  side:THREE.BackSide, depthWrite:false, fog:false,
+  uniforms:{
+    uTop:{value:sRGB(0x2f6ea8)}, uMid:{value:sRGB(0x8fb4d4)},
+    uHaze:{value:sRGB(HORIZON)}, uSun:{value:sRGB(0xfff0d0)},
+    uSunDir:{value:SUN_DIR}
+  },
+  vertexShader:`varying vec3 vD; void main(){ vD=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader:`
+    varying vec3 vD; uniform vec3 uTop,uMid,uHaze,uSun,uSunDir;
+    void main(){
+      vec3 d=normalize(vD);
+      float h=clamp(d.y,0.0,1.0);
+      vec3 col=mix(uMid,uTop,pow(h,0.72));
+      col=mix(uHaze,col,smoothstep(0.0,0.34,h));
+      float s=max(dot(d,normalize(uSunDir)),0.0);
+      col+=uSun*pow(s,1400.0)*3.0;
+      col+=uSun*pow(s,14.0)*0.30;
+      col+=uSun*pow(s,3.0)*0.06;
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+const skyDome=new THREE.Mesh(new THREE.SphereGeometry(3000,32,18), skyMat);
+skyDome.frustumCulled=false;
+scene.add(skyDome);
+
+/* ----------------------------------------------------------------- lights */
+scene.add(new THREE.HemisphereLight(sRGB(0x9fc3e2).getHex(), sRGB(0x4d4a30).getHex(), 0.72));
+const sun = new THREE.DirectionalLight(sRGB(0xfff2dc).getHex(), 2.35);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-72; sun.shadow.camera.right=72;
+sun.shadow.camera.top=72;   sun.shadow.camera.bottom=-72;
+sun.shadow.camera.near=1;   sun.shadow.camera.far=420;
+sun.shadow.bias=-0.0006; sun.shadow.normalBias=0.035;
+// r128 never recomputes this itself -- updateMatrices() reads projectionMatrix
+// but never rebuilds it, so without this the frustum stays at its default
+// 10x10 box and shadows only land in a tiny patch around the sun target.
+sun.shadow.camera.updateProjectionMatrix();
+scene.add(sun); scene.add(sun.target);
+
+/* --------------------------------------------------------- texture loader */
+let pending=0, loaded=0;
+const bar=document.querySelector('#bar i');
+function texture(src, srgb, rw, rh){
+  pending++;
+  const t=new THREE.Texture();
+  t.userData={clones:[]};   // r128 does not create userData on Texture
+  const img=new Image();
+  img.onload=()=>{
+    t.image=img; t.needsUpdate=true;
+    // clones made before the image arrived are still empty -- fill them now
+    for(const c of (t.userData.clones||[])){ c.image=img; c.needsUpdate=true; }
+    loaded++;
+    bar.style.width=Math.round(loaded/pending*100)+'%';
+    if(loaded>=pending) ready();
+  };
+  img.src=src;
+  t.wrapS = rw||THREE.RepeatWrapping;
+  t.wrapT = rh||THREE.RepeatWrapping;
+  t.anisotropy = MAXANISO;
+  if(srgb) t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+/* Texture.clone() copies .image by reference, so a clone taken before the
+   image has decoded stays permanently blank. Register it instead. */
+function cloneTex(t){
+  const c=t.clone();
+  c.needsUpdate=true;
+  if(t.image){ c.image=t.image; return c; }
+  if(!t.userData) t.userData={};
+  if(!t.userData.clones) t.userData.clones=[];
+  t.userData.clones.push(c);
+  return c;
+}
+/* trees.json + trees.bin must be in hand before makeTrees() runs. Both are
+   fetched here; ready() already waits on the pending/loaded counters. */
+pending++;
+Promise.all([
+  fetch('trees.json').then(r=>r.json()),
+  fetch(ASSETS.geo).then(r=>r.arrayBuffer())
+]).then(([man,buf])=>{
+  ASSETS.geoManifest=man; GEO_BUF=buf;
+  loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
+  if(loaded>=pending) ready();
+}).catch(e=>{
+  console.error('tree assets failed',e);
+  loaded++; if(loaded>=pending) ready();
+});
+
+const texRoad = texture(ASSETS.road, true);
+const texRock = texture(ASSETS.rock, true);
+const texBark = texture(ASSETS.bark, true);
+const texBarkN= texture(ASSETS.barkN,false);
+const texLeaf = texture(ASSETS.leaf, true);
+
+const texGround = new THREE.CanvasTexture(groundTexture());
+texGround.wrapS=texGround.wrapT=THREE.RepeatWrapping;
+texGround.anisotropy=MAXANISO; texGround.encoding=THREE.sRGBEncoding;
+texGround.repeat.set(1000,1000);   // 8 m tile — 1400 m recycle is exactly 175 tiles
+
+const texWear = new THREE.CanvasTexture(wearTexture());
+texWear.wrapS=THREE.ClampToEdgeWrapping; texWear.wrapT=THREE.RepeatWrapping;
+texWear.anisotropy=MAXANISO;
+
+/* ---------------------------------------------------------------- terrain */
+const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
+(function buildTerrain(){
+  const SEG=200, SIZE=8000;
+  const g=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);
+  g.rotateX(-Math.PI/2);
+  const p=g.attributes.position, col=new Float32Array(p.count*3);
+  const dry=new THREE.Color(0.62,0.56,0.36), green=new THREE.Color(0.44,0.55,0.30);
+  const dirt=new THREE.Color(0.50,0.44,0.33);
+  const c=new THREE.Color();
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i), z=p.getZ(i);
+    p.setY(i, terrainH(x,z));
+    const t=pfbm(x,z,3,0.006,0.006);
+    c.copy(green).lerp(dry, clamp(t*1.5-0.25,0,1));
+    const verge=1-smoothstep(6,26,Math.abs(x));   // scuffed dirt beside the tarmac
+    c.lerp(dirt, verge*0.75);
+    const sh=0.82+pfbm(x,z,2,0.02,0.02)*0.4;
+    col[i*3]=c.r*sh; col[i*3+1]=c.g*sh; col[i*3+2]=c.b*sh;
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  g.computeVertexNormals();
+  const m=new THREE.MeshStandardMaterial({map:texGround,vertexColors:true,roughness:1,metalness:0});
+  const mesh=new THREE.Mesh(g,m);
+  mesh.receiveShadow=true;
+  mesh.frustumCulled=false;
+  terrainGroup.add(mesh);
+})();
+
+/* ------------------------------------------------------------------- road */
+const roadGroup=new THREE.Group(); scene.add(roadGroup);
+(function buildRoad(){
+  texRoad.repeat.set(3.0, TRACK_LEN/3.0);   // 3 m tile: divides ROAD_SNAP exactly
+
+  const asphalt=new THREE.MeshStandardMaterial({
+    map:texRoad, bumpMap:texRoad, bumpScale:0.035,
+    roughnessMap:texRoad, roughness:0.97, metalness:0,
+    color:sRGB(0xa8a8a8)
+  });
+  asphalt.onBeforeCompile=sh=>{
+    sh.uniforms.uWear={value:texWear};
+    sh.vertexShader=sh.vertexShader
+      .replace('#include <common>','#include <common>\nvarying vec2 vWear;')
+      .replace('#include <uv_vertex>','#include <uv_vertex>\nvWear=uv;');
+    sh.fragmentShader=sh.fragmentShader
+      .replace('#include <common>','#include <common>\nuniform sampler2D uWear;\nvarying vec2 vWear;')
+      .replace('#include <map_fragment>',
+        '#include <map_fragment>\nvec3 wr=texture2D(uWear,vec2(vWear.x,vWear.y*'+(TRACK_LEN/60).toFixed(1)+')).rgb;\ndiffuseColor.rgb*=mix(vec3(1.0),wr,0.85);');
+  };
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF*2,TRACK_LEN,1,1),asphalt);
+  road.rotation.x=-Math.PI/2; road.position.y=0.12; road.receiveShadow=true;
+  roadGroup.add(road);
+
+  // gravel shoulders
+  const gravel=new THREE.MeshStandardMaterial({map:cloneTex(texRock),roughness:1,metalness:0,color:sRGB(0x8d8578)});
+  gravel.map.wrapS=gravel.map.wrapT=THREE.RepeatWrapping;
+  gravel.map.repeat.set(1.1,TRACK_LEN/2.4); gravel.map.encoding=THREE.sRGBEncoding;
+  gravel.map.anisotropy=MAXANISO;
+  [-1,1].forEach(s=>{
+    const w=SHOULDER-ROAD_HALF;
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,TRACK_LEN,1,1),gravel);
+    m.rotation.x=-Math.PI/2; m.position.set(s*(ROAD_HALF+w/2),0.10,0); m.receiveShadow=true;
+    roadGroup.add(m);
+  });
+
+  // paint
+  const paint=new THREE.MeshStandardMaterial({
+    color:sRGB(0xdedbd0), roughness:0.7, metalness:0,
+    polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4
+  });
+  [-1,1].forEach(s=>{
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(0.15,TRACK_LEN,1,1),paint);
+    m.rotation.x=-Math.PI/2; m.position.set(s*LANE_EDGE,0.14,0);
+    roadGroup.add(m);
+  });
+  const DASH=3, GAP=6, n=Math.floor(TRACK_LEN/(DASH+GAP));
+  const dashes=new THREE.InstancedMesh(new THREE.PlaneGeometry(0.15,DASH,1,1),paint,n);
+  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI/2,0,0));
+  const one=new THREE.Vector3(1,1,1);
+  for(let i=0;i<n;i++){
+    mtx.compose(new THREE.Vector3(0,0.14,-TRACK_LEN/2+i*(DASH+GAP)+DASH/2),q,one);
+    dashes.setMatrixAt(i,mtx);
+  }
+  dashes.instanceMatrix.needsUpdate=true; dashes.frustumCulled=false;
+  roadGroup.add(dashes);
+
+  // reflective marker posts
+  const postGeo=new THREE.BoxGeometry(0.11,1.05,0.07);
+  postGeo.translate(0,0.525,0);
+  const postMat=new THREE.MeshStandardMaterial({color:sRGB(0xe8e5da),roughness:0.6});
+  const capMat =new THREE.MeshStandardMaterial({color:sRGB(0xb52d1c),roughness:0.45,
+                                                emissive:sRGB(0x521008),emissiveIntensity:.5});
+  const capGeo=new THREE.BoxGeometry(0.09,0.16,0.075); capGeo.translate(0,0.86,0);
+  const cnt=Math.floor(TRACK_LEN/45)*2;
+  const posts=new THREE.InstancedMesh(postGeo,postMat,cnt);
+  const caps =new THREE.InstancedMesh(capGeo, capMat, cnt);
+  posts.castShadow=true;
+  let k=0;
+  for(let i=0;i<cnt/2;i++) for(const s of [-1,1]){
+    const z=-TRACK_LEN/2+i*45+22.5;
+    mtx.compose(new THREE.Vector3(s*(SHOULDER+0.5),0.08,z),new THREE.Quaternion(),one);
+    posts.setMatrixAt(k,mtx); caps.setMatrixAt(k,mtx); k++;
+  }
+  posts.instanceMatrix.needsUpdate=true; caps.instanceMatrix.needsUpdate=true;
+  posts.frustumCulled=false; caps.frustumCulled=false;
+  roadGroup.add(posts,caps);
+})();
+
+/* -------------------------------------------------------------- mountains */
+const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
+(function buildMountains(){
+  const rand=mulberry32(90210);
+  const chunks=[];
+  let vTotal=0;
+
+  function pyramid(R,H,seed){
+    // square-based pyramid, subdivided and roughened into crags.
+    // displacement stays modest so the four faces still read as a pyramid.
+    let g=new THREE.ConeGeometry(R,H,4,10,false);
+    g.translate(0,H/2,0);
+    const p=g.attributes.position;
+    const r2=mulberry32(seed);
+    const ph=r2()*100;
+    for(let i=0;i<p.count;i++){
+      const x=p.getX(i), y=p.getY(i), z=p.getZ(i);
+      const t=clamp(y/H,0,1);
+      // pin the apex and the base ring, bulge the middle
+      const env=Math.sin(Math.PI*t)*0.9+0.1;
+      const n1=fbm(x*0.012+ph, z*0.012+ph,4)-0.5;
+      const n2=fbm(x*0.05+ph,  z*0.05+ph, 3)-0.5;
+      const d=(n1*0.16+n2*0.05)*env;
+      const len=Math.hypot(x,z)||1;
+      p.setX(i,x+(x/len)*d*R*0.85);
+      p.setZ(i,z+(z/len)*d*R*0.85);
+      p.setY(i,y+(n2*0.5)*env*H*0.05);
+    }
+    g=g.toNonIndexed();
+    return g;
+  }
+
+  function faceUVsAndColour(g,H,uvScale,uOff,vOff,snowLine,seed){
+    g.computeVertexNormals();
+    const p=g.attributes.position, nr=g.attributes.normal;
+    const uv=new Float32Array(p.count*2), col=new Float32Array(p.count*3);
+    // Near-white tints so the photo supplies the colour. The old grey ramp
+    // multiplied the texture down to mush and the snow blend finished the job.
+    const rock=new THREE.Color(1.14,1.09,1.02);   // sun-facing rock, slightly warm
+    const dark=new THREE.Color(0.50,0.51,0.58);   // crevices, cool bounce light
+    const c=new THREE.Color();
+    const rr=mulberry32(seed);
+    const jx=rr()*80, jz=rr()*80;
+    for(let f=0;f<p.count;f+=3){
+      const nx=Math.abs(nr.getX(f)), ny=Math.abs(nr.getY(f)), nz=Math.abs(nr.getZ(f));
+      for(let k=0;k<3;k++){
+        const i=f+k, x=p.getX(i), y=p.getY(i), z=p.getZ(i);
+        let u,v;
+        if(ny>nx&&ny>nz){ u=x; v=z; }
+        else if(nx>nz){   u=z; v=y; }
+        else {            u=x; v=y; }
+        uv[i*2]  =(u+jx)*uvScale+uOff;
+        uv[i*2+1]=(v+jz)*uvScale+vOff;
+        const t=y/H;
+        const grit=fbm(x*0.06+jx, z*0.06+jz,3);
+        // shade by height, grit and how much the face points at the sky
+        c.copy(dark).lerp(rock, clamp(t*0.55+grit*0.62+ny*0.30,0,1));
+        col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+      }
+    }
+    g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+    g.setAttribute('color',new THREE.BufferAttribute(col,3));
+    return g;
+  }
+
+  // every peak is authored inside one MPERIOD-long slice, then the whole
+  // field is stamped three times so there is always rock ahead and behind.
+  function place(x,z,R,H,seed){
+    const rr=mulberry32(seed+7);
+    const uvS=0.0030+rr()*0.0015, uo=rr()*20, vo=rr()*20;
+    const snow=0.74+rr()*0.20, ry=rr()*Math.PI*2;
+    for(let c=-1;c<=1;c++){
+      let g=pyramid(R,H,seed);
+      g=faceUVsAndColour(g,H,uvS,uo,vo,snow,seed+3);
+      g.rotateY(ry);
+      // sunk well below the rolling ground so no base ever pokes into view
+      g.translate(x, terrainH(x,z)-H*0.05-26, z+c*MPERIOD);
+      chunks.push(g); vTotal+=g.attributes.position.count;
+    }
+  }
+
+  // two ridgelines flanking the road, plus foothills
+  for(let i=0;i<15;i++){
+    const s=i%2?1:-1;
+    const dist=900+rand()*700;
+    const z=i*(MPERIOD/15)+rand()*180;
+    place(s*dist, z, 140+rand()*190, 190+rand()*260, 1000+i);
+  }
+  for(let i=0;i<14;i++){
+    const s=rand()>.5?1:-1;
+    const dist=1700+rand()*900;
+    place(s*dist, rand()*MPERIOD, 190+rand()*240, 300+rand()*330, 2000+i);
+  }
+  for(let i=0;i<16;i++){
+    const s=rand()>.5?1:-1;
+    place(s*(760+rand()*320), rand()*MPERIOD, 70+rand()*60, 55+rand()*110, 3000+i);
+  }
+  // a few sat right on the vanishing point
+  place(-980, 1200, 260, 400, 4001);
+  place( 1120, 600, 300, 460, 4002);
+  place(-1240, 3900, 280, 420, 4003);
+
+  // merge into one draw call
+  const pos=new Float32Array(vTotal*3), nrm=new Float32Array(vTotal*3),
+        uv =new Float32Array(vTotal*2), col=new Float32Array(vTotal*3);
+  let o=0;
+  chunks.forEach(g=>{
+    pos.set(g.attributes.position.array,o*3);
+    nrm.set(g.attributes.normal.array,  o*3);
+    uv .set(g.attributes.uv.array,      o*2);
+    col.set(g.attributes.color.array,   o*3);
+    o+=g.attributes.position.count;
+  });
+  const G=new THREE.BufferGeometry();
+  G.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  G.setAttribute('normal',  new THREE.BufferAttribute(nrm,3));
+  G.setAttribute('uv',      new THREE.BufferAttribute(uv,2));
+  G.setAttribute('color',   new THREE.BufferAttribute(col,3));
+
+  const rockMap=cloneTex(texRock);
+  rockMap.wrapS=rockMap.wrapT=THREE.RepeatWrapping;
+  rockMap.encoding=THREE.sRGBEncoding; rockMap.anisotropy=MAXANISO;
+  const m=new THREE.MeshStandardMaterial({
+    map:rockMap, vertexColors:true, roughness:0.98, metalness:0, flatShading:true
+  });
+  const mesh=new THREE.Mesh(G,m);
+  mesh.frustumCulled=false;
+  mountainGroup.add(mesh);
+})();
+
+/* -------------------------------------------------------------------- car */
+/* The GLB was rebuilt so each wheel is its own node sitting exactly on its
+   axle, with the mesh recentred -- so spinning a wheel is just rotation.x. */
+const carGroup=new THREE.Group(); scene.add(carGroup);
+const wheels=[];
+let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
+const STEER_AXIS=new THREE.Vector3(0,0.456,0.890).normalize();
+const CAR_LEN=5.60;                     // 2025-spec car length, metres
+
+(function loadCar(){
+  pending++;
+  const loader=new THREE.GLTFLoader();
+  if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  loader.load(ASSETS.car, gltf=>{
+    const car=gltf.scene;
+    car.updateMatrixWorld(true);
+    const b0=new THREE.Box3().setFromObject(car);
+    car.scale.setScalar(CAR_LEN/(b0.max.z-b0.min.z));
+    car.updateMatrixWorld(true);
+    const b1=new THREE.Box3().setFromObject(car);
+    car.position.y=-b1.min.y;           // drop the tyres onto the deck
+    carGroup.add(car); carObj=car;
+
+    for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
+      const w=car.getObjectByName(n);
+      if(!w) continue;
+      w.userData.steers = (n==='Wheel_FL'||n==='Wheel_FR');
+      wheels.push(w);
+    }
+    // The steering wheel keeps gltfpack's shared quantisation offset, so its
+    // mesh sits at the hub rather than at the node origin. Cancel that on the
+    // child, then the node rotates about the real column axis.
+    /* gltfpack's shared quantisation grid leaves each mesh at its authored
+       position, so a pivot node's child still carries the full offset.
+       Cancel it and the node rotates about its own origin.                */
+    const pivotFix=o=>{
+      if(!o) return null;
+      const c=o.position.clone();
+      o.children.forEach(ch=>ch.position.sub(c));
+      return o;
+    };
+    steer=pivotFix(car.getObjectByName('SteerWheel'));
+    // column axis measured off the rim: tilted back 27 deg, like the real car
+    if(steer) STEER_AXIS.set(0,0.456,0.890).normalize();
+    // the over-wheel winglets are mounted to the uprights: they steer but
+    // must not roll with the tyre, so they get their own pivot nodes
+    wingL=pivotFix(car.getObjectByName('Wing_FL'));
+    wingR=pivotFix(car.getObjectByName('Wing_FR'));
+    if(wheels.length){
+      carGroup.updateMatrixWorld(true);
+      const wb=new THREE.Box3().setFromObject(wheels[0]);
+      const r=(wb.max.y-wb.min.y)/2;
+      if(r>0.05) wheelR=r;              // rolling radius, for the spin rate
+    }
+    car.traverse(o=>{
+      if(!o.isMesh) return;
+      o.castShadow=true; o.receiveShadow=true;
+      o.userData.casts=true; shadowCasters.push(o);
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      ms.forEach(m=>{ if(m && m.map) m.map.anisotropy=MAXANISO; });
+    });
+    carGroup.position.y=0.125;          // road deck sits at 0.12
+    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
+    if(loaded>=pending) ready();
+  }, undefined, err=>{
+    console.error('car failed to load',err);
+    loaded++; if(loaded>=pending) ready();
+  });
+})();
+
+/* model-space point -> world, so cameras can be bolted to real car features */
+const _cp=new THREE.Vector3();
+function carPoint(x,y,z){
+  _cp.set(x,y,z);
+  return carObj ? carObj.localToWorld(_cp) : _cp.set(0,y,carState.z+z);
+}
+
+/* ------------------------------------------------------------------ trees */
+const windU={value:0};
+const treeGroup=new THREE.Group(); scene.add(treeGroup);
+
+function makeTrees(){
+  const buf=GEO_BUF;
+  const man=ASSETS.geoManifest;
+
+  const barkMat=new THREE.MeshStandardMaterial({
+    map:texBark, normalMap:texBarkN, roughness:0.94, metalness:0,
+    normalScale:new THREE.Vector2(1.1,1.1), vertexColors:true
+  });
+  const leafMat=new THREE.MeshStandardMaterial({
+    map:texLeaf, alphaTest:0.5, side:THREE.DoubleSide,
+    roughness:0.86, metalness:0, vertexColors:true
+  });
+  [barkMat,leafMat].forEach((m,idx)=>{
+    m.onBeforeCompile=sh=>{
+      sh.uniforms.uWind=windU;
+      sh.vertexShader='uniform float uWind;\n'+sh.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         #ifdef USE_INSTANCING
+           vec3 wp=(instanceMatrix*vec4(transformed,1.0)).xyz;
+         #else
+           vec3 wp=transformed;
+         #endif
+         float amp=${idx===0?'0.010':'0.045'};
+         float hgt=max(transformed.y,0.0);
+         float s=sin(uWind*1.7+wp.x*0.22+wp.z*0.17)+0.45*sin(uWind*3.1+wp.x*0.55);
+         transformed.x+=s*amp*hgt;
+         transformed.z+=s*amp*hgt*0.55;`
+      );
+    };
+  });
+
+  const rand=mulberry32(20260727);
+  const kinds=['small','medium','large'];
+  const share={small:0.36, medium:0.36, large:0.28};
+  const PER=230, COPIES=3;
+
+  // one shared layout so the forest tiles perfectly every PERIOD metres
+  const layout={small:[],medium:[],large:[]};
+  for(let i=0;i<PER;i++){
+    const side=rand()>0.5?1:-1;
+    const r=rand();
+    const x=side*(TREE_START + Math.pow(rand(),1.7)*96);
+    const z=rand()*PERIOD;
+    const kind = r<share.small?'small':(r<share.small+share.medium?'medium':'large');
+    layout[kind].push({
+      x, z,
+      s:0.82+rand()*0.55,
+      ry:rand()*Math.PI*2,
+      tilt:(rand()-0.5)*0.09,
+      tint:0.80+rand()*0.34,
+      warm:(rand()-0.5)*0.16
+    });
+  }
+
+  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(), e=new THREE.Euler(),
+        v=new THREE.Vector3(), sc=new THREE.Vector3(), col=new THREE.Color();
+
+  // Slice the 3 copies into short z-buckets. Instanced meshes can't be frustum
+  // culled by three.js (the instance offsets aren't in the bounding sphere), so
+  // we bucket them and toggle .visible ourselves — roughly a 3x triangle saving.
+  const BUCKET=350;
+  const B0=-PERIOD, B1=(COPIES-1)*PERIOD;            // -1400 .. +2800
+  const NB=Math.round((B1-B0)/BUCKET);
+
+  kinds.forEach(kind=>{
+    const list=layout[kind];
+    if(!list.length) return;
+    const barkGeo=buildGeometry(man[kind].bark,buf);
+    const leafGeo=buildGeometry(man[kind].leaf,buf);
+    const casts=(kind!=='small');
+
+    // gather instance transforms per bucket first so we can size each mesh
+    const bins=[]; for(let b=0;b<NB;b++) bins.push([]);
+    for(let c=0;c<COPIES;c++){
+      const zBase=(c-1)*PERIOD;
+      for(const t of list){
+        const z=zBase+t.z;
+        const b=clamp(Math.floor((z-B0)/BUCKET),0,NB-1);
+        bins[b].push({t,z});
+      }
+    }
+
+    bins.forEach((items,b)=>{
+      if(!items.length) return;
+      const bark=new THREE.InstancedMesh(barkGeo, barkMat, items.length);
+      const leaf=new THREE.InstancedMesh(leafGeo, leafMat, items.length);
+      items.forEach(({t,z},n)=>{
+        e.set(t.tilt,t.ry,t.tilt*0.6);
+        q.setFromEuler(e);
+        sc.set(t.s,t.s*(0.94+((t.tint*7)%1)*0.14),t.s);
+        v.set(t.x, terrainH(t.x,z)-0.06, z);
+        mtx.compose(v,q,sc);
+        bark.setMatrixAt(n,mtx); leaf.setMatrixAt(n,mtx);
+        col.setRGB(t.tint*(1+t.warm), t.tint, t.tint*(1-t.warm*0.7));
+        bark.setColorAt(n,col); leaf.setColorAt(n,col);
+      });
+      bark.instanceMatrix.needsUpdate=true; leaf.instanceMatrix.needsUpdate=true;
+      if(bark.instanceColor) bark.instanceColor.needsUpdate=true;
+      if(leaf.instanceColor) leaf.instanceColor.needsUpdate=true;
+      bark.frustumCulled=false; leaf.frustumCulled=false;
+
+      // leaves must punch their alpha through the shadow map too
+      leaf.customDepthMaterial=new THREE.MeshDepthMaterial({
+        depthPacking:THREE.RGBADepthPacking, map:texLeaf, alphaTest:0.5
+      });
+      bark.userData.casts=casts; leaf.userData.casts=casts;
+      bark.castShadow=casts; leaf.castShadow=casts;
+      bark.receiveShadow=true; leaf.receiveShadow=true;
+      shadowCasters.push(bark,leaf);
+      treeGroup.add(bark,leaf);
+      treeBuckets.push({z:B0+(b+0.5)*BUCKET, meshes:[bark,leaf]});
+    });
+  });
+}
+const shadowCasters=[];
+const treeBuckets=[];
+
+/* ----------------------------------------------------------------- audio */
+/* Four looping engine beds crossfaded on a 0.1 s ramp. Each state gets a
+   fresh source so it can be started at an offset -- a looping BufferSource
+   cannot be seeked once running. */
+const FADE=0.10;
+let actx=null, sbuf={}, sndCur=null, sndSrc=null, sndGain=null, audioOn=false;
+
+function initAudio(){
+  if(actx) return;
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) return;
+  actx=new AC();
+  const keys=['accel','idle','brake','coast'];
+  let done=0;
+  keys.forEach(k=>{
+    const fin=()=>{ if(++done===keys.length) audioOn=true; };
+    fetch(ASSETS.snd[k]).then(r=>r.arrayBuffer())
+      .then(ab=>actx.decodeAudioData(ab, b=>{ sbuf[k]=b; fin(); }, fin))
+      .catch(fin);
+  });
+}
+function unlockAudio(){
+  initAudio();
+  if(actx && actx.state==='suspended') actx.resume();
+}
+function setSound(name, offset){
+  if(!audioOn || !actx || !sbuf[name] || sndCur===name) return;
+  const now=actx.currentTime;
+  if(sndGain){                       // fade the outgoing bed out, then drop it
+    const g=sndGain, old=sndSrc;
+    g.gain.cancelScheduledValues(now);
+    g.gain.setValueAtTime(g.gain.value, now);
+    g.gain.linearRampToValueAtTime(0, now+FADE);
+    try{ old.stop(now+FADE+0.02); }catch(e){}
+  }
+  const src=actx.createBufferSource();
+  src.buffer=sbuf[name]; src.loop=true;
+  const g=actx.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(1, now+FADE);
+  src.connect(g); g.connect(actx.destination);
+  src.start(now, (offset||0)%sbuf[name].duration);
+  sndCur=name; sndSrc=src; sndGain=g;
+}
+
+/* --------------------------------------------------------------- controls */
+const keys=Object.create(null);
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  unlockAudio();                    // browsers only allow audio after a gesture
+  keys[k]=true;
+  if(k==='c'){ camMode=(camMode+1)%CAMS.length; orbit=false; updateStatus(); }
+  if(k==='o'){ orbit=!orbit; updateStatus(); }
+  if(k==='q'){ setQuality(quality==='High'?'Low':'High'); }
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  auto=false;
+});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+/* Camera rig. p is a point in the car model's own space (metres before the
+   fit-to-5.6 m scale); aim z is relative to the car, aim y is world height. */
+const CAMS=[
+  // Seated down in the tub: rim at 0.68 is just below the lens, the halo at
+  // 0.87 arcs overhead, the wheel at 0.51-0.68 sits in the lower frame.
+  {name:'Cockpit', p:[0, 0.72, 0.11], aim:[0,0.79,44], fov:70, zoom:10, shake:1.3}
+];
+let orbit=false, camMode=0, auto=true, quality='High';
+function updateStatus(){
+  document.getElementById('camname').textContent = orbit?'Orbit':CAMS[camMode].name;
+  document.getElementById('qname').textContent   = quality;
+}
+function setQuality(q){
+  quality=q;
+  const hi = q==='High';
+  renderer.shadowMap.enabled=hi;
+  shadowCasters.forEach(m=>{ m.castShadow = hi && m.userData.casts!==false; });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, hi?1.75:1.1));
+  scene.traverse(o=>{ if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.needsUpdate=true); } });
+  updateStatus();
+}
+
+// orbit drag
+let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=13;
+canvas.addEventListener('pointerdown',e=>{
+  unlockAudio();
+  dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointerup',e=>{
+  dragging=false;
+  if(moved<8){                       // a tap, not a drag — cycle the view
+    if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
+    updateStatus();
+  }
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!dragging) return;
+  const dx=e.clientX-lastX, dy=e.clientY-lastY;
+  moved+=Math.abs(dx)+Math.abs(dy);
+  orbYaw   -= dx*0.005;
+  orbPitch = clamp(orbPitch+dy*0.004,-0.12,1.15);
+  lastX=e.clientX; lastY=e.clientY;
+  if(!orbit && moved>8){ orbit=true; updateStatus(); }
+});
+canvas.addEventListener('wheel',e=>{ if(orbit){ orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,220); e.preventDefault(); } },{passive:false});
+
+/* ------------------------------------------------------------ drive model */
+const carState={ z:-140, speed:30 };
+let spin=0;                       // accumulated wheel angle, radians
+let steerIn=0, steerAng=0;        // input -1..1, and the damped angle it drives
+let lockF=1;                      // eased speed-dependent lock multiplier
+let pitch=0, spdPrev=0;           // body pitch (rad, +ve = nose down)
+const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
+const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of tyre
+const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
+const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
+const MAXSPEED=100;          // m/s = 360 km/h exactly
+const kmhEl=document.getElementById('kmh');
+
+function drive(dt){
+  const thr = keys['w']||keys['arrowup'];
+  const brk = keys['s']||keys['arrowdown'];
+  const lft = keys['a']||keys['arrowleft'];
+  const rgt = keys['d']||keys['arrowright'];
+
+  /* Steering is visual only -- the car stays on the crown of the road.
+     Two stages of easing: the input ramps toward the key state, then the
+     angle chases the input. Critically damped-ish, so it arrives smoothly
+     and settles instead of snapping or overshooting. */
+  const want = (lft?-1:0) + (rgt?1:0);
+  const rate = want ? 3.4 : 5.0;                    // self-centres a bit quicker
+  steerIn += (want-steerIn)*(1-Math.pow(0.0016,dt*rate/3.4));
+
+  /* Available lock falls away with speed, like a real rack loading up.
+     The bands are hard steps, so the factor is eased rather than applied
+     raw -- otherwise the wheel snaps when crossing a threshold, and sitting
+     exactly on one (say 100 kph) would flicker between two bands per frame. */
+  const kph=carState.speed*3.6;
+  const lockT = kph< 30 ? 1.00 : kph< 55 ? 0.60 : kph<100 ? 0.50
+              : kph<150 ? 0.40 : kph<200 ? 0.30
+              : kph<300 ? 0.2667 : 0.25;
+  lockF += (lockT-lockF)*(1-Math.pow(0.02,dt));
+
+  steerAng += (steerIn*STEER_LOCK*lockF - steerAng)*(1-Math.pow(0.0009,dt));
+  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
+
+  if(auto){ carState.speed += (58-carState.speed)*dt*0.35; }
+  else{
+    if(thr){
+      // drag rises with v^2, so: hard launch, progressive knee, flat top end.
+      // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
+      const v=carState.speed/MAXSPEED;
+      carState.speed += 26.0*(1.0 - v*v)*dt;
+    }
+    else if(brk) carState.speed -= 46*dt;
+    else carState.speed -= (0.8 + carState.speed*0.028)*dt;
+  }
+  carState.speed=clamp(carState.speed,0,MAXSPEED);
+
+  /* Body pitch: dive on the brakes, squat under power, level when coasting.
+     Driven off actual longitudinal acceleration rather than the key state, so
+     it eases off by itself as accel tails away near top speed. Clamped, then
+     damped, so the shell rocks on its springs instead of snapping. */
+  const along=(carState.speed-spdPrev)/Math.max(dt,1e-4);
+  spdPrev=carState.speed;
+  const pitchT=clamp(-along*0.00045, -0.014, 0.021);   // -0.8 deg .. +1.2 deg
+  pitch += (pitchT-pitch)*(1-Math.pow(0.01,dt));
+  if(carObj) carObj.rotation.x=pitch;
+
+  // Wheels roll at v/r -- faster car, faster spin, no slip.
+  // Steer and roll are composed as quaternions on the axle node itself, in the
+  // order steer-then-roll, so the roll axis follows the steered wheel the way a
+  // real one does. Euler rotation.x/.y on one node would fight over axis order,
+  // and rotating the child mesh would swing it in an arc -- its local origin is
+  // ~2.8 m from the geometry. The node has no scale, so this stays rigid: no
+  // stretch on the tyres, covers or discs at any angle.
+  spin += (carState.speed/wheelR)*dt;
+  if(spin>6.283185307) spin-=6.283185307;
+  _qRoll.setFromAxisAngle(_AXIS_X, spin);
+  _qSteer.setFromAxisAngle(_AXIS_Y, -steerAng/STEER_RATIO);
+  for(let i=0;i<wheels.length;i++){
+    const w=wheels[i];
+    if(w.userData.steers) w.quaternion.copy(_qSteer).multiply(_qRoll);
+    else                  w.quaternion.copy(_qRoll);
+  }
+  // winglets steer with the uprights but never roll
+  if(wingL) wingL.quaternion.copy(_qSteer);
+  if(wingR) wingR.quaternion.copy(_qSteer);
+
+  carState.z += carState.speed*dt;
+  // MPERIOD is a whole number of every layer's repeat length, so resetting the
+  // odometer here keeps float precision tight and is completely invisible.
+  if(carState.z > MPERIOD) carState.z -= MPERIOD;
+
+  /* engine bed: idle when stopped, otherwise brake > throttle > coast.
+     Lifting off the brake back onto the throttle while still rolling means
+     the engine is already spinning, so pick the accel loop up halfway in
+     rather than replaying the rev sweep from nothing. */
+  const st = carState.speed<0.6 ? 'idle' : brk ? 'brake' : thr ? 'accel' : 'coast';
+  if(st!==sndCur){
+    const rolling = (st==='accel' && sndCur==='brake' && carState.speed>0.6);
+    setSound(st, rolling && sbuf.accel ? sbuf.accel.duration*0.5 : 0);
+  }
+
+  kmhEl.textContent = Math.round(carState.speed*3.6);
+}
+
+/* ------------------------------------------------------------- main loop */
+const tmp=new THREE.Vector3();
+let last=performance.now(), t=0, frames=0, acc=0, checked=false;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt=Math.min((now-last)/1000,0.05); last=now; t+=dt;
+  drive(dt);
+  windU.value=t;
+
+  // recycle each layer around the car. Every snap distance is an exact
+  // multiple of that layer's repeat length, so nothing visibly jumps.
+  const tSnap = Math.round(carState.z/PERIOD)*PERIOD;
+  treeGroup.position.z    = tSnap;
+  terrainGroup.position.z = tSnap;
+  mountainGroup.position.z= Math.round(carState.z/MPERIOD)*MPERIOD;
+  roadGroup.position.z    = Math.round(carState.z/ROAD_SNAP)*ROAD_SNAP;
+
+  // the car sits on the crown of the road; matrices must be current before
+  // carPoint() reads mount positions off the bodywork
+  carGroup.position.z = carState.z;
+  carGroup.updateMatrixWorld(true);
+
+  // show only the buckets of trees that can actually be on screen
+  const localZ = carState.z - tSnap;
+  const back = orbit ? -1500 : -500, fwd = orbit ? 1600 : 1250;
+  for(let i=0;i<treeBuckets.length;i++){
+    const b=treeBuckets[i], d=b.z-localZ, vis=(d>back && d<fwd);
+    if(b.vis!==vis){ b.vis=vis; b.meshes[0].visible=vis; b.meshes[1].visible=vis; }
+  }
+
+  if(orbit){
+    const cx=0, cz=carState.z;
+    camera.position.set(
+      cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
+      1.0+Math.sin(orbPitch)*orbDist,
+      cz+Math.cos(orbYaw)*Math.cos(orbPitch)*orbDist);
+    camera.up.set(0,1,0);
+    camera.lookAt(cx,0.9,cz);
+    camera.fov=52;
+  }else{
+    const sp=carState.speed/MAXSPEED;
+    const C=CAMS[camMode];
+    // mount point is a real feature on the model, so it tracks the bodywork
+    const P=carPoint(C.p[0], C.p[1], C.p[2]);
+
+    /* Cockpit vibration. Short and hard rather than floaty: 11-19 Hz stacked
+       buzz, kept under the 30 Hz Nyquist limit at 60 fps or it just aliases
+       back into a slow wobble. Three incommensurate tones plus irregular road
+       noise so it never settles into a pure tone. Most of the violence is
+       rotational -- it reads far harder than sliding the camera, and it can't
+       shove the lens through the bodywork. */
+    const amp=(0.10 + sp*0.26 + sp*sp*0.68)*C.shake*0.66;
+    const b1=Math.sin(t*119.4), b2=Math.sin(t*71.0+1.3), b3=Math.sin(t*94.2+2.7);
+    const n1=vnoise(t*19.0,0.0)-0.5, n2=vnoise(t*27.0,7.3)-0.5;
+
+    camera.position.set(
+      P.x + (b2*0.50 + n2*1.40)*0.0030*amp,
+      P.y + (b1*0.50 + b3*0.32 + n1*1.50)*0.0042*amp,
+      P.z);
+    // aim point rides in the car's own space, so pitching the shell pitches
+    // the view with it. carPoint reuses one scratch vector -- position was
+    // already copied out by .set() above, so overwriting it here is safe.
+    const A=carPoint(C.aim[0], C.aim[1], C.aim[2]);
+    camera.lookAt(A);
+    camera.rotation.z += (b2*0.55 + n1*1.20)*0.0110*amp;   // roll
+    camera.rotation.x += (b1*0.50 + n2*1.30)*0.0090*amp;   // pitch
+    camera.fov = C.fov + sp*C.zoom;
+  }
+  camera.updateProjectionMatrix();
+  skyDome.position.copy(camera.position);   // the dome is finite; keep it centred
+
+  // sun rig follows the car so the shadow map stays tight
+  tmp.set(0,0,carState.z);
+  sun.target.position.copy(tmp);
+  sun.position.copy(tmp).addScaledVector(SUN_DIR,190);
+
+  renderer.render(scene,camera);
+
+  // one-shot adaptive quality
+  if(!checked){
+    frames++; acc+=dt;
+    if(acc>2.2){ checked=true; if(frames/acc < 34) setQuality('Low'); }
+  }
+}
+
+/* ------------------------------------------------------------------ boot */
+function ready(){
+  makeTrees();
+  setQuality('High');
+  updateStatus();
+  document.getElementById('boot').classList.add('gone');
+  requestAnimationFrame(frame);
+}
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight,false);
+});
+})();
+</script>
+</body>
+</html>
