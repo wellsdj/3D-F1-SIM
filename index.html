@@ -1484,39 +1484,61 @@ function carPoint(x,y,z){
    under gravity, bounce once or twice and lie there until their life runs
    out. Retired pieces are parked far under the world rather than resized to
    nothing, which would still cost the same draw. */
-const DEBRIS_N=52;
-const debris=[];
-let debrisMesh=null;
-const DEBRIS_COL=[sRGB(0x141416), sRGB(0x1b1b1e), sRGB(0xd6600f), sRGB(0x0d3f56)];
+/* Pieces come off as recognisable bodywork rather than generic blocks: a
+   wing element, an endplate or barge board, and small chunks like mirrors and
+   winglets. Each shape needs its own geometry and so its own instanced mesh,
+   so the pool is split three ways and a hit draws from all of them. */
+const DEBRIS_KINDS=[
+  { // wing element: long, wide and very thin
+    dim:[1.15,0.045,0.26], n:16, weight:3, spin:9,
+    cols:[0xd6600f,0xd6600f,0x151517,0xe8e6de] },
+  { // endplate / barge board: an upright panel
+    dim:[0.30,0.50,0.035], n:16, weight:3, spin:11,
+    cols:[0x151517,0x1d1d20,0xd6600f,0x0d3f56] },
+  { // mirror, vent, winglet: small solid chunks
+    dim:[0.24,0.15,0.19], n:16, weight:2, spin:16,
+    cols:[0x151517,0x0d3f56,0xd6600f,0x1d1d20] }
+];
+const debrisPools=[];
 
 (function initDebris(){
-  const g=new THREE.BoxGeometry(0.50,0.12,0.34);
-  // r128 drops instanceColor unless USE_COLOR is on, and that needs a real
-  // colour attribute present -- a neutral white one turns it on
-  const white=new Float32Array(g.attributes.position.count*3); white.fill(1);
-  g.setAttribute('color',new THREE.BufferAttribute(white,3));
-  const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.5,metalness:0.15});
-  debrisMesh=new THREE.InstancedMesh(g,m,DEBRIS_N);
-  debrisMesh.frustumCulled=false;
-  debrisMesh.castShadow=true; debrisMesh.userData.casts=true; shadowCasters.push(debrisMesh);
-  scene.add(debrisMesh);
-  for(let i=0;i<DEBRIS_N;i++) debris.push({life:0});
   const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
         v=new THREE.Vector3(0,-800,0), one=new THREE.Vector3(1,1,1);
   mtx.compose(v,q,one);
-  for(let i=0;i<DEBRIS_N;i++) debrisMesh.setMatrixAt(i,mtx);
-  debrisMesh.instanceMatrix.needsUpdate=true;
+  DEBRIS_KINDS.forEach(k=>{
+    const g=new THREE.BoxGeometry(k.dim[0],k.dim[1],k.dim[2]);
+    // r128 drops instanceColor unless USE_COLOR is on, and that needs a real
+    // colour attribute present -- a neutral white one turns it on
+    const white=new Float32Array(g.attributes.position.count*3); white.fill(1);
+    g.setAttribute('color',new THREE.BufferAttribute(white,3));
+    const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.52,metalness:0.2});
+    const mesh=new THREE.InstancedMesh(g,m,k.n);
+    mesh.frustumCulled=false;
+    mesh.castShadow=true; mesh.userData.casts=true; shadowCasters.push(mesh);
+    scene.add(mesh);
+    const items=[];
+    for(let i=0;i<k.n;i++){ items.push({life:0}); mesh.setMatrixAt(i,mtx); }
+    mesh.instanceMatrix.needsUpdate=true;
+    debrisPools.push({mesh, items, spin:k.spin, weight:k.weight,
+                      cols:k.cols.map(c=>sRGB(c))});
+  });
 })();
 
 const _dmtx=new THREE.Matrix4(), _dq=new THREE.Quaternion(), _de=new THREE.Euler(),
       _dv=new THREE.Vector3(), _ds=new THREE.Vector3();
+
 function spawnPiece(vIn){
-  let slot=-1, oldest=1e9;
-  for(let i=0;i<DEBRIS_N;i++){
-    if(debris[i].life<=0){ slot=i; break; }
-    if(debris[i].life<oldest){ oldest=debris[i].life; slot=i; }
+  // pick a shape by weight, then the first free slot in that pool
+  let total=0; debrisPools.forEach(p=>total+=p.weight);
+  let r=Math.random()*total, pool=debrisPools[0];
+  for(const p of debrisPools){ r-=p.weight; if(r<=0){ pool=p; break; } }
+  const items=pool.items;
+  let slot=0, oldest=1e9;
+  for(let i=0;i<items.length;i++){
+    if(items[i].life<=0){ slot=i; oldest=-1; break; }
+    if(items[i].life<oldest){ oldest=items[i].life; slot=i; }
   }
-  const d=debris[slot];
+  const d=items[slot];
   const h=carGroup.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
   d.x=carGroup.position.x+(Math.random()-0.5)*1.8;
   d.y=0.45+Math.random()*0.6;
@@ -1525,55 +1547,58 @@ function spawnPiece(vIn){
   d.vx=fx*carry+(Math.random()-0.5)*vIn*1.8;
   d.vy=1.6+Math.random()*(1.2+vIn*0.35);
   d.vz=fz*carry+(Math.random()-0.5)*vIn*1.8;
-  d.wx=(Math.random()-0.5)*16; d.wy=(Math.random()-0.5)*16; d.wz=(Math.random()-0.5)*16;
+  const sp=pool.spin;
+  d.wx=(Math.random()-0.5)*sp; d.wy=(Math.random()-0.5)*sp; d.wz=(Math.random()-0.5)*sp;
   d.rx=Math.random()*6.283; d.ry=Math.random()*6.283; d.rz=Math.random()*6.283;
-  d.sc=0.70+Math.random()*1.05;
+  d.sc=0.85+Math.random()*0.5;
   d.life=6+Math.random()*4;
-  if(debrisMesh.instanceColor || true){
-    debrisMesh.setColorAt(slot, DEBRIS_COL[(Math.random()*DEBRIS_COL.length)|0]);
-    if(debrisMesh.instanceColor) debrisMesh.instanceColor.needsUpdate=true;
-  }
+  pool.mesh.setColorAt(slot, pool.cols[(Math.random()*pool.cols.length)|0]);
+  if(pool.mesh.instanceColor) pool.mesh.instanceColor.needsUpdate=true;
 }
 function hitBarrier(vIn){
   const n=clamp(Math.round(vIn*0.75),1,8);
   for(let i=0;i<n;i++) spawnPiece(vIn);
 }
 function clearDebris(){
-  for(let i=0;i<DEBRIS_N;i++) debris[i].life=0;
   _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1);
   _dmtx.compose(_dv,_dq,_ds);
-  for(let i=0;i<DEBRIS_N;i++) debrisMesh.setMatrixAt(i,_dmtx);
-  debrisMesh.instanceMatrix.needsUpdate=true;
+  debrisPools.forEach(p=>{
+    for(let i=0;i<p.items.length;i++){ p.items[i].life=0; p.mesh.setMatrixAt(i,_dmtx); }
+    p.mesh.instanceMatrix.needsUpdate=true;
+  });
 }
 function updateDebris(dt){
-  let live=false;
-  for(let i=0;i<DEBRIS_N;i++){
-    const d=debris[i];
-    if(d.life<=0) continue;
-    live=true;
-    d.life-=dt;
-    d.vy-=9.81*dt;
-    d.x+=d.vx*dt; d.y+=d.vy*dt; d.z+=d.vz*dt;
-    const floor=terrainH(d.x,d.z)+0.05;
-    if(d.y<floor){
-      d.y=floor;
-      if(d.vy<-0.6){ d.vy=-d.vy*0.32; }      // bounce, losing most of it
-      else { d.vy=0; d.vx*=0.72; d.vz*=0.72; d.wx*=0.5; d.wy*=0.5; d.wz*=0.5; }
-      d.vx*=0.78; d.vz*=0.78;
+  debrisPools.forEach(pool=>{
+    let live=false;
+    const items=pool.items;
+    for(let i=0;i<items.length;i++){
+      const d=items[i];
+      if(d.life<=0) continue;
+      live=true;
+      d.life-=dt;
+      d.vy-=9.81*dt;
+      d.x+=d.vx*dt; d.y+=d.vy*dt; d.z+=d.vz*dt;
+      const floor=terrainH(d.x,d.z)+0.05;
+      if(d.y<floor){
+        d.y=floor;
+        if(d.vy<-0.6){ d.vy=-d.vy*0.32; }      // bounce, losing most of it
+        else { d.vy=0; d.vx*=0.72; d.vz*=0.72; d.wx*=0.5; d.wy*=0.5; d.wz*=0.5; }
+        d.vx*=0.78; d.vz*=0.78;
+      }
+      d.rx+=d.wx*dt; d.ry+=d.wy*dt; d.rz+=d.wz*dt;
+      if(d.life<=0){ _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1); }
+      else{
+        _dv.set(d.x,d.y,d.z);
+        _de.set(d.rx,d.ry,d.rz); _dq.setFromEuler(_de);
+        // shrink away over the last second rather than vanishing mid-frame
+        const f=d.sc*Math.min(1,d.life);
+        _ds.set(f,f,f);
+      }
+      _dmtx.compose(_dv,_dq,_ds);
+      pool.mesh.setMatrixAt(i,_dmtx);
     }
-    d.rx+=d.wx*dt; d.ry+=d.wy*dt; d.rz+=d.wz*dt;
-    if(d.life<=0){ _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1); }
-    else{
-      _dv.set(d.x,d.y,d.z);
-      _de.set(d.rx,d.ry,d.rz); _dq.setFromEuler(_de);
-      // shrink away over the last second rather than vanishing mid-frame
-      const f=d.sc*Math.min(1,d.life);
-      _ds.set(f,f,f);
-    }
-    _dmtx.compose(_dv,_dq,_ds);
-    debrisMesh.setMatrixAt(i,_dmtx);
-  }
-  if(live) debrisMesh.instanceMatrix.needsUpdate=true;
+    if(live) pool.mesh.instanceMatrix.needsUpdate=true;
+  });
 }
 
 /* ------------------------------------------------------------------ trees */
@@ -2142,7 +2167,24 @@ function lockGrip(kph){
   if(v<1) return 1;
   return clamp(STEER_RATIO*Math.atan(WHEELBASE*A_GRIP/(v*v))/STEER_LOCK, 0, 1);
 }
-function lockAt(kph){ return Math.min(lockTable(kph), lockGrip(kph)); }
+/* A third limit, and the one that actually fixes the mid-range twitch.
+   Between roughly 90 and 200 kph neither of the other two was doing useful
+   work: the grip cap does not bind until 216 kph, and the table was still
+   handing out enough lock to rotate the car at 1.3 rad/s -- 74 deg a second --
+   at 100 kph. That is inside the tyres' ability and completely uncontrollable
+   on a key that is either fully on or fully off.
+
+   So lock is also capped at whatever produces YAW_COMFORT, which holds the
+   car's rotation rate roughly constant across the whole mid range instead of
+   letting it peak in the middle. Above 216 kph grip is the tighter of the two
+   and takes over unchanged, which is why fast corners still feel the same. */
+const YAW_COMFORT=0.70;           // rad/s, about 40 deg a second
+function lockYaw(kph){
+  const v=kph/3.6;
+  if(v<2) return 1;
+  return clamp(STEER_RATIO*Math.atan(WHEELBASE*YAW_COMFORT/v)/STEER_LOCK, 0, 1);
+}
+function lockAt(kph){ return Math.min(lockTable(kph), lockGrip(kph), lockYaw(kph)); }
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
 const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
 const MAXSPEED=100;               // m/s = 360 km/h exactly
