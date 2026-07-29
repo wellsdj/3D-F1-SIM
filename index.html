@@ -2176,9 +2176,14 @@ function lockGrip(kph){
 
    So lock is also capped at whatever produces YAW_COMFORT, which holds the
    car's rotation rate roughly constant across the whole mid range instead of
-   letting it peak in the middle. Above 216 kph grip is the tighter of the two
-   and takes over unchanged, which is why fast corners still feel the same. */
-const YAW_COMFORT=0.70;           // rad/s, about 40 deg a second
+   letting it peak in the middle. Above 178 kph grip is the tighter of the two
+   and takes over unchanged, which is why fast corners still feel the same.
+
+   The cap costs corner speed where it binds, so it is set as high as the mid
+   range will tolerate: at 0.85 the 63 m corner comes out grip-limited anyway
+   (185 kph against a 193 kph yaw limit, so no restriction at all), and only
+   the 25.8 m hairpin is still held back, to 79 kph against grip's 119. */
+const YAW_COMFORT=0.85;           // rad/s, about 49 deg a second
 function lockYaw(kph){
   const v=kph/3.6;
   if(v<2) return 1;
