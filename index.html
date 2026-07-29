@@ -44,6 +44,26 @@
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
   #boot.gone{opacity:0;pointer-events:none}
+  /* start gantry lights, mirrored on screen so they read in every camera */
+  #lights{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
+          display:flex;gap:clamp(5px,.95vw,13px);padding:clamp(6px,1vw,13px);
+          background:linear-gradient(#171110,#090707);
+          border:1px solid rgba(0,0,0,.55);border-radius:5px;
+          box-shadow:0 8px 30px rgba(0,0,0,.6);
+          pointer-events:none;opacity:0;transition:opacity .3s ease;z-index:6}
+  #lights.show{opacity:1}
+  #lights .col{display:flex;flex-direction:column;gap:clamp(5px,.95vw,13px)}
+  #lights b{display:block;width:clamp(24px,3.9vw,50px);height:clamp(24px,3.9vw,50px);
+            border-radius:50%;background:#2b0b07;
+            box-shadow:inset 0 2px 6px rgba(0,0,0,.85)}
+  #lights .col.on b{
+    background:radial-gradient(circle at 38% 33%,#fff4dc 5%,#ff6a24 40%,#e01c07 76%,#8b0f04 100%);
+    box-shadow:0 0 clamp(9px,1.9vw,24px) rgba(255,72,20,.9), inset 0 0 8px rgba(255,214,170,.45)}
+  #golabel{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
+           font-family:var(--mono);font-size:clamp(20px,4vw,44px);font-weight:600;
+           letter-spacing:.3em;color:#37e06a;text-shadow:0 0 22px rgba(55,224,106,.75);
+           pointer-events:none;opacity:0;transition:opacity .45s ease;z-index:6}
+  #golabel.show{opacity:1}
   @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px} }
 </style>
 </head>
@@ -60,8 +80,18 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
   <div><kbd>V</kbd> free look · <kbd>R</kbd><kbd>F</kbd> eye up · down · <kbd>X</kbd> recentre</div>
+  <div><kbd>G</kbd> restart the start procedure</div>
   <div>drag look · scroll lean back · tap to cycle</div>
 </div>
+
+<div id="lights">
+  <div class="col"><b></b><b></b></div>
+  <div class="col"><b></b><b></b></div>
+  <div class="col"><b></b><b></b></div>
+  <div class="col"><b></b><b></b></div>
+  <div class="col"><b></b><b></b></div>
+</div>
+<div id="golabel">GO</div>
 
 <div id="boot"><p>Building circuit</p><div id="bar"><i></i></div></div>
 
@@ -973,6 +1003,62 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
   });
 })();
 
+/* ------------------------------------------------------- start-light rig */
+/* The start/finish gantry is 580 m up the road from the grid, far too distant
+   to read a light sequence off, so the lights get their own gantry just ahead
+   of the car -- which is also where they sit on a real grid. Five columns of
+   two, matching the real panel. Each column owns its material so it can be
+   lit independently. */
+const bulbMats=[];
+const L_ON_C =sRGB(0xff5a22), L_ON_E =sRGB(0xff2f0a);
+const L_OFF_C=sRGB(0x300d08), L_OFF_E=sRGB(0x120302);
+const LIGHTS_AHEAD=40;   // close enough that the halo strut does not hide the panel
+
+(function buildStartLights(){
+  const s=START_S+LIGHTS_AHEAD;
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  trackAt(s,p); trackDir(s,d);
+  const g=new THREE.Group();
+  g.position.set(p.x,0,p.y);
+  g.rotation.y=Math.atan2(d.x,d.y);
+  scene.add(g);
+  // in group space +z is the direction of travel, so the car sits at -z and
+  // the panel has to face back toward it
+  const steel=new THREE.MeshStandardMaterial({color:sRGB(0x24282c),roughness:0.5,metalness:0.6});
+  const H=7.2, LEGX=SHOULDER+1.4;
+  [-1,1].forEach(sg=>{
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.4,H,0.4),steel);
+    leg.position.set(sg*LEGX,H/2,0);
+    leg.castShadow=true; leg.userData.casts=true; shadowCasters.push(leg);
+    g.add(leg);
+  });
+  const beam=new THREE.Mesh(new THREE.BoxGeometry(LEGX*2+0.8,0.5,0.45),steel);
+  beam.position.y=H-0.25;
+  beam.castShadow=true; beam.userData.casts=true; shadowCasters.push(beam);
+  g.add(beam);
+
+  const COLS=5, GAPX=1.28, GAPY=1.08, R=0.43;
+  const panel=new THREE.Mesh(
+    new THREE.BoxGeometry(COLS*GAPX+0.5, GAPY+R*2+0.5, 0.24),
+    new THREE.MeshStandardMaterial({color:sRGB(0x0d0b0a),roughness:0.8}));
+  panel.position.set(0, H-1.55, -0.16);
+  panel.castShadow=true; panel.userData.casts=true; shadowCasters.push(panel);
+  g.add(panel);
+
+  const bulbGeo=new THREE.SphereGeometry(R,14,10);
+  for(let i=0;i<COLS;i++){
+    const m=new THREE.MeshStandardMaterial({
+      color:L_OFF_C, emissive:L_OFF_E, emissiveIntensity:0.35, roughness:0.32
+    });
+    bulbMats.push(m);
+    for(let r=0;r<2;r++){
+      const b=new THREE.Mesh(bulbGeo,m);
+      b.position.set((i-(COLS-1)/2)*GAPX, H-1.55+(r?-GAPY/2:GAPY/2), -0.30);
+      g.add(b);
+    }
+  }
+})();
+
 /* -------------------------------------------------------------- mountains */
 const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
 (function buildMountains(){
@@ -1403,6 +1489,7 @@ addEventListener('keydown',e=>{
   if(k==='q'){ setQuality(quality==='High'?'Low':'High'); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x'&&freeLook) resetFree();                 // recentre the head
+  if(k==='g') armStart();                            // back to the grid, new sequence
   // raise/lower the eye while free-looking
   if(freeLook&&(k==='r'||k==='pageup'))   fUp=clamp(fUp+0.05,F_UP_MIN,F_UP_MAX);
   if(freeLook&&(k==='f'||k==='pagedown')) fUp=clamp(fUp-0.05,F_UP_MIN,F_UP_MAX);
@@ -1495,6 +1582,70 @@ canvas.addEventListener('wheel',e=>{
   }
 },{passive:false});
 
+/* -------------------------------------------------------- start procedure */
+/* Real F1 sequence: the five columns light one per second, hold all five for
+   an interval nobody can anticipate, then go out together -- lights out is
+   the start, not a green. The hold is redrawn every time, so the launch
+   cannot be learned. The car is pinned to the grid until they go out; the
+   throttle still works on the engine note, so you can sit there holding W and
+   go the instant the panel clears. */
+const LIGHT_STEP=1.0;                  // seconds between columns
+const HOLD_MIN=1.0, HOLD_MAX=5.0;      // random hold, seconds
+let startPhase='armed';                // armed -> lighting -> hold -> go
+let startT=0, litCols=-1, holdFor=0;
+const lightsEl=document.getElementById('lights');
+const goEl=document.getElementById('golabel');
+const lightCols=Array.prototype.slice.call(lightsEl.querySelectorAll('.col'));
+
+function setLights(n){
+  if(n===litCols) return;
+  litCols=n;
+  for(let i=0;i<lightCols.length;i++){
+    const on=i<n;
+    lightCols[i].classList.toggle('on',on);
+    const m=bulbMats[i];
+    if(!m) continue;
+    m.color.copy(on?L_ON_C:L_OFF_C);
+    m.emissive.copy(on?L_ON_E:L_OFF_E);
+    m.emissiveIntensity = on?1.9:0.35;
+  }
+}
+function armStart(){
+  startPhase='armed'; startT=0; holdFor=0;
+  carState.speed=0; carState.s=START_S;
+  setLights(0);
+  lightsEl.classList.add('show');
+  goEl.classList.remove('show');
+}
+function updateStart(dt){
+  if(startPhase==='go') return;
+  startT+=dt;
+  if(startPhase==='armed'){
+    if(startT>=1.6){ startPhase='lighting'; startT=0; setLights(1); }
+    return;
+  }
+  if(startPhase==='lighting'){
+    setLights(Math.min(5, Math.floor(startT/LIGHT_STEP)+1));
+    // the fifth column lights at 4 s, not 5 -- the hold has to start there, or
+    // the panel sits complete for a fixed extra second and the random window
+    // becomes 2-6 s instead of the 1-5 s it is meant to be
+    if(startT>=LIGHT_STEP*4){
+      startPhase='hold'; startT=0;
+      // deliberately Math.random, not the seeded generator the world uses --
+      // a reproducible hold would defeat the whole point
+      holdFor=HOLD_MIN+Math.random()*(HOLD_MAX-HOLD_MIN);
+    }
+    return;
+  }
+  if(startPhase==='hold' && startT>=holdFor){
+    startPhase='go'; startT=0;
+    setLights(0);
+    lightsEl.classList.remove('show');
+    goEl.classList.add('show');
+    setTimeout(()=>goEl.classList.remove('show'),1100);
+  }
+}
+
 /* ------------------------------------------------------------ drive model */
 /* The car is still railed to the crown of the road -- what changed is that the
    crown is now a curve, so s is distance along the lap instead of world z. */
@@ -1533,7 +1684,14 @@ function drive(dt){
               : kph<300 ? 0.2667 : 0.25;
   lockF += (lockT-lockF)*(1-Math.pow(0.02,dt));
 
-  if(thr){
+  /* Pinned to the grid until the lights go out. The throttle is deliberately
+     still read below for the engine note, so holding W on the line revs the
+     car and you launch the instant the panel clears. */
+  const gridded = startPhase!=='go';
+  if(gridded){
+    carState.speed=0;
+  }
+  else if(thr){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
     const v=carState.speed/MAXSPEED;
@@ -1543,8 +1701,10 @@ function drive(dt){
   else carState.speed -= (0.8 + carState.speed*0.028)*dt;
   carState.speed=clamp(carState.speed,0,MAXSPEED);
 
-  carState.s += carState.speed*dt;
-  if(carState.s>=LAP) carState.s-=LAP;
+  if(!gridded){
+    carState.s += carState.speed*dt;
+    if(carState.s>=LAP) carState.s-=LAP;
+  }
 
   /* Steering. The rack now has a real job: hold the tyres at whatever angle
      the corner needs, from a bicycle model on the track's own curvature, a few
@@ -1606,7 +1766,10 @@ function drive(dt){
      Lifting off the brake back onto the throttle while still rolling means
      the engine is already spinning, so pick the accel loop up halfway in
      rather than replaying the rev sweep from nothing. */
-  const st = carState.speed<0.6 ? 'idle' : brk ? 'brake' : thr ? 'accel' : 'coast';
+  // on the grid the car is stationary but the engine is not: holding W there
+  // has to rev it, or sitting on the lights is silent
+  const st = gridded ? (thr?'accel':'idle')
+           : carState.speed<0.6 ? 'idle' : brk ? 'brake' : thr ? 'accel' : 'coast';
   if(st!==sndCur){
     const rolling = (st==='accel' && sndCur==='brake' && carState.speed>0.6);
     setSound(st, rolling && sbuf.accel ? sbuf.accel.duration*0.5 : 0);
@@ -1625,6 +1788,7 @@ let last=performance.now(), t=0, frames=0, acc=0, checked=false;
 function frame(now){
   requestAnimationFrame(frame);
   const dt=Math.min((now-last)/1000,0.05); last=now; t+=dt;
+  updateStart(dt);
   drive(dt);
   windU.value=t;
 
@@ -1774,6 +1938,7 @@ function ready(){
   if(booted) return; booted=true;
   makeTrees();
   buildMap();
+  armStart();
   setQuality('High');
   updateStatus();
   document.getElementById('tagsub').textContent =
