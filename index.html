@@ -79,7 +79,7 @@
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
-  <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>X</kbd> recentre</div>
+  <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
   <div><kbd>G</kbd> restart the start procedure</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
@@ -1564,13 +1564,21 @@ function applyDetail(){
    V additionally frees the gaze: drag to look around from the seat. Offsets
    live in the car's own space, so they ride the shell through corners. */
 let freeLook=false;
-let fYaw=0, fPitch=0, fUp=0;
+let fYaw=0, fPitch=0, fUp=0, fFwd=0, fwdDir=1;
 const F_YAW=1.15, F_PITCH_UP=0.42, F_PITCH_DN=0.55;   // rad
 // Deliberately tight, and deliberately slow: the whole travel takes about six
 // seconds to walk end to end, so a tap is a barely-perceptible trim.
 const F_UP_MIN=-0.10, F_UP_MAX=0.22;                  // m
 const EYE_RATE=0.055;                                 // m per second, held
-function resetFree(){ fYaw=0; fPitch=0; fUp=0; }
+/* Shift slides the eye up the tub toward the nose. It reverses at each end
+   rather than stopping, so one key covers the whole travel in both directions:
+   hold it and the eye runs forward to the front edge of the cockpit, turns
+   round and comes back. The forward stop is just past the steering wheel
+   (which sits at z = 0.31 in model space) -- far enough to lean over the
+   wheel and see the road, not so far that the eye leaves the tub. */
+const F_FWD_MIN=-0.05, F_FWD_MAX=0.38;                // m, +ve = toward the nose
+const FWD_RATE=0.07;                                  // m per second, held
+function resetFree(){ fYaw=0; fPitch=0; fUp=0; fFwd=0; fwdDir=1; }
 
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
@@ -1833,6 +1841,13 @@ function frame(now){
   // frame-rate independent instead of stepping on key auto-repeat
   if(keys['arrowup'])   fUp=clamp(fUp+EYE_RATE*dt, F_UP_MIN, F_UP_MAX);
   if(keys['arrowdown']) fUp=clamp(fUp-EYE_RATE*dt, F_UP_MIN, F_UP_MAX);
+  // shift runs the eye forward, and turns round at each stop instead of
+  // sticking there, so the one key walks the full travel both ways
+  if(keys['shift']){
+    fFwd += fwdDir*FWD_RATE*dt;
+    if(fFwd>=F_FWD_MAX){ fFwd=F_FWD_MAX; fwdDir=-1; }
+    else if(fFwd<=F_FWD_MIN){ fFwd=F_FWD_MIN; fwdDir=1; }
+  }
 
   updateStart(dt);
   drive(dt);
@@ -1876,7 +1891,7 @@ function frame(now){
          The eye offset is clamped at source, and the aim is built from the
          eye rather than from the centreline -- otherwise looking sideways
          would still drag the view back to the road ahead. */
-      const ex=C.p[0], ey=C.p[1]+fUp, ez=C.p[2];
+      const ex=C.p[0], ey=C.p[1]+fUp, ez=C.p[2]+fFwd;
       camera.position.copy(carPoint(ex,ey,ez));
       // aim: a model-space point 24 m ahead of the eye along the yawed and
       // pitched gaze, then taken to world -- a point, so localToWorld is valid
@@ -1890,8 +1905,8 @@ function frame(now){
       camera.lookAt(_fwd);
     }else{
       // mount point is a real feature on the model, so it tracks the bodywork.
-      // fUp applies here too, so the seat trim works in the plain cockpit view.
-      const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]);
+      // the seat trim applies here too, not just in free look.
+      const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]+fFwd);
       camera.position.copy(P);
       _aim.set(_p2.x, P.y+0.06, _p2.y);
       camera.up.set(0,1,0);
