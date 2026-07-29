@@ -72,16 +72,16 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Detail <em id="qname">High</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
-  <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>Q</kbd> detail</div>
-  <div><kbd>V</kbd> free look · <kbd>R</kbd><kbd>F</kbd> eye up · down · <kbd>X</kbd> recentre</div>
+  <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
+  <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>X</kbd> recentre</div>
   <div><kbd>G</kbd> restart the start procedure</div>
-  <div>drag look · scroll lean back · tap to cycle</div>
+  <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
 <div id="lights">
@@ -1232,6 +1232,37 @@ const WHEELBASE=3.60;
     steer=pivotFix(car.getObjectByName('SteerWheel'));
     // column axis measured off the rim: tilted back 27 deg, like the real car
     if(steer) STEER_AXIS.set(0,0.456,0.890).normalize();
+
+    /* The dash display and the rev-light strip are primitives of the Body
+       mesh, not of SteerWheel -- there is no node for them in the GLB at all,
+       so the rim turned and they stayed put. Every glTF primitive arrives as
+       its own Mesh, so they can simply be reparented onto the wheel node,
+       which is where the rotation is applied.
+
+       Found by containment in the wheel's own bounds rather than by index, so
+       this survives a re-export: the parts that belong to the wheel are
+       exactly the ones that fit inside it. The cockpit surround and halo
+       overlap the wheel but always spill outside that box, so they are left
+       alone. attach() preserves world transform, so nothing moves -- the
+       parts just start turning. */
+    if(steer){
+      carGroup.updateMatrixWorld(true);
+      const wb=new THREE.Box3().setFromObject(steer);
+      const body=car.getObjectByName('Body');
+      if(body && !wb.isEmpty()){
+        wb.expandByScalar(0.02);
+        const cand=[];
+        body.traverse(o=>{ if(o.isMesh) cand.push(o); });
+        const bb=new THREE.Box3();
+        let adopted=0;
+        // collect first, then reparent -- mutating during a traverse is unsafe
+        for(const m of cand){
+          bb.setFromObject(m);
+          if(!bb.isEmpty() && wb.containsBox(bb)){ steer.attach(m); adopted++; }
+        }
+        if(!adopted) console.warn('steering wheel: no dash parts adopted');
+      }
+    }
     // the over-wheel winglets are mounted to the uprights: they steer but
     // must not roll with the tyre, so they get their own pivot nodes
     wingL=pivotFix(car.getObjectByName('Wing_FL'));
@@ -1486,13 +1517,10 @@ addEventListener('keydown',e=>{
   keys[k]=true;
   if(k==='c'){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
   if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
-  if(k==='q'){ setQuality(quality==='High'?'Low':'High'); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
-  if(k==='x'&&freeLook) resetFree();                 // recentre the head
+  if(k==='x') resetFree();                           // recentre the head
   if(k==='g') armStart();                            // back to the grid, new sequence
-  // raise/lower the eye while free-looking
-  if(freeLook&&(k==='r'||k==='pageup'))   fUp=clamp(fUp+0.05,F_UP_MIN,F_UP_MAX);
-  if(freeLook&&(k==='f'||k==='pagedown')) fUp=clamp(fUp-0.05,F_UP_MIN,F_UP_MAX);
+  // the eye is moved in the frame loop, not here -- see EYE_RATE
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
@@ -1505,44 +1533,44 @@ const CAMS=[
   {name:'Cockpit', p:[0,0.72,0.11], fov:70, zoom:10, shake:1.30},
   {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35}
 ];
-let orbit=false, camMode=0, quality='High', shadowsOn=true;
+let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
-  document.getElementById('qname').textContent   = quality;
 }
-function setQuality(q){
-  quality=q;
-  const hi = q==='High';
-  shadowsOn=hi;
-  renderer.shadowMap.enabled=hi;
-  shadowCasters.forEach(m=>{ m.castShadow = hi && m.userData.casts!==false; });
-  // this just overrode the per-cell tree gating below, so make the cull loop
-  // reapply it on the next frame rather than leaving distant cells casting
+/* Full detail, always. There is no longer a quality toggle and nothing
+   downgrades it behind your back -- the old adaptive check could drop the
+   scene to Low a couple of seconds after load on a slow first frame and never
+   put it back. */
+function applyDetail(){
+  shadowsOn=true;
+  renderer.shadowMap.enabled=true;
+  shadowCasters.forEach(m=>{ m.castShadow = m.userData.casts!==false; });
+  // this just overrode the per-cell tree gating in the frame loop, so make the
+  // cull loop reapply it on the next frame rather than leaving distant cells casting
   treeCells.forEach(b=>{ b.cast=undefined; });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, hi?1.75:1.1));
-  scene.traverse(o=>{ if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.needsUpdate=true); } });
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
   updateStatus();
 }
 
-/* ------------------------------------------------------------- free look */
-/* Press V and the drag controls stop orbiting and start moving the driver's
-   head instead: drag to look around, wheel to slide the eye back. The eye is
-   clamped to a small envelope around its mount so you can lean back and
-   crane up or down for a better view of the road, but cannot reverse out of
-   the cockpit or push forward into the bodywork. Offsets are in the car's own
-   space, so they ride the shell through corners. */
+/* ------------------------------------------------- seat height + free look */
+/* The up and down arrows are the only thing that moves the eye, and they move
+   it slowly and continuously while held rather than in steps -- a keypress
+   step reads as a jolt, and key auto-repeat makes the rate depend on the OS.
+   Integrating a rate against dt instead gives the same gentle travel on every
+   machine. It applies in the normal cockpit view as well as in free look, so
+   you can trim your seating position at any time.
+
+   V additionally frees the gaze: drag to look around from the seat. Offsets
+   live in the car's own space, so they ride the shell through corners. */
 let freeLook=false;
-let fYaw=0, fPitch=0, fBack=0, fUp=0;
+let fYaw=0, fPitch=0, fUp=0;
 const F_YAW=1.15, F_PITCH_UP=0.42, F_PITCH_DN=0.55;   // rad
-/* Deliberately tight. The tub around the driver's head is only so big: much
-   past a quarter of a metre back and the eye is inside the airbox looking at
-   the underside of the bodywork. Leaning back also lifts the eye slightly,
-   which is what keeps it clear of the headrest instead of buried in it. */
-const F_BACK_MIN=-0.04, F_BACK_MAX=0.28;              // m, +ve = further back
-const F_BACK_RISE=0.30;                               // m of lift per m back
-const F_UP_MIN=-0.12,  F_UP_MAX=0.26;                 // m
-function resetFree(){ fYaw=0; fPitch=0; fBack=0; fUp=0; }
+// Deliberately tight, and deliberately slow: the whole travel takes about six
+// seconds to walk end to end, so a tap is a barely-perceptible trim.
+const F_UP_MIN=-0.10, F_UP_MAX=0.22;                  // m
+const EYE_RATE=0.055;                                 // m per second, held
+function resetFree(){ fYaw=0; fPitch=0; fUp=0; }
 
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
@@ -1572,14 +1600,9 @@ canvas.addEventListener('pointermove',e=>{
   orbPitch = clamp(orbPitch+dy*0.004,-0.12,1.15);
   if(!orbit && moved>8){ orbit=true; updateStatus(); }
 });
+// the wheel only zooms the orbit camera; nothing but the arrows moves the eye
 canvas.addEventListener('wheel',e=>{
-  if(freeLook){                      // slide the eye back and forth in the tub
-    fBack=clamp(fBack + e.deltaY*0.0012, F_BACK_MIN, F_BACK_MAX);
-    e.preventDefault();
-  } else if(orbit){
-    orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,900);
-    e.preventDefault();
-  }
+  if(orbit){ orbDist=clamp(orbDist*(1+e.deltaY*0.0012),3.5,900); e.preventDefault(); }
 },{passive:false});
 
 /* -------------------------------------------------------- start procedure */
@@ -1656,14 +1679,38 @@ let lockF=1;                      // eased speed-dependent lock multiplier
 let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
 const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
 const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of tyre
+
+/* Available lock falls away with speed, like a real rack loading up. These
+   used to be hard bands -- 0.60 below 55 kph, 0.50 below 100, and so on -- so
+   the wheel visibly jumped the instant you crossed a threshold, and sitting
+   exactly on one flickered between two values frame to frame. Same breakpoints,
+   but now interpolated: the lock slides continuously from each value to the
+   next across the whole band, so going 30 -> 55 kph tightens gradually the
+   entire way rather than doing nothing and then stepping at the boundary.
+   smoothstep rather than a straight lerp so the rate of change is also zero at
+   each knot -- no step, and no kink where two bands meet either. */
+const LOCK_KPH=[   0,   30,   55,  100,  150,  200,    300,  360];
+const LOCK_VAL=[1.00, 1.00, 0.60, 0.50, 0.40, 0.30, 0.2667, 0.25];
+function lockAt(kph){
+  if(kph<=LOCK_KPH[0]) return LOCK_VAL[0];
+  for(let i=1;i<LOCK_KPH.length;i++){
+    if(kph<=LOCK_KPH[i]){
+      const t=smoothstep(LOCK_KPH[i-1],LOCK_KPH[i],kph);
+      return LOCK_VAL[i-1]+(LOCK_VAL[i]-LOCK_VAL[i-1])*t;
+    }
+  }
+  return LOCK_VAL[LOCK_VAL.length-1];
+}
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
 const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
 const MAXSPEED=100;               // m/s = 360 km/h exactly
 const kmhEl=document.getElementById('kmh');
 
 function drive(dt){
-  const thr = keys['w']||keys['arrowup'];
-  const brk = keys['s']||keys['arrowdown'];
+  // up/down arrows now trim the seat height, so they are no longer throttle
+  // and brake -- W and S are the drive controls
+  const thr = keys['w'];
+  const brk = keys['s'];
   const lft = keys['a']||keys['arrowleft'];
   const rgt = keys['d']||keys['arrowright'];
 
@@ -1674,15 +1721,8 @@ function drive(dt){
   const rate = want ? 3.4 : 5.0;                    // self-centres a bit quicker
   steerIn += (want-steerIn)*(1-Math.pow(0.0016,dt*rate/3.4));
 
-  /* Available lock falls away with speed, like a real rack loading up.
-     The bands are hard steps, so the factor is eased rather than applied
-     raw -- otherwise the wheel snaps when crossing a threshold, and sitting
-     exactly on one (say 100 kph) would flicker between two bands per frame. */
   const kph=carState.speed*3.6;
-  const lockT = kph< 30 ? 1.00 : kph< 55 ? 0.60 : kph<100 ? 0.50
-              : kph<150 ? 0.40 : kph<200 ? 0.30
-              : kph<300 ? 0.2667 : 0.25;
-  lockF += (lockT-lockF)*(1-Math.pow(0.02,dt));
+  lockF += (lockAt(kph)-lockF)*(1-Math.pow(0.02,dt));
 
   /* Pinned to the grid until the lights go out. The throttle is deliberately
      still read below for the engine note, so holding W on the line revs the
@@ -1783,11 +1823,17 @@ const tmp=new THREE.Vector3();
 const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
 const _fwd=new THREE.Vector3();
 const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
-let last=performance.now(), t=0, frames=0, acc=0, checked=false;
+let last=performance.now(), t=0;
 
 function frame(now){
   requestAnimationFrame(frame);
   const dt=Math.min((now-last)/1000,0.05); last=now; t+=dt;
+
+  // seat trim: integrated against dt while held, so the travel is smooth and
+  // frame-rate independent instead of stepping on key auto-repeat
+  if(keys['arrowup'])   fUp=clamp(fUp+EYE_RATE*dt, F_UP_MIN, F_UP_MAX);
+  if(keys['arrowdown']) fUp=clamp(fUp-EYE_RATE*dt, F_UP_MIN, F_UP_MAX);
+
   updateStart(dt);
   drive(dt);
   windU.value=t;
@@ -1830,7 +1876,7 @@ function frame(now){
          The eye offset is clamped at source, and the aim is built from the
          eye rather than from the centreline -- otherwise looking sideways
          would still drag the view back to the road ahead. */
-      const ex=C.p[0], ey=C.p[1]+fUp+fBack*F_BACK_RISE, ez=C.p[2]-fBack;
+      const ex=C.p[0], ey=C.p[1]+fUp, ez=C.p[2];
       camera.position.copy(carPoint(ex,ey,ez));
       // aim: a model-space point 24 m ahead of the eye along the yawed and
       // pitched gaze, then taken to world -- a point, so localToWorld is valid
@@ -1843,8 +1889,9 @@ function frame(now){
       camera.up.set(0,1,0);
       camera.lookAt(_fwd);
     }else{
-      // mount point is a real feature on the model, so it tracks the bodywork
-      const P=carPoint(C.p[0],C.p[1],C.p[2]);
+      // mount point is a real feature on the model, so it tracks the bodywork.
+      // fUp applies here too, so the seat trim works in the plain cockpit view.
+      const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]);
       camera.position.copy(P);
       _aim.set(_p2.x, P.y+0.06, _p2.y);
       camera.up.set(0,1,0);
@@ -1925,11 +1972,6 @@ function frame(now){
   renderer.render(scene,camera);
   drawMap();
 
-  // one-shot adaptive quality
-  if(!checked){
-    frames++; acc+=dt;
-    if(acc>2.2){ checked=true; if(frames/acc < 34) setQuality('Low'); }
-  }
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -1939,7 +1981,7 @@ function ready(){
   makeTrees();
   buildMap();
   armStart();
-  setQuality('High');
+  applyDetail();
   updateStatus();
   document.getElementById('tagsub').textContent =
     (LAP/1000).toFixed(3)+' km · McLaren MCL39';
