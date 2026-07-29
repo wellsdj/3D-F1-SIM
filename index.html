@@ -84,7 +84,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>G</kbd> restart the start procedure</div>
+  <div><kbd>R</kbd> back to track · <kbd>G</kbd> restart the lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -1478,6 +1478,104 @@ function carPoint(x,y,z){
   return _cp.set(carGroup.position.x,y,carGroup.position.z);
 }
 
+/* ----------------------------------------------------------------- debris */
+/* Bodywork that comes off in a barrier hit. A single instanced mesh with a
+   pool of pieces: a hit wakes as many as the impact deserves, they tumble
+   under gravity, bounce once or twice and lie there until their life runs
+   out. Retired pieces are parked far under the world rather than resized to
+   nothing, which would still cost the same draw. */
+const DEBRIS_N=52;
+const debris=[];
+let debrisMesh=null;
+const DEBRIS_COL=[sRGB(0x141416), sRGB(0x1b1b1e), sRGB(0xd6600f), sRGB(0x0d3f56)];
+
+(function initDebris(){
+  const g=new THREE.BoxGeometry(0.50,0.12,0.34);
+  // r128 drops instanceColor unless USE_COLOR is on, and that needs a real
+  // colour attribute present -- a neutral white one turns it on
+  const white=new Float32Array(g.attributes.position.count*3); white.fill(1);
+  g.setAttribute('color',new THREE.BufferAttribute(white,3));
+  const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.5,metalness:0.15});
+  debrisMesh=new THREE.InstancedMesh(g,m,DEBRIS_N);
+  debrisMesh.frustumCulled=false;
+  debrisMesh.castShadow=true; debrisMesh.userData.casts=true; shadowCasters.push(debrisMesh);
+  scene.add(debrisMesh);
+  for(let i=0;i<DEBRIS_N;i++) debris.push({life:0});
+  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
+        v=new THREE.Vector3(0,-800,0), one=new THREE.Vector3(1,1,1);
+  mtx.compose(v,q,one);
+  for(let i=0;i<DEBRIS_N;i++) debrisMesh.setMatrixAt(i,mtx);
+  debrisMesh.instanceMatrix.needsUpdate=true;
+})();
+
+const _dmtx=new THREE.Matrix4(), _dq=new THREE.Quaternion(), _de=new THREE.Euler(),
+      _dv=new THREE.Vector3(), _ds=new THREE.Vector3();
+function spawnPiece(vIn){
+  let slot=-1, oldest=1e9;
+  for(let i=0;i<DEBRIS_N;i++){
+    if(debris[i].life<=0){ slot=i; break; }
+    if(debris[i].life<oldest){ oldest=debris[i].life; slot=i; }
+  }
+  const d=debris[slot];
+  const h=carGroup.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
+  d.x=carGroup.position.x+(Math.random()-0.5)*1.8;
+  d.y=0.45+Math.random()*0.6;
+  d.z=carGroup.position.z+(Math.random()-0.5)*1.8;
+  const carry=carState.speed*(0.35+Math.random()*0.35);
+  d.vx=fx*carry+(Math.random()-0.5)*vIn*1.8;
+  d.vy=1.6+Math.random()*(1.2+vIn*0.35);
+  d.vz=fz*carry+(Math.random()-0.5)*vIn*1.8;
+  d.wx=(Math.random()-0.5)*16; d.wy=(Math.random()-0.5)*16; d.wz=(Math.random()-0.5)*16;
+  d.rx=Math.random()*6.283; d.ry=Math.random()*6.283; d.rz=Math.random()*6.283;
+  d.sc=0.70+Math.random()*1.05;
+  d.life=6+Math.random()*4;
+  if(debrisMesh.instanceColor || true){
+    debrisMesh.setColorAt(slot, DEBRIS_COL[(Math.random()*DEBRIS_COL.length)|0]);
+    if(debrisMesh.instanceColor) debrisMesh.instanceColor.needsUpdate=true;
+  }
+}
+function hitBarrier(vIn){
+  const n=clamp(Math.round(vIn*0.75),1,8);
+  for(let i=0;i<n;i++) spawnPiece(vIn);
+}
+function clearDebris(){
+  for(let i=0;i<DEBRIS_N;i++) debris[i].life=0;
+  _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1);
+  _dmtx.compose(_dv,_dq,_ds);
+  for(let i=0;i<DEBRIS_N;i++) debrisMesh.setMatrixAt(i,_dmtx);
+  debrisMesh.instanceMatrix.needsUpdate=true;
+}
+function updateDebris(dt){
+  let live=false;
+  for(let i=0;i<DEBRIS_N;i++){
+    const d=debris[i];
+    if(d.life<=0) continue;
+    live=true;
+    d.life-=dt;
+    d.vy-=9.81*dt;
+    d.x+=d.vx*dt; d.y+=d.vy*dt; d.z+=d.vz*dt;
+    const floor=terrainH(d.x,d.z)+0.05;
+    if(d.y<floor){
+      d.y=floor;
+      if(d.vy<-0.6){ d.vy=-d.vy*0.32; }      // bounce, losing most of it
+      else { d.vy=0; d.vx*=0.72; d.vz*=0.72; d.wx*=0.5; d.wy*=0.5; d.wz*=0.5; }
+      d.vx*=0.78; d.vz*=0.78;
+    }
+    d.rx+=d.wx*dt; d.ry+=d.wy*dt; d.rz+=d.wz*dt;
+    if(d.life<=0){ _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1); }
+    else{
+      _dv.set(d.x,d.y,d.z);
+      _de.set(d.rx,d.ry,d.rz); _dq.setFromEuler(_de);
+      // shrink away over the last second rather than vanishing mid-frame
+      const f=d.sc*Math.min(1,d.life);
+      _ds.set(f,f,f);
+    }
+    _dmtx.compose(_dv,_dq,_ds);
+    debrisMesh.setMatrixAt(i,_dmtx);
+  }
+  if(live) debrisMesh.instanceMatrix.needsUpdate=true;
+}
+
 /* ------------------------------------------------------------------ trees */
 const windU={value:0};
 const treeGroup=new THREE.Group(); scene.add(treeGroup);
@@ -1638,9 +1736,9 @@ function drawMap(){
   if(!mapBg) return;
   mapCtx.clearRect(0,0,mapCan.width,mapCan.height);
   mapCtx.drawImage(mapBg,0,0);
-  const p=trackAt(carState.s,_mp);
+  // the car's own position now, not a point on the centreline
   mapCtx.beginPath();
-  mapCtx.arc(p.x*mapK+mapPX,p.y*mapK+mapPZ,7,0,6.2832);
+  mapCtx.arc(carGroup.position.x*mapK+mapPX,carGroup.position.z*mapK+mapPZ,7,0,6.2832);
   mapCtx.fillStyle='#f2a20c'; mapCtx.fill();
   mapCtx.lineWidth=3; mapCtx.strokeStyle='rgba(11,12,13,.85)'; mapCtx.stroke();
 }
@@ -1700,8 +1798,10 @@ function drawCornerMap(){
   const scale=(H-HEAD-26)/(CM_AHEAD+CM_BEHIND);
   const cx=W/2, cy=H-18-CM_BEHIND*scale;
 
-  trackAt(carState.s,_cmP); trackDir(carState.s,_cmD);
-  const ox=_cmP.x, oz=_cmP.y, tx=_cmD.x, tz=_cmD.y;
+  // centred and rotated on the car itself, so the panel stays heading-up even
+  // when you are well off the centreline
+  const ox=carGroup.position.x, oz=carGroup.position.z;
+  const ch=carGroup.rotation.y, tx=Math.sin(ch), tz=Math.cos(ch);
   // world delta -> car frame. forward is +z_local, and the driver's left is
   // +x_local, so left maps to screen-left.
   const toScreen=(px,pz,out)=>{
@@ -1823,6 +1923,7 @@ addEventListener('keydown',e=>{
   if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
+  if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
@@ -1947,7 +2048,8 @@ function setLights(n){
 }
 function armStart(){
   startPhase='armed'; startT=0; holdFor=0;
-  carState.speed=0; carState.s=START_S;
+  carState.speed=0; carState.s=START_S; carState.n=0; carState.psi=0;
+  steerIn=0; steerAng=0; clearDebris();
   setLights(0);
   lightsEl.classList.add('show');
   goEl.classList.remove('show');
@@ -1982,9 +2084,21 @@ function updateStart(dt){
 }
 
 /* ------------------------------------------------------------ drive model */
-/* The car is still railed to the crown of the road -- what changed is that the
-   crown is now a curve, so s is distance along the lap instead of world z. */
-const carState={ s:START_S, speed:0 };
+/* The car is no longer railed. It carries a full curvilinear state: s along
+   the centreline, n laterally off it, and psi -- its heading relative to the
+   track tangent. Everything else in this file already lives in track space
+   (kerbs, barriers, boards, the corner map), so collisions and the reset stay
+   trivial while the car moves completely freely:
+
+     sdot = v cos(psi) / (1 - n k)
+     ndot = v sin(psi)
+     psidot = yawRate - k sdot
+
+   The 1 - n k term is the Frenet stretch: a metre travelled on the inside of
+   a corner covers less centreline than a metre on the outside. It only
+   degenerates at n = 1/k, and the barriers stop us at 13.8 m while the
+   tightest corner has a 25.8 m radius, so it is never close. */
+const carState={ s:START_S, n:0, psi:0, speed:0 };
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
@@ -2003,7 +2117,7 @@ const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of 
    each knot -- no step, and no kink where two bands meet either. */
 const LOCK_KPH=[   0,   30,   55,  100,  150,  200,    300,  360];
 const LOCK_VAL=[1.00, 1.00, 0.60, 0.50, 0.40, 0.30, 0.2667, 0.25];
-function lockAt(kph){
+function lockTable(kph){
   if(kph<=LOCK_KPH[0]) return LOCK_VAL[0];
   for(let i=1;i<LOCK_KPH.length;i++){
     if(kph<=LOCK_KPH[i]){
@@ -2013,10 +2127,39 @@ function lockAt(kph){
   }
   return LOCK_VAL[LOCK_VAL.length-1];
 }
+/* Now that the rack actually steers the car, the table above is not the whole
+   story: it was tuned when steering was cosmetic, so its values were never
+   checked as control authority, and above about 130 kph it hands out far more
+   lock than the tyres could ever use. Beyond the grip limit extra lock buys
+   nothing but twitch.
+
+   So the available lock is also capped at the angle that exactly reaches
+   A_GRIP -- full lock then means "the tightest arc the car can hold", at every
+   speed, and never more. Below ~130 kph the table is already inside that and
+   wins unchanged, so the low-speed feel is untouched. */
+function lockGrip(kph){
+  const v=kph/3.6;
+  if(v<1) return 1;
+  return clamp(STEER_RATIO*Math.atan(WHEELBASE*A_GRIP/(v*v))/STEER_LOCK, 0, 1);
+}
+function lockAt(kph){ return Math.min(lockTable(kph), lockGrip(kph)); }
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
 const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
 const MAXSPEED=100;               // m/s = 360 km/h exactly
+const A_GRIP=42;                  // m/s^2 of lateral grip, ~4.3 g
+const CAR_HALF_W=1.0;             // half the car's width, for the wall test
+const WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
+
+/* R puts the car back on the centreline where it stands, pointing down the
+   road and stopped. Everything that could be left leaning or wound up from
+   the shunt is zeroed with it. */
+function resetToTrack(){
+  carState.n=0; carState.psi=0; carState.speed=0;
+  steerIn=0; steerAng=0; lockF=1;
+  pitch=0; roll=0; headLean=0; spdPrev=0;
+  clearDebris();
+}
 
 function drive(dt){
   // up/down arrows now trim the seat height, so they are no longer throttle
@@ -2027,11 +2170,17 @@ function drive(dt){
   const rgt = keys['d']||keys['arrowright'];
 
   /* Two stages of easing on the player's input: it ramps toward the key state,
-     then the wheel angle chases it. Critically damped-ish, so it arrives
-     smoothly and settles instead of snapping or overshooting. */
+     then the wheel angle chases it.
+
+     The ramp used to reach full lock in about a sixth of a second, which was
+     harmless while steering was cosmetic. Now that it actually turns the car
+     it is not: a key is all-or-nothing, so that made the shortest tap a huge
+     input and full lock arrived long before you meant it. Applying over about
+     four tenths of a second makes a tap a small angle and lets you hold a
+     partial one, while it still snaps back quicker than it goes on. */
   const want = (lft?-1:0) + (rgt?1:0);
-  const rate = want ? 3.4 : 5.0;                    // self-centres a bit quicker
-  steerIn += (want-steerIn)*(1-Math.pow(0.0016,dt*rate/3.4));
+  const k = 1-Math.exp(-dt/(want?0.40:0.25));       // self-centres quicker
+  steerIn += (want-steerIn)*k;
 
   const kph=carState.speed*3.6;
   lockF += (lockAt(kph)-lockF)*(1-Math.pow(0.02,dt));
@@ -2053,21 +2202,55 @@ function drive(dt){
   else carState.speed -= (0.8 + carState.speed*0.028)*dt;
   carState.speed=clamp(carState.speed,0,MAXSPEED);
 
-  if(!gridded){
-    carState.s += carState.speed*dt;
-    if(carState.s>=LAP) carState.s-=LAP;
-  }
-
-  /* Steering. The rack now has a real job: hold the tyres at whatever angle
-     the corner needs, from a bicycle model on the track's own curvature, a few
-     metres ahead so the wheels lead the car into the turn the way they should.
-     The player's A/D input rides on top of that and is still cosmetic --
-     the car cannot leave the crown of the road. */
-  const kNow=trackK(carState.s+6);
-  const dTyre=Math.atan(WHEELBASE*kNow);            // +ve = left
-  const target=clamp(-dTyre*STEER_RATIO + steerIn*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
+  /* Steering is entirely yours now -- there is no longer any curvature term
+     holding the car to the crown of the road. The speed-scaled lock does real
+     work here rather than being decoration: it is what stops the rack being
+     unusably twitchy at 300 kph. */
+  const target=clamp(steerIn*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
   steerAng += (target-steerAng)*(1-Math.pow(0.0009,dt));
   if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
+
+  let yawRate=0;
+  if(!gridded){
+    const v=carState.speed;
+    /* Kinematic bicycle: no slip angle, the car goes where it points. Simple
+       and stable on a keyboard. The geometric yaw rate alone would allow
+       ~17 g at top speed, so it is capped at what the tyres could actually
+       hold -- which is also what gives the car its understeer at speed. */
+    const dTyre=-steerAng/STEER_RATIO;              // +ve = left
+    yawRate=v*Math.tan(dTyre)/WHEELBASE;
+    const yawMax = v>0.5 ? A_GRIP/v : 8;
+    yawRate=clamp(yawRate,-yawMax,yawMax);
+
+    const k=trackK(carState.s);
+    const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
+    const sdot=v*Math.cos(carState.psi)/denom;
+    carState.psi += (yawRate - k*sdot)*dt;
+    // capping psi keeps cos(psi) positive, so s can never run backwards and
+    // the lap logic stays monotonic even in a big slide
+    carState.psi=clamp(carState.psi,-1.15,1.15);
+    carState.n += v*Math.sin(carState.psi)*dt;
+    carState.s += sdot*dt;
+    if(carState.s>=LAP) carState.s-=LAP;
+    if(carState.s<0)    carState.s+=LAP;
+
+    // off the asphalt: grass and gravel scrub speed off
+    const off=Math.abs(carState.n)-ROAD_HALF;
+    if(off>0) carState.speed=Math.max(0,carState.speed-Math.min(off,3.5)*2.4*dt);
+
+    /* Barriers. n is measured from the centreline, so the wall test is one
+       comparison -- the whole point of keeping the car in track space. */
+    if(Math.abs(carState.n)>=WALL_N){
+      const side=carState.n>0?1:-1;
+      carState.n=side*WALL_N;
+      const vIn=carState.speed*Math.sin(carState.psi)*side;   // +ve = into it
+      if(vIn>0){
+        if(vIn>1.2) hitBarrier(vIn);
+        carState.psi=-carState.psi*0.28;                      // glance off
+        carState.speed=Math.max(1.5, carState.speed*(1-clamp(vIn*0.05,0.02,0.5)));
+      }
+    }
+  }
 
   /* Body attitude. Pitch is dive/squat off actual longitudinal acceleration
      rather than the key state, so it eases off by itself near top speed. Roll
@@ -2078,7 +2261,8 @@ function drive(dt){
   const pitchT=clamp(-along*0.00045, -0.014, 0.021);   // -0.8 deg .. +1.2 deg
   pitch += (pitchT-pitch)*(1-Math.pow(0.01,dt));
 
-  const alat=carState.speed*carState.speed*trackK(carState.s);
+  // lateral load is now the car's own, not the corner's: a = v * yaw rate
+  const alat=carState.speed*yawRate;
   const rollT=clamp(alat*0.00085, -0.042, 0.042);      // up to ~2.4 deg
   roll += (rollT-roll)*(1-Math.pow(0.03,dt));
   if(carObj){ carObj.rotation.x=pitch; carObj.rotation.z=roll; }
@@ -2133,7 +2317,7 @@ function drive(dt){
 /* ------------------------------------------------------------- main loop */
 const tmp=new THREE.Vector3();
 const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
-const _fwd=new THREE.Vector3();
+const _fwd=new THREE.Vector3(), _carP=new THREE.Vector3();
 const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
 let last=performance.now(), t=0;
 
@@ -2157,12 +2341,14 @@ function frame(now){
   drive(dt);
   windU.value=t;
 
-  // put the car on the centreline, nose along the tangent. Matrices must be
-  // current before carPoint() reads mount positions off the bodywork.
-  trackAt(carState.s,_p2); trackDir(carState.s,_d2);
-  carGroup.position.set(_p2.x,0.125,_p2.y);
-  carGroup.rotation.y=Math.atan2(_d2.x,_d2.y);
+  // place the car at (s, n) with its own heading. Matrices must be current
+  // before carPoint() reads mount positions off the bodywork.
+  trackPos(carState.s,carState.n,0.125,_carP);
+  trackDir(carState.s,_d2);
+  carGroup.position.copy(_carP);
+  carGroup.rotation.y=Math.atan2(_d2.x,_d2.y)+carState.psi;
   carGroup.updateMatrixWorld(true);
+  updateDebris(dt);
 
   const sp=carState.speed/MAXSPEED;
   const C=CAMS[camMode];
@@ -2177,19 +2363,18 @@ function frame(now){
     camera.lookAt(cx,0.9,cz);
     camera.fov=52;
   }else{
-    /* The aim point rides the centreline ahead of the car rather than sitting
-       straight out of the nose, so the view leads into a corner the way a
-       driver's eyes do. Lookahead grows with speed. */
+    /* Both of these used to be built off the centreline, which was fine while
+       the car was welded to it. Now that it steers, they follow the car: the
+       cockpit looks where the nose points, and the chase sits behind the car's
+       own heading rather than behind a point on the track you may have left. */
     const LA=14+carState.speed*0.8;
-    trackAt(carState.s+LA,_p2);
+    const h=carGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
 
     if(C.chase){
-      trackAt(carState.s-C.back,_d2);
-      camera.position.set(_d2.x, C.up, _d2.y);
-      _aim.set(_p2.x, 1.1, _p2.y);
+      camera.position.set(carGroup.position.x-hx*C.back, C.up,
+                          carGroup.position.z-hz*C.back);
       camera.up.set(0,1,0);
-      camera.lookAt(carGroup.position.x*0.55+_aim.x*0.45,
-                    1.15, carGroup.position.z*0.55+_aim.z*0.45);
+      camera.lookAt(carGroup.position.x+hx*8, 1.15, carGroup.position.z+hz*8);
     }else if(freeLook){
       /* Head moved and aimed in the car's own space, so it rides the shell.
          The eye offset is clamped at source, and the aim is built from the
@@ -2212,7 +2397,7 @@ function frame(now){
       // the seat trim applies here too, not just in free look.
       const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]+fFwd);
       camera.position.copy(P);
-      _aim.set(_p2.x, P.y+0.06, _p2.y);
+      _aim.set(P.x+hx*LA, P.y+0.06, P.z+hz*LA);
       camera.up.set(0,1,0);
       camera.lookAt(_aim);
     }
