@@ -37,6 +37,7 @@
           letter-spacing:.14em;text-transform:uppercase;opacity:.6;line-height:1.9}
   #status em{font-style:normal;color:var(--amber);opacity:.9}
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
+  #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
         background:var(--ink);color:var(--paper);font-family:var(--mono);z-index:9;
         transition:opacity .7s ease}
@@ -64,7 +65,9 @@
            letter-spacing:.3em;color:#37e06a;text-shadow:0 0 22px rgba(55,224,106,.75);
            pointer-events:none;opacity:0;transition:opacity .45s ease;z-index:6}
   #golabel.show{opacity:1}
-  @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px} }
+  @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px}
+                            #cmap{width:120px;height:138px;top:204px} }
+  @media (max-height:620px){ #cmap{display:none} }
 </style>
 </head>
 <body>
@@ -74,6 +77,7 @@
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
 <div class="hud" id="status">Camera <em id="camname">Cockpit</em></div>
 <canvas id="map" width="372" height="372"></canvas>
+<canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
@@ -512,6 +516,46 @@ function kerbTexture(){
   return c;
 }
 
+/* Barrier facing. u runs along the barrier, v up it. One tile is a white
+   panel plus a red one, so the stripes count off distance as they go by. */
+function barrierTexture(){
+  const W=256,H=64,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d');
+  g.fillStyle='#e9e7df'; g.fillRect(0,0,W,H);
+  g.fillStyle='#bf2a1b'; g.fillRect(W/2,0,W/2,H);
+  // armco corrugation: a bright waist with shaded lips top and bottom
+  const gr=g.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0.00,'rgba(0,0,0,.34)');
+  gr.addColorStop(0.20,'rgba(255,255,255,.14)');
+  gr.addColorStop(0.50,'rgba(0,0,0,.22)');
+  gr.addColorStop(0.80,'rgba(255,255,255,.10)');
+  gr.addColorStop(1.00,'rgba(0,0,0,.46)');
+  g.fillStyle=gr; g.fillRect(0,0,W,H);
+  // support posts, one per half panel
+  g.fillStyle='rgba(0,0,0,.28)';
+  for(let i=0;i<4;i++) g.fillRect(i*W/4+W/8-3,0,6,H);
+  const rand=mulberry32(31);
+  for(let i=0;i<220;i++){
+    g.globalAlpha=.04+rand()*.10;
+    g.fillStyle=rand()>.5?'#000':'#fff';
+    const x=rand()*W,y=rand()*H,r=1+rand()*5;
+    wrapDrawRect(g,W,H,x,y,8,ctx=>{ctx.beginPath();ctx.arc(0,0,r,0,6.2832);ctx.fill();});
+  }
+  return c;
+}
+/* Distance board. Drawn once per number and used as its own material. */
+function boardTexture(num){
+  const W=256,H=192,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d');
+  g.fillStyle='#f4f2ea'; g.fillRect(0,0,W,H);
+  g.strokeStyle='#16181b'; g.lineWidth=12; g.strokeRect(6,6,W-12,H-12);
+  g.fillStyle='#16181b';
+  g.font='bold 118px ui-monospace, Menlo, Consolas, monospace';
+  g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(String(num), W/2, H*0.54);
+  return c;
+}
+
 /* --------------------------------------------------------------- renderer */
 const canvas   = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
@@ -638,6 +682,10 @@ texGround.anisotropy=MAXANISO; texGround.encoding=THREE.sRGBEncoding;
 const texWear = new THREE.CanvasTexture(wearTexture());
 texWear.wrapS=THREE.ClampToEdgeWrapping; texWear.wrapT=THREE.RepeatWrapping;
 texWear.anisotropy=MAXANISO;
+
+const texBarrier = new THREE.CanvasTexture(barrierTexture());
+texBarrier.wrapS=THREE.RepeatWrapping; texBarrier.wrapT=THREE.ClampToEdgeWrapping;
+texBarrier.anisotropy=MAXANISO; texBarrier.encoding=THREE.sRGBEncoding;
 
 const texKerb = new THREE.CanvasTexture(kerbTexture());
 texKerb.wrapS=THREE.ClampToEdgeWrapping; texKerb.wrapT=THREE.RepeatWrapping;
@@ -890,6 +938,139 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
   posts.frustumCulled=false; caps.frustumCulled=false;
   posts.userData.casts=true; shadowCasters.push(posts);
   roadGroup.add(posts,caps);
+})();
+
+/* --------------------------------------------------------------- barriers */
+/* The point of these is visibility, not safety. The track is dead flat, so at
+   an eye height of 0.85 m a point 200 m away sits a quarter of a degree below
+   the horizon -- the whole 100-300 m braking zone collapses into about four
+   pixels, and every flat cue (tarmac, kerbs, painted lines) collapses with it.
+   Anything with height does not: a waist-high wall following the track edge
+   draws the corner as a line in the air long after the road surface has gone,
+   which is what lets you read how sharp the next corner is from the cockpit. */
+const BARRIER_LAT=SHOULDER+2.4, BARRIER_Y0=0.28, BARRIER_Y1=1.08;
+const BARRIER_TILE=fitTile(8);
+
+/* A vertical ribbon: fixed lateral offset, swept between two heights. The
+   horizontal ribbonGeo above sweeps between two lateral offsets at one height,
+   which is the other half of the same idea. */
+function wallGeo(lat,y0,y1,uTile){
+  const n=RN+1;
+  const pos=new Float32Array(n*2*3), uv=new Float32Array(n*2*2);
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  for(let i=0;i<n;i++){
+    const s=i*RSTEP;
+    trackAt(s,p); trackDir(s,d);
+    const X=p.x+d.y*lat, Z=p.y-d.x*lat, u=s/uTile;
+    for(let k=0;k<2;k++){
+      const o=i*2+k;
+      pos[o*3]=X; pos[o*3+1]=k?y1:y0; pos[o*3+2]=Z;
+      uv[o*2]=u;  uv[o*2+1]=k?1:0;
+    }
+  }
+  const idx=(n*2<=65536)?new Uint16Array(RN*6):new Uint32Array(RN*6);
+  for(let i=0;i<RN;i++){
+    const a=i*2,b=a+1,c=a+2,d2=a+3;
+    idx[i*6  ]=a; idx[i*6+1]=c; idx[i*6+2]=b;
+    idx[i*6+3]=b; idx[i*6+4]=c; idx[i*6+5]=d2;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('uv',      new THREE.BufferAttribute(uv,2));
+  g.setIndex(new THREE.BufferAttribute(idx,1));
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
+
+(function buildBarriers(){
+  // DoubleSide so the winding never matters and the far barrier still reads
+  // through a corner from either hand
+  const mat=new THREE.MeshStandardMaterial({
+    map:texBarrier, side:THREE.DoubleSide, roughness:0.62, metalness:0.15
+  });
+  [-1,1].forEach(sg=>{
+    const m=new THREE.Mesh(wallGeo(sg*BARRIER_LAT,BARRIER_Y0,BARRIER_Y1,BARRIER_TILE),mat);
+    m.frustumCulled=false; m.receiveShadow=true;
+    m.castShadow=true; m.userData.casts=true; shadowCasters.push(m);
+    roadGroup.add(m);
+  });
+})();
+
+/* ------------------------------------------------------- distance boards */
+/* Corner entries, and the 200/150/100/50 m boards on the approach to each.
+   Boards stand clear of the ground so they keep their angular height at
+   distance, which is the same reason the barriers work. */
+const CORNER_TH=1/260;                 // anything tighter than 260 m counts
+function cornerEntries(){
+  const out=[]; let inC=false, startS=0, peak=0;
+  for(let s=0;s<LAP;s+=2){
+    const k=trackK(s), on=Math.abs(k)>CORNER_TH;
+    if(on&&!inC){ inC=true; startS=s; peak=k; }
+    else if(on){ if(Math.abs(k)>Math.abs(peak)) peak=k; }
+    else if(inC){ inC=false; out.push({s:startS,peak}); }
+  }
+  if(inC) out.push({s:startS,peak});
+  return out;
+}
+
+(function buildBoards(){
+  const ENTRIES=cornerEntries();
+  const DISTS=[200,150,100,50];
+  const BW=1.7, BH=1.25, POST_H=0.95;
+  const slots=DISTS.map(()=>[]);
+  const posts=[];
+  ENTRIES.forEach(c=>{
+    // outside of the corner: the inside is +lateral when curvature is positive
+    const side=c.peak>0?-1:1;
+    DISTS.forEach((d,di)=>{
+      let s=c.s-d; if(s<0) s+=LAP;
+      // a board only makes sense on the approach, not buried inside the
+      // previous corner, where it would be behind you before it was readable
+      if(Math.abs(trackK(s))>CORNER_TH) return;
+      slots[di].push({s,side});
+      posts.push({s,side});
+    });
+  });
+
+  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
+        v3=new THREE.Vector3(), one=new THREE.Vector3(1,1,1),
+        p2=new THREE.Vector2(), d2=new THREE.Vector2(),
+        AXIS=new THREE.Vector3(0,1,0);
+  const place=(s,side,y)=>{
+    trackAt(s,p2); trackDir(s,d2);
+    const lat=side*(SHOULDER+1.9);
+    v3.set(p2.x+d2.y*lat, y, p2.y-d2.x*lat);
+    // face back down the track so it is readable on the approach
+    q.setFromAxisAngle(AXIS, Math.atan2(-d2.x,-d2.y));
+    mtx.compose(v3,q,one);
+    return mtx;
+  };
+
+  const boardGeo=new THREE.PlaneGeometry(BW,BH);
+  DISTS.forEach((d,di)=>{
+    const list=slots[di];
+    if(!list.length) return;
+    const tex=new THREE.CanvasTexture(boardTexture(d));
+    tex.anisotropy=MAXANISO; tex.encoding=THREE.sRGBEncoding;
+    const mat=new THREE.MeshStandardMaterial({map:tex,side:THREE.DoubleSide,roughness:0.7});
+    const im=new THREE.InstancedMesh(boardGeo,mat,list.length);
+    list.forEach((b,i)=>im.setMatrixAt(i,place(b.s,b.side,POST_H+BH/2)));
+    im.instanceMatrix.needsUpdate=true;
+    im.frustumCulled=false;
+    im.castShadow=true; im.userData.casts=true; shadowCasters.push(im);
+    roadGroup.add(im);
+  });
+
+  if(posts.length){
+    const pg=new THREE.BoxGeometry(0.1,POST_H,0.1); pg.translate(0,POST_H/2,0);
+    const pm=new THREE.MeshStandardMaterial({color:sRGB(0x2a2e32),roughness:0.6});
+    const im=new THREE.InstancedMesh(pg,pm,posts.length);
+    posts.forEach((b,i)=>im.setMatrixAt(i,place(b.s,b.side,0)));
+    im.instanceMatrix.needsUpdate=true;
+    im.frustumCulled=false;
+    roadGroup.add(im);
+  }
 })();
 
 /* ---------------------------------------------------- start / finish line */
@@ -1464,6 +1645,129 @@ function drawMap(){
   mapCtx.lineWidth=3; mapCtx.strokeStyle='rgba(11,12,13,.85)'; mapCtx.stroke();
 }
 
+/* ------------------------------------------------------ next-corner view */
+/* A heading-up slice of the road ahead: the centreline from just behind the
+   car to CM_AHEAD metres in front, rotated so up is always where the nose is
+   pointing, and tinted by how fast each part of it can be taken. This is the
+   piece that actually answers "how sharp is the next one" -- from the cockpit
+   the corner itself is only a few pixels tall until you are on top of it. */
+const cmapCan=document.getElementById('cmap'), cmapCtx=cmapCan.getContext('2d');
+const CM_AHEAD=380, CM_BEHIND=24, CM_STEP=5;
+const A_LAT=34;                       // m/s^2 of grip assumed when colouring
+
+/* corner speed from radius: v = sqrt(a/k). Bands are in kph so the colours
+   line up with what the speedo is reading on the approach. */
+function cornerHue(k){
+  const kk=Math.abs(k);
+  if(kk<1/900) return '#7fdd63';
+  const kph=Math.sqrt(A_LAT/kk)*3.6;
+  if(kph>260) return '#7fdd63';
+  if(kph>195) return '#dfd94a';
+  if(kph>135) return '#f2a20c';
+  return '#e8483a';
+}
+function severity(radius){
+  return radius<32?1:radius<55?2:radius<85?3:radius<130?4:radius<210?5:6;
+}
+/* the next corner worth naming, and how far away its entry is */
+function nextCorner(s0){
+  for(let d=10;d<620;d+=4){
+    const k=trackK(s0+d);
+    if(Math.abs(k)<=CORNER_TH) continue;
+    let peak=k;
+    for(let e=d;e<d+340;e+=4){
+      const kk=trackK(s0+e);
+      if(Math.abs(kk)<=CORNER_TH*0.7) break;
+      if(Math.abs(kk)>Math.abs(peak)) peak=kk;
+    }
+    return {dist:d, left:peak>0, radius:1/Math.abs(peak)};
+  }
+  return null;
+}
+
+const _cmP=new THREE.Vector2(), _cmD=new THREE.Vector2(), _cmQ=new THREE.Vector2();
+function drawCornerMap(){
+  const W=cmapCan.width, H=cmapCan.height, HEAD=62;
+  const g=cmapCtx;
+  g.clearRect(0,0,W,H);
+  // opaque enough to read against a sunlit mountain, which is what sits behind
+  // this corner of the screen for much of the lap
+  g.fillStyle='rgba(11,12,13,.86)';
+  g.fillRect(0,0,W,H);
+  g.strokeStyle='rgba(236,234,228,.16)'; g.lineWidth=2;
+  g.strokeRect(1,1,W-2,H-2);
+
+  const scale=(H-HEAD-26)/(CM_AHEAD+CM_BEHIND);
+  const cx=W/2, cy=H-18-CM_BEHIND*scale;
+
+  trackAt(carState.s,_cmP); trackDir(carState.s,_cmD);
+  const ox=_cmP.x, oz=_cmP.y, tx=_cmD.x, tz=_cmD.y;
+  // world delta -> car frame. forward is +z_local, and the driver's left is
+  // +x_local, so left maps to screen-left.
+  const toScreen=(px,pz,out)=>{
+    const dx=px-ox, dz=pz-oz;
+    out.x = cx - (dx*tz - dz*tx)*scale;   // lateral, + is the driver's left
+    out.y = cy - (dx*tx + dz*tz)*scale;   // forward, up the screen
+  };
+
+  /* How far to draw. A fixed 380 m through a 60 m corner wraps the road more
+     than a full quarter turn and it spirals off the side of the panel, so the
+     path also stops once it has bent about 130 degrees -- far enough to show
+     the whole of the next corner and where it lets you out, and no further. */
+  const ends=[];
+  let turn=0, kPrev=trackK(carState.s);
+  for(let d=-CM_BEHIND; d<=CM_AHEAD; d+=CM_STEP){
+    if(d>0){
+      const k=trackK(carState.s+d);
+      turn+=Math.abs((k+kPrev)*0.5)*CM_STEP; kPrev=k;
+      if(turn>2.27) break;
+    }
+    trackAt(carState.s+d,_cmQ); toScreen(_cmQ.x,_cmQ.y,_cmQ);
+    ends.push({x:_cmQ.x, y:_cmQ.y, k:trackK(carState.s+d-CM_STEP*0.5)});
+  }
+
+  g.lineCap='round'; g.lineJoin='round';
+  const wide=Math.max(3, ROAD_HALF*2*scale);
+  // dark casing first so the ribbon reads against the panel
+  g.strokeStyle='rgba(0,0,0,.6)'; g.lineWidth=wide+5;
+  g.beginPath();
+  ends.forEach((p,i)=> i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));
+  g.stroke();
+  // then one short stroke per step, tinted by that step's curvature
+  g.lineWidth=wide;
+  for(let i=1;i<ends.length;i++){
+    g.strokeStyle=cornerHue(ends[i].k);
+    g.beginPath(); g.moveTo(ends[i-1].x,ends[i-1].y); g.lineTo(ends[i].x,ends[i].y); g.stroke();
+  }
+
+  // the car, always at the same spot facing up
+  g.fillStyle='#f2a20c';
+  g.beginPath();
+  g.moveTo(cx,cy-11); g.lineTo(cx-7,cy+7); g.lineTo(cx+7,cy+7);
+  g.closePath(); g.fill();
+
+  // header: which way the next corner goes, how tight, how far
+  const nc=nextCorner(carState.s);
+  g.fillStyle='rgba(0,0,0,.62)'; g.fillRect(0,0,W,HEAD);
+  if(nc){
+    const col=cornerHue(1/nc.radius);
+    g.fillStyle=col;
+    g.font='bold 40px ui-monospace, Menlo, Consolas, monospace';
+    g.textBaseline='middle';
+    g.textAlign='left';  g.fillText(nc.left?'◀':'▶', 14, HEAD/2);
+    g.textAlign='center';g.fillText(String(severity(nc.radius)), W/2-14, HEAD/2);
+    g.fillStyle='#eceae4';
+    g.font='600 30px ui-monospace, Menlo, Consolas, monospace';
+    g.textAlign='right';
+    g.fillText(Math.round(nc.dist/10)*10+' m', W-14, HEAD/2);
+  }else{
+    g.fillStyle='rgba(236,234,228,.5)';
+    g.font='600 24px ui-monospace, Menlo, Consolas, monospace';
+    g.textAlign='center'; g.textBaseline='middle';
+    g.fillText('CLEAR', W/2, HEAD/2);
+  }
+}
+
 /* ----------------------------------------------------------------- audio */
 /* Four looping engine beds crossfaded on a 0.1 s ramp. Each state gets a
    fresh source so it can be started at an offset -- a looping BufferSource
@@ -1986,6 +2290,7 @@ function frame(now){
 
   renderer.render(scene,camera);
   drawMap();
+  drawCornerMap();
 
 }
 
