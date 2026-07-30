@@ -75,7 +75,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
@@ -84,7 +84,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>R</kbd> back to track · <kbd>G</kbd> restart the lights</div>
+  <div><kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -149,6 +149,10 @@ const KERB_W      = 2.0;    // kerb width, outboard of the edge line
 const SHOULDER    = 11.4;   // gravel outer edge
 const TREE_CLEAR  = 22.0;   // nearest trunk to the centreline
 const LAP_TARGET  = 5000;   // circuit length, metres
+/* Declared here rather than with the drive model: the racing line is built at
+   load and needs both, and it is built long before that section is reached. */
+const MAXSPEED    = 100;    // m/s = 360 km/h exactly
+const A_GRIP      = 42;     // m/s^2 of lateral grip, ~4.3 g
 
 const shadowCasters=[];
 const treeCells=[];
@@ -1073,6 +1077,130 @@ function cornerEntries(){
   }
 })();
 
+/* ----------------------------------------------------------- racing line */
+/* A real line, not the centreline painted a different colour -- with the car
+   free to steer, a line you can actually take is finally worth drawing.
+
+   Built by minimum-curvature relaxation: start on the centreline, then
+   repeatedly pull each point toward the midpoint of its neighbours and clamp
+   it back inside the track. Straightening a path is exactly what lowering its
+   curvature means, so this converges on the classic outside-apex-outside
+   shape on its own, without any corner-detection heuristics.
+
+   Colour is the speed profile, so it doubles as the braking guide: the
+   backward pass is the one that finds braking points, since it walks back
+   from each corner asking how early you must be off the brakes to arrive at
+   the speed the corner allows. */
+const RL_STEP=4;                            // metres between line points
+const RL_N=Math.round(LAP/RL_STEP);
+const RL_MARGIN=1.35;                       // keep the car's width off the kerb
+const RL_LIMIT=ROAD_HALF-RL_MARGIN;
+const RL_ITER=1200;
+const A_BRAKE=40, A_ACCEL=13;               // m/s^2 used for the profile
+let rlN=null, rlV=null, rlState=null, rlMesh=null;
+
+(function buildRacingLine(){
+  rlN=new Float32Array(RL_N);
+  const cx=new Float32Array(RL_N), cz=new Float32Array(RL_N),
+        nx=new Float32Array(RL_N), nz=new Float32Array(RL_N);
+  const p=new THREE.Vector2(), d=new THREE.Vector2();
+  for(let i=0;i<RL_N;i++){
+    const s=i*RL_STEP;
+    trackAt(s,p); trackDir(s,d);
+    cx[i]=p.x; cz[i]=p.y; nx[i]=d.y; nz[i]=-d.x;   // unit left normal
+  }
+  // relax. Each sweep moves every point a little way toward the midpoint of
+  // its neighbours, measured back onto that point's own cross-section.
+  const alpha=0.35;
+  for(let it=0;it<RL_ITER;it++){
+    for(let i=0;i<RL_N;i++){
+      const a=(i-1+RL_N)%RL_N, b=(i+1)%RL_N;
+      const ax=cx[a]+nx[a]*rlN[a], az=cz[a]+nz[a]*rlN[a];
+      const bx=cx[b]+nx[b]*rlN[b], bz=cz[b]+nz[b]*rlN[b];
+      const mx=(ax+bx)*0.5, mz=(az+bz)*0.5;
+      // lateral offset of that midpoint on this point's cross-section
+      const t=(mx-cx[i])*nx[i]+(mz-cz[i])*nz[i];
+      rlN[i]=clamp(rlN[i]+alpha*(t-rlN[i]), -RL_LIMIT, RL_LIMIT);
+    }
+  }
+
+  // curvature of the resulting line, from the circle through each triple
+  const kap2=new Float32Array(RL_N);
+  const px=new Float32Array(RL_N), pz=new Float32Array(RL_N);
+  for(let i=0;i<RL_N;i++){ px[i]=cx[i]+nx[i]*rlN[i]; pz[i]=cz[i]+nz[i]*rlN[i]; }
+  for(let i=0;i<RL_N;i++){
+    const a=(i-1+RL_N)%RL_N, b=(i+1)%RL_N;
+    const x1=px[a],z1=pz[a], x2=px[i],z2=pz[i], x3=px[b],z3=pz[b];
+    const A=Math.hypot(x2-x1,z2-z1), B=Math.hypot(x3-x2,z3-z2), C=Math.hypot(x3-x1,z3-z1);
+    const area=Math.abs((x2-x1)*(z3-z1)-(x3-x1)*(z2-z1))*0.5;
+    kap2[i]= (A*B*C>1e-6) ? (4*area)/(A*B*C) : 0;      // 1/R via the circumradius
+  }
+
+  /* Speed profile. Corner limit first, then a backward pass for braking and a
+     forward pass for how fast you can actually get back up to it -- run twice
+     because the two constrain each other around a corner. */
+  rlV=new Float32Array(RL_N);
+  const segLen=new Float32Array(RL_N);
+  for(let i=0;i<RL_N;i++){
+    const b=(i+1)%RL_N;
+    segLen[i]=Math.hypot(px[b]-px[i],pz[b]-pz[i]);
+    rlV[i]=Math.min(MAXSPEED, kap2[i]>1e-6?Math.sqrt(A_GRIP/kap2[i]):MAXSPEED);
+  }
+  for(let pass=0;pass<2;pass++){
+    for(let k=0;k<RL_N;k++){                          // backward: braking
+      const i=(RL_N-1-k), b=(i+1)%RL_N;
+      rlV[i]=Math.min(rlV[i], Math.sqrt(rlV[b]*rlV[b]+2*A_BRAKE*segLen[i]));
+    }
+    for(let i=0;i<RL_N*2;i++){                        // forward: power
+      const c=i%RL_N, a=(c-1+RL_N)%RL_N;
+      rlV[c]=Math.min(rlV[c], Math.sqrt(rlV[a]*rlV[a]+2*A_ACCEL*segLen[a]));
+    }
+  }
+
+  // classify: braking / at the limit / full throttle
+  rlState=new Uint8Array(RL_N);
+  for(let i=0;i<RL_N;i++){
+    const b=(i+1)%RL_N;
+    const dv=(rlV[b]-rlV[i])/Math.max(segLen[i],0.01);
+    rlState[i] = dv<-0.035 ? 2 : (rlV[i]<MAXSPEED*0.97 ? 1 : 0);
+  }
+
+  // ribbon, laid just above the asphalt and tinted by that classification
+  const W=0.30;                                        // half width
+  const pos=new Float32Array((RL_N+1)*2*3), col=new Float32Array((RL_N+1)*2*3);
+  const idx=new Uint32Array(RL_N*6);
+  const C_GO=sRGB(0x35d84a), C_LIM=sRGB(0xf2c40c), C_BRK=sRGB(0xe12d1b);
+  for(let i=0;i<=RL_N;i++){
+    const j=i%RL_N;
+    const c=rlState[j]===2?C_BRK:(rlState[j]===1?C_LIM:C_GO);
+    for(let k=0;k<2;k++){
+      const o=i*2+k, lat=rlN[j]+(k?-W:W);
+      pos[o*3  ]=cx[j]+nx[j]*lat;
+      pos[o*3+1]=0.135;
+      pos[o*3+2]=cz[j]+nz[j]*lat;
+      col[o*3]=c.r; col[o*3+1]=c.g; col[o*3+2]=c.b;
+    }
+  }
+  for(let i=0;i<RL_N;i++){
+    const a=i*2,b=a+1,c=a+2,d2=a+3;
+    idx[i*6  ]=a; idx[i*6+1]=b; idx[i*6+2]=c;
+    idx[i*6+3]=b; idx[i*6+4]=d2; idx[i*6+5]=c;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',   new THREE.BufferAttribute(col,3));
+  g.setIndex(new THREE.BufferAttribute(idx,1));
+  g.computeVertexNormals();
+  const m=new THREE.MeshBasicMaterial({
+    vertexColors:true, transparent:true, opacity:0.78,
+    polygonOffset:true, polygonOffsetFactor:-10, polygonOffsetUnits:-10
+  });
+  rlMesh=new THREE.Mesh(g,m);
+  rlMesh.frustumCulled=false;
+  rlMesh.visible=false;                                // off until L is pressed
+  roadGroup.add(rlMesh);
+})();
+
 /* ---------------------------------------------------- start / finish line */
 (function buildStartLine(){
   const p=new THREE.Vector2(), d=new THREE.Vector2();
@@ -1948,6 +2076,7 @@ addEventListener('keydown',e=>{
   if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
+  if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -1967,6 +2096,7 @@ let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
+  document.getElementById('lname').textContent = (rlMesh&&rlMesh.visible)?'On':'Off';
 }
 /* Full detail, always. There is no longer a quality toggle and nothing
    downgrades it behind your back -- the old adaptive check could drop the
@@ -2167,33 +2297,28 @@ function lockGrip(kph){
   if(v<1) return 1;
   return clamp(STEER_RATIO*Math.atan(WHEELBASE*A_GRIP/(v*v))/STEER_LOCK, 0, 1);
 }
-/* A third limit, and the one that actually fixes the mid-range twitch.
-   Between roughly 90 and 200 kph neither of the other two was doing useful
-   work: the grip cap does not bind until 216 kph, and the table was still
-   handing out enough lock to rotate the car at 1.3 rad/s -- 74 deg a second --
-   at 100 kph. That is inside the tyres' ability and completely uncontrollable
-   on a key that is either fully on or fully off.
+/* There was briefly a third limit here, capping lock to hold the car's yaw
+   rate flat across the mid range. It is gone, because it could never give
+   both things at once: a
+   hairpin at 100 kph and a straight at 100 kph are the same speed, so no
+   curve of yaw against speed can be generous for one and calm for the other.
+   Capping the car was the wrong lever entirely.
 
-   So lock is also capped at whatever produces YAW_COMFORT, which holds the
-   car's rotation rate roughly constant across the whole mid range instead of
-   letting it peak in the middle. Above 178 kph grip is the tighter of the two
-   and takes over unchanged, which is why fast corners still feel the same.
-
-   The cap costs corner speed where it binds, so it is set as high as the mid
-   range will tolerate: at 0.85 the 63 m corner comes out grip-limited anyway
-   (185 kph against a 193 kph yaw limit, so no restriction at all), and only
-   the 25.8 m hairpin is still held back, to 79 kph against grip's 119. */
-const YAW_COMFORT=0.85;           // rad/s, about 49 deg a second
-function lockYaw(kph){
-  const v=kph/3.6;
-  if(v<2) return 1;
-  return clamp(STEER_RATIO*Math.atan(WHEELBASE*YAW_COMFORT/v)/STEER_LOCK, 0, 1);
-}
-function lockAt(kph){ return Math.min(lockTable(kph), lockGrip(kph), lockYaw(kph)); }
+   What actually made a tap twitchy was never the car's peak rotation, it was
+   how much heading a tap banked. Displacement comes from the heading you keep
+   afterwards, not the yaw rate while turning, so the fix belongs in the input:
+   a slow application ramp makes a tap a small angle, and a quick return stops
+   it dribbling on afterwards, while holding the key still walks all the way to
+   full lock. Corners keep the whole of the grip; only the flick is quietened.
+   See STEER_ON / STEER_OFF in drive(). */
+function lockAt(kph){ return Math.min(lockTable(kph), lockGrip(kph)); }
 const _qRoll=new THREE.Quaternion(), _qSteer=new THREE.Quaternion();
 const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
-const MAXSPEED=100;               // m/s = 360 km/h exactly
-const A_GRIP=42;                  // m/s^2 of lateral grip, ~4.3 g
+/* Asymmetric on purpose. Slow on so a flick banks little heading; quick off so
+   it stops steering the moment you release instead of trailing away. Holding
+   still reaches full lock in about two seconds, which is what keeps the whole
+   of the car's grip available in a corner. */
+const STEER_ON=0.62, STEER_OFF=0.14;   // seconds, application and return
 const CAR_HALF_W=1.0;             // half the car's width, for the wall test
 const WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
@@ -2226,7 +2351,7 @@ function drive(dt){
      four tenths of a second makes a tap a small angle and lets you hold a
      partial one, while it still snaps back quicker than it goes on. */
   const want = (lft?-1:0) + (rgt?1:0);
-  const k = 1-Math.exp(-dt/(want?0.40:0.25));       // self-centres quicker
+  const k = 1-Math.exp(-dt/(want?STEER_ON:STEER_OFF));
   steerIn += (want-steerIn)*k;
 
   const kph=carState.speed*3.6;
