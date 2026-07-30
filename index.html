@@ -2027,6 +2027,26 @@ function drawCornerMap(){
    cannot be seeked once running. */
 const FADE=0.10;
 let actx=null, sbuf={}, sndCur=null, sndSrc=null, sndGain=null, audioOn=false;
+const sbufTrim={};                 // per-bed loop points, see trimPoints()
+
+/* Every one of these beds carries dead air at the head -- 148 ms on accel,
+   128 on brake, 127 on coast -- partly the encoder's own delay and partly
+   real silence in the source. Looped raw that is an audible dropout on every
+   pass, which on the 3.9 s coast bed lands every 3.9 seconds.
+
+   Rather than re-encode the assets, find the first and last samples that
+   actually carry signal and hand those to the source as loopStart/loopEnd,
+   so the loop cycles the sounding part and never replays the gap. The trim is
+   capped so a genuinely quiet intro can never be cut short. */
+function trimPoints(buf){
+  const d=buf.getChannelData(0), n=d.length, sr=buf.sampleRate;
+  const thr=0.004, cap=Math.round(sr*0.40);
+  let a=0; while(a<n && a<cap && Math.abs(d[a])<thr) a++;
+  let b=n-1, lim=n-1-cap; while(b>a && b>lim && Math.abs(d[b])<thr) b--;
+  const start=a/sr, end=(b+1)/sr;
+  return (end-start>0.25) ? {start,end,len:end-start}
+                          : {start:0, end:buf.duration, len:buf.duration};
+}
 
 function initAudio(){
   if(actx) return;
@@ -2038,7 +2058,7 @@ function initAudio(){
   ks.forEach(k=>{
     const fin=()=>{ if(++done===ks.length) audioOn=true; };
     fetch(ASSETS.snd[k]).then(r=>r.arrayBuffer())
-      .then(ab=>actx.decodeAudioData(ab, b=>{ sbuf[k]=b; fin(); }, fin))
+      .then(ab=>actx.decodeAudioData(ab, b=>{ sbuf[k]=b; sbufTrim[k]=trimPoints(b); fin(); }, fin))
       .catch(fin);
   });
 }
@@ -2058,11 +2078,14 @@ function setSound(name, offset){
   }
   const src=actx.createBufferSource();
   src.buffer=sbuf[name]; src.loop=true;
+  // loop only the sounding part, skipping the dead air at the head
+  const tr=sbufTrim[name]||{start:0,end:sbuf[name].duration,len:sbuf[name].duration};
+  src.loopStart=tr.start; src.loopEnd=tr.end;
   const g=actx.createGain();
   g.gain.setValueAtTime(0, now);
   g.gain.linearRampToValueAtTime(1, now+FADE);
   src.connect(g); g.connect(actx.destination);
-  src.start(now, (offset||0)%sbuf[name].duration);
+  src.start(now, tr.start + ((offset||0)%tr.len));
   sndCur=name; sndSrc=src; sndGain=g;
 }
 
@@ -2489,8 +2512,10 @@ function drive(dt){
   const st = gridded ? (thr?'accel':'idle')
            : carState.speed<0.6 ? 'idle' : brk ? 'brake' : thr ? 'accel' : 'coast';
   if(st!==sndCur){
+    // resuming onto the throttle mid-clip: half way through the sounding part,
+    // not half way through the file, which would land inside the dead air
     const rolling = (st==='accel' && sndCur==='brake' && carState.speed>0.6);
-    setSound(st, rolling && sbuf.accel ? sbuf.accel.duration*0.5 : 0);
+    setSound(st, rolling && sbufTrim.accel ? sbufTrim.accel.len*0.5 : 0);
   }
 
   kmhEl.textContent = Math.round(carState.speed*3.6);
