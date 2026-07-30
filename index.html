@@ -45,6 +45,15 @@
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
   #boot.gone{opacity:0;pointer-events:none}
+  #pick{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  #pick button{font-family:var(--mono);cursor:pointer;color:var(--paper);
+        background:rgba(236,234,228,.05);border:1px solid var(--line);
+        border-radius:6px;padding:16px 20px;min-width:210px;text-align:left;
+        transition:background .18s ease,border-color .18s ease}
+  #pick button:hover{background:rgba(242,162,12,.13);border-color:var(--amber)}
+  #pick button b{display:block;font-size:14px;letter-spacing:.14em;
+        text-transform:uppercase;margin-bottom:5px}
+  #pick button span{display:block;font-size:10.5px;letter-spacing:.08em;opacity:.6}
   /* start gantry lights, mirrored on screen so they read in every camera */
   #lights{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
           display:flex;gap:clamp(5px,.95vw,13px);padding:clamp(6px,1vw,13px);
@@ -97,7 +106,14 @@
 </div>
 <div id="golabel">GO</div>
 
-<div id="boot"><p>Building circuit</p><div id="bar"><i></i></div></div>
+<div id="boot">
+  <p id="bootmsg">Choose a circuit</p>
+  <div id="pick">
+    <button data-track="pinewood"><b>Pinewood</b><span>Generated · 5.00 km · wide and fast</span></button>
+    <button data-track="autodromo"><b>Autodromo</b><span>Imported · 0.78 km · tight and technical</span></button>
+  </div>
+  <div id="bar"><i></i></div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="meshopt_decoder.js"></script>
@@ -143,12 +159,42 @@ function fbm(x,y,oct){
 }
 
 /* road cross-section (metres, lateral offset from the centreline) */
-const ROAD_HALF   = 7.6;    // asphalt half width — 15.2 m, wide modern F1 spec
-const LANE_EDGE   = 6.75;   // white edge line offset
-const KERB_W      = 2.0;    // kerb width, outboard of the edge line
-const SHOULDER    = 11.4;   // gravel outer edge
-const TREE_CLEAR  = 22.0;   // nearest trunk to the centreline
-const LAP_TARGET  = 5000;   // circuit length, metres
+/* Now per-track rather than fixed: Pinewood is generated to these, while the
+   imported circuit takes its own width from the mesh it was extracted from. */
+let ROAD_HALF   = 7.6;      // asphalt half width — 15.2 m, wide modern F1 spec
+let LANE_EDGE   = 6.75;     // white edge line offset
+let KERB_W      = 2.0;      // kerb width, outboard of the edge line
+let SHOULDER    = 11.4;     // gravel outer edge
+let TREE_CLEAR  = 22.0;     // nearest trunk to the centreline
+let LAP_TARGET  = 5000;     // circuit length, metres
+
+/* ------------------------------------------------------------------ tracks */
+/* Pinewood is authored from control points. Autodromo is imported: its
+   centreline is recovered from the road mesh in the GLB, so the driving
+   surface and everything derived from it line up with the model exactly
+   rather than being eyeballed into place. */
+const TRACKS={
+  pinewood:{
+    id:'pinewood', name:'Pinewood', sub:'Generated · 5.00 km',
+    procedural:true,
+    roadHalf:7.6, laneEdge:6.75, kerbW:2.0, shoulder:11.4, treeClear:22.0,
+    barrierOut:2.4, scenery:true
+  },
+  autodromo:{
+    id:'autodromo', name:'Autodromo', sub:'Imported · 0.78 km',
+    procedural:false, glb:'race_track.glb',
+    /* The model carries no unit declaration, so the scale is pinned off the
+       geometry: the road mesh measures 578 units across and its crash walls
+       58 units tall. Taking the road as 12 m puts the walls at 1.20 m, which
+       is right for a crash wall, and every other object in the scene lands
+       at a sensible size too. */
+    roadMetres:12.0,
+    roadHalf:6.0, laneEdge:5.2, kerbW:1.6, shoulder:8.0, treeClear:26.0,
+    barrierOut:2.6, scenery:false,
+    matchMaterial:'Asfalto'      // the mesh the centreline is recovered from
+  }
+};
+let TRACK=TRACKS.pinewood;
 /* Declared here rather than with the drive model: the racing line is built at
    load and needs both, and it is built long before that section is reached. */
 const MAXSPEED    = 100;    // m/s = 360 km/h exactly
@@ -190,17 +236,117 @@ const STRAIGHT_END_I = 6;
 let LAP=0, NSAMP=0, DS=1;
 let sx=null, sz=null, tanx=null, tanz=null, kap=null;
 let START_S=6, FINISH_S=0, STRAIGHT_S0=0, STRAIGHT_S1=0;
+const trackShift=new THREE.Vector3();   // model units removed when centring
 let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
 
-(function buildTrack(){
-  const pts=TRACK_PX.map(p=>new THREE.Vector3(p[0],0,p[1]));
+/* ------------------------------------------- centreline from a road mesh --
+   The imported circuit has no path or spline in it, only geometry, so the
+   racing surface itself is the source of truth. The road is a flat slab: a
+   top face, a bottom face 37 units under it, and vertical sides joining them.
+   Taking only the triangles on the top face and walking the edges used by
+   exactly one triangle gives the two rims of the ribbon; pairing them across
+   gives the centre.
+
+   The two rims are told apart by perimeter, not by winding, so it does not
+   matter which way round the model was built. As a check, a closed ribbon of
+   width W turning through one full revolution must have its rims differ in
+   length by 2*pi*W -- for this mesh that predicts 578 units against a 581
+   measured, which is what confirms the pairing is real and not two edges of
+   the same rim. */
+function centrelineFromMesh(mesh){
+  mesh.updateWorldMatrix(true,false);
+  const g=mesh.geometry, pos=g.attributes.position, idx=g.index;
+  const m=mesh.matrixWorld, v=new THREE.Vector3();
+  const n=pos.count;
+  const X=new Float64Array(n), Y=new Float64Array(n), Z=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    v.fromBufferAttribute(pos,i).applyMatrix4(m);
+    X[i]=v.x; Y[i]=v.y; Z[i]=v.z;
+  }
+  // weld: the exporter splits vertices for normals and uvs, which would leave
+  // every interior edge looking like a boundary
+  const key=i=>X[i].toFixed(2)+'_'+Y[i].toFixed(2)+'_'+Z[i].toFixed(2);
+  const seen=new Map(), rep=new Int32Array(n);
+  const ux=[],uy=[],uz=[];
+  for(let i=0;i<n;i++){
+    const k=key(i);
+    if(!seen.has(k)){ seen.set(k,ux.length); ux.push(X[i]); uy.push(Y[i]); uz.push(Z[i]); }
+    rep[i]=seen.get(k);
+  }
+  // split the slab: everything above the midpoint of its height is the top
+  let lo=Infinity, hi=-Infinity;
+  for(let i=0;i<uy.length;i++){ if(uy[i]<lo)lo=uy[i]; if(uy[i]>hi)hi=uy[i]; }
+  const cut=(lo+hi)*0.5;
+  const ec=new Map(), ek=(a,b)=>a<b?a+':'+b:b+':'+a;
+  const ni=idx?idx.count:n;
+  for(let t=0;t<ni;t+=3){
+    const a=rep[idx?idx.getX(t):t], b=rep[idx?idx.getX(t+1):t+1], c=rep[idx?idx.getX(t+2):t+2];
+    if(a===b||b===c||a===c) continue;                       // exporter slivers
+    if(uy[a]<=cut||uy[b]<=cut||uy[c]<=cut) continue;
+    for(const [p,q] of [[a,b],[b,c],[c,a]]){ const k=ek(p,q); ec.set(k,(ec.get(k)||0)+1); }
+  }
+  const adj=new Map();
+  ec.forEach((count,k)=>{
+    if(count!==1) return;                                   // interior edge
+    const [a,b]=k.split(':').map(Number);
+    if(!adj.has(a)) adj.set(a,[]); if(!adj.has(b)) adj.set(b,[]);
+    adj.get(a).push(b); adj.get(b).push(a);
+  });
+  const used=new Set(), loops=[];
+  adj.forEach((_,s)=>{
+    if(used.has(s)) return;
+    const loop=[s]; used.add(s);
+    let prev=-1, cur=s;
+    for(let guard=0;guard<200000;guard++){
+      const nx=(adj.get(cur)||[]).find(x=>x!==prev&&!used.has(x));
+      if(nx===undefined) break;
+      loop.push(nx); used.add(nx); prev=cur; cur=nx;
+    }
+    if(loop.length>24) loops.push(loop);
+  });
+  if(loops.length<2) return null;
+  const per=l=>{ let s=0; for(let i=0;i<l.length;i++){ const a=l[i],b=l[(i+1)%l.length];
+    s+=Math.hypot(ux[a]-ux[b],uz[a]-uz[b]); } return s; };
+  /* Keep only loops that go most of the way round before choosing. The mesh
+     also yields short loops around small holes and a doubled lip along each
+     rim, and simply taking the shortest and longest of everything picked a
+     stray 150 m sliver instead of the circuit. Both real rims are within a
+     factor of two of the longest loop; nothing else comes close. */
+  const maxPer=Math.max(...loops.map(per));
+  const rims=loops.filter(l=>per(l)>=maxPer*0.5).sort((a,b)=>per(a)-per(b));
+  if(rims.length<2) return null;
+  const inner=rims[0], outer=rims[rims.length-1];
+  // pair across: nearest outer rim point to each ordered inner rim point
+  const pts=[];
+  let wsum=0;
+  for(const a of inner){
+    let bb=-1, best=Infinity;
+    for(const b of outer){
+      const d=(ux[a]-ux[b])**2+(uz[a]-uz[b])**2;
+      if(d<best){ best=d; bb=b; }
+    }
+    wsum+=Math.sqrt(best);
+    pts.push([(ux[a]+ux[bb])*0.5, (uy[a]+uy[bb])*0.5, (uz[a]+uz[bb])*0.5]);
+  }
+  return {pts, width:wsum/inner.length, surfaceY:(lo+hi)*0.5+ (hi-lo)*0.5};
+}
+
+/* Takes either the authored control points or a centreline recovered from an
+   imported mesh. Both end up as one closed Catmull-Rom resampled at even
+   arclength, so everything downstream is blind to where the shape came from.
+   `srcPts` is an array of [x,z] already in metres and already centred. */
+function buildTrack(srcPts, exactLap){
+  const srcRaw = srcPts || TRACK_PX;
+  const pts=srcRaw.map(p=>new THREE.Vector3(p[0],0,p[1]));
   let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9;
   pts.forEach(p=>{mnx=Math.min(mnx,p.x);mxx=Math.max(mxx,p.x);mnz=Math.min(mnz,p.z);mxz=Math.max(mxz,p.z);});
   const cx=(mnx+mxx)/2, cz=(mnz+mxz)/2;
   pts.forEach(p=>{p.x-=cx;p.z-=cz;});
+  trackShift.set(cx,0,cz);
 
-  // centripetal parameterisation: the tight kinks on the left flank and the
-  // right-hand loop would cusp or loop back under the uniform variant.
+  /* centripetal parameterisation: the tight kinks on Pinewood's left flank and
+     its right-hand loop would cusp or loop back under the uniform variant, and
+     an imported rim can be just as unevenly spaced. */
   const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal',0.5);
 
   const D=24000;
@@ -209,10 +355,12 @@ let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
   for(let i=0;i<=D;i++){ curve.getPoint(i/D,v); px[i]=v.x; pz[i]=v.z; }
   for(let i=0;i<D;i++) cum[i+1]=cum[i]+Math.hypot(px[i+1]-px[i],pz[i+1]-pz[i]);
 
-  // one uniform scale takes the sketch to metres; the lap is then exact
-  const SC=LAP_TARGET/cum[D];
+  /* Pinewood is scaled so the lap comes out at exactly LAP_TARGET. An imported
+     circuit is already in metres and must not be stretched, so it keeps
+     whatever length it measures. */
+  const SC = exactLap ? LAP_TARGET/cum[D] : 1;
   for(let i=0;i<=D;i++){ px[i]*=SC; pz[i]*=SC; cum[i]*=SC; }
-  LAP=LAP_TARGET; NSAMP=Math.round(LAP); DS=LAP/NSAMP;
+  LAP=cum[D]; NSAMP=Math.max(64,Math.round(LAP)); DS=LAP/NSAMP;
 
   sx=new Float32Array(NSAMP); sz=new Float32Array(NSAMP);
   let j=0;
@@ -260,23 +408,41 @@ let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
     if(sz[i]>TRK_MAXZ||i===0)TRK_MAXZ=sz[i];
   }
 
-  // s of a control point, found by matching its scaled position to a sample
-  const sOfPoint=i=>{
-    const ex=(TRACK_PX[i][0]-cx)*SC, ez=(TRACK_PX[i][1]-cz)*SC;
-    let best=1e18, bi=0;
-    for(let k=0;k<NSAMP;k++){
-      const d=(sx[k]-ex)*(sx[k]-ex)+(sz[k]-ez)*(sz[k]-ez);
-      if(d<best){best=d;bi=k;}
+  if(srcPts){
+    /* An imported circuit has no authored straight to point at, so find its
+       longest genuinely straight run and treat that as the pit straight. Same
+       intent as the control-point lookup below, arrived at by measurement. */
+    const TH=1/400;
+    let bs=0,bl=0,cs=-1;
+    for(let i=0;i<NSAMP*2;i++){
+      const k=i%NSAMP;
+      if(Math.abs(kap[k])<TH){ if(cs<0) cs=i; }
+      else { if(cs>=0 && i-cs>bl){ bl=i-cs; bs=cs; } cs=-1; }
     }
-    return bi*DS;
-  };
-  STRAIGHT_S0=sOfPoint(STRAIGHT_BEG_I);
-  STRAIGHT_S1=sOfPoint(STRAIGHT_END_I);
+    if(cs>=0 && NSAMP*2-cs>bl){ bl=NSAMP*2-cs; bs=cs; }
+    bl=Math.min(bl,NSAMP-1);
+    STRAIGHT_S0=(bs%NSAMP)*DS;
+    STRAIGHT_S1=STRAIGHT_S0+bl*DS;
+  }else{
+    // s of a control point, found by matching its scaled position to a sample
+    const sOfPoint=i=>{
+      const ex=(TRACK_PX[i][0]-cx)*SC, ez=(TRACK_PX[i][1]-cz)*SC;
+      let best=1e18, bi=0;
+      for(let k=0;k<NSAMP;k++){
+        const d=(sx[k]-ex)*(sx[k]-ex)+(sz[k]-ez)*(sz[k]-ez);
+        if(d<best){best=d;bi=k;}
+      }
+      return bi*DS;
+    };
+    STRAIGHT_S0=sOfPoint(STRAIGHT_BEG_I);
+    STRAIGHT_S1=sOfPoint(STRAIGHT_END_I);
+  }
   // start/finish sits about seven tenths down the straight — past the middle,
   // with enough road left to still be braking for turn one after it.
-  FINISH_S = STRAIGHT_S0 + (STRAIGHT_S1-STRAIGHT_S0)*0.70;
-  START_S  = STRAIGHT_S0;            // lights out at the start of the dead-straight run
-})();
+  const wrap=v=>{ v%=LAP; return v<0?v+LAP:v; };
+  FINISH_S = wrap(STRAIGHT_S0 + (STRAIGHT_S1-STRAIGHT_S0)*0.70);
+  START_S  = wrap(STRAIGHT_S0);      // lights out at the start of the dead-straight run
+}
 
 const _ta=new THREE.Vector2(), _td=new THREE.Vector2();
 function trackAt(s,out){
@@ -316,7 +482,7 @@ function trackPos(s,lat,y,out){
    further than anything downstream cares about.                           */
 const DCELL=40, DRING=3;
 let dgX0=0, dgZ0=0, dgNX=0, dgNZ=0, dgBins=null;
-(function buildDistGrid(){
+function buildDistGrid(){
   const pad=DCELL*(DRING+1);
   dgX0=TRK_MINX-pad; dgZ0=TRK_MINZ-pad;
   dgNX=Math.ceil((TRK_MAXX-TRK_MINX+pad*2)/DCELL);
@@ -328,7 +494,7 @@ let dgX0=0, dgZ0=0, dgNX=0, dgNZ=0, dgBins=null;
     const k=cz*dgNX+cx;
     (dgBins[k]||(dgBins[k]=[])).push(i);
   }
-})();
+}
 const DFAR=1e6;
 function distToTrack(x,z){
   const cx=Math.floor((x-dgX0)/DCELL), cz=Math.floor((z-dgZ0)/DCELL);
@@ -697,7 +863,7 @@ texKerb.anisotropy=MAXANISO; texKerb.encoding=THREE.sRGBEncoding;
 
 /* ---------------------------------------------------------------- terrain */
 const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
-(function buildTerrain(){
+function buildTerrain(){
   const SEG=300, SIZE=9000;
   texGround.repeat.set(SIZE/8,SIZE/8);          // 8 m tile
   const g=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);
@@ -729,7 +895,7 @@ const terrainGroup=new THREE.Group(); scene.add(terrainGroup);
   mesh.receiveShadow=true;
   mesh.frustumCulled=false;
   terrainGroup.add(mesh);
-})();
+}
 
 /* ------------------------------------------------------------------- road */
 const roadGroup=new THREE.Group(); scene.add(roadGroup);
@@ -788,7 +954,7 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
   return g;
 }
 
-(function buildRoad(){
+function buildRoad(){
   texRoad.repeat.set(1,1);             // tiling is baked into the ribbon UVs
 
   const asphalt=new THREE.MeshStandardMaterial({
@@ -942,7 +1108,7 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
   posts.frustumCulled=false; caps.frustumCulled=false;
   posts.userData.casts=true; shadowCasters.push(posts);
   roadGroup.add(posts,caps);
-})();
+}
 
 /* --------------------------------------------------------------- barriers */
 /* The point of these is visibility, not safety. The track is dead flat, so at
@@ -952,7 +1118,8 @@ function ribbonGeo(la, lb, y, ua, ub, vTile, wear){
    Anything with height does not: a waist-high wall following the track edge
    draws the corner as a line in the air long after the road surface has gone,
    which is what lets you read how sharp the next corner is from the cockpit. */
-const BARRIER_LAT=SHOULDER+2.4, BARRIER_Y0=0.28, BARRIER_Y1=1.08;
+let BARRIER_LAT=SHOULDER+2.4;
+const BARRIER_Y0=0.28, BARRIER_Y1=1.08;
 const BARRIER_TILE=fitTile(8);
 
 /* A vertical ribbon: fixed lateral offset, swept between two heights. The
@@ -987,7 +1154,7 @@ function wallGeo(lat,y0,y1,uTile){
   return g;
 }
 
-(function buildBarriers(){
+function buildBarriers(){
   // DoubleSide so the winding never matters and the far barrier still reads
   // through a corner from either hand
   const mat=new THREE.MeshStandardMaterial({
@@ -999,7 +1166,7 @@ function wallGeo(lat,y0,y1,uTile){
     m.castShadow=true; m.userData.casts=true; shadowCasters.push(m);
     roadGroup.add(m);
   });
-})();
+}
 
 /* ------------------------------------------------------- distance boards */
 /* Corner entries, and the 200/150/100/50 m boards on the approach to each.
@@ -1018,7 +1185,7 @@ function cornerEntries(){
   return out;
 }
 
-(function buildBoards(){
+function buildBoards(){
   const ENTRIES=cornerEntries();
   const DISTS=[200,150,100,50];
   const BW=1.7, BH=1.25, POST_H=0.95;
@@ -1075,7 +1242,7 @@ function cornerEntries(){
     im.frustumCulled=false;
     roadGroup.add(im);
   }
-})();
+}
 
 /* ----------------------------------------------------------- racing line */
 /* A real line, not the centreline painted a different colour -- with the car
@@ -1099,7 +1266,7 @@ const RL_ITER=1200;
 const A_BRAKE=40, A_ACCEL=13;               // m/s^2 used for the profile
 let rlN=null, rlV=null, rlState=null, rlMesh=null;
 
-(function buildRacingLine(){
+function buildRacingLine(){
   rlN=new Float32Array(RL_N);
   const cx=new Float32Array(RL_N), cz=new Float32Array(RL_N),
         nx=new Float32Array(RL_N), nz=new Float32Array(RL_N);
@@ -1199,10 +1366,10 @@ let rlN=null, rlV=null, rlState=null, rlMesh=null;
   rlMesh.frustumCulled=false;
   rlMesh.visible=false;                                // off until L is pressed
   roadGroup.add(rlMesh);
-})();
+}
 
 /* ---------------------------------------------------- start / finish line */
-(function buildStartLine(){
+function buildStartLine(){
   const p=new THREE.Vector2(), d=new THREE.Vector2();
   trackAt(FINISH_S,p); trackDir(FINISH_S,d);
   const yaw=Math.atan2(d.x,d.y);
@@ -1310,7 +1477,7 @@ let rlN=null, rlV=null, rlState=null, rlMesh=null;
     stripe.rotation.y=Math.PI/2;
     g.add(stripe);
   });
-})();
+}
 
 /* ------------------------------------------------------- start-light rig */
 /* The start/finish gantry is 580 m up the road from the grid, far too distant
@@ -1323,7 +1490,7 @@ const L_ON_C =sRGB(0xff5a22), L_ON_E =sRGB(0xff2f0a);
 const L_OFF_C=sRGB(0x300d08), L_OFF_E=sRGB(0x120302);
 const LIGHTS_AHEAD=40;   // close enough that the halo strut does not hide the panel
 
-(function buildStartLights(){
+function buildStartLights(){
   const s=START_S+LIGHTS_AHEAD;
   const p=new THREE.Vector2(), d=new THREE.Vector2();
   trackAt(s,p); trackDir(s,d);
@@ -1366,11 +1533,11 @@ const LIGHTS_AHEAD=40;   // close enough that the halo strut does not hide the p
       g.add(b);
     }
   }
-})();
+}
 
 /* -------------------------------------------------------------- mountains */
 const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
-(function buildMountains(){
+function buildMountains(){
   const rand=mulberry32(90210);
   const chunks=[];
   let vTotal=0;
@@ -1497,7 +1664,7 @@ const mountainGroup=new THREE.Group(); scene.add(mountainGroup);
   const mesh=new THREE.Mesh(G,m);
   mesh.frustumCulled=false;
   mountainGroup.add(mesh);
-})();
+}
 
 /* -------------------------------------------------------------------- car */
 /* The GLB was rebuilt so each wheel is its own node sitting exactly on its
@@ -2343,7 +2510,7 @@ const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
    of the car's grip available in a corner. */
 const STEER_ON=0.62, STEER_OFF=0.14;   // seconds, application and return
 const CAR_HALF_W=1.0;             // half the car's width, for the wall test
-const WALL_N=BARRIER_LAT-CAR_HALF_W;
+let WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
 
 /* R puts the car back on the centreline where it stands, pointing down the
@@ -2687,19 +2854,116 @@ function frame(now){
 }
 
 /* ------------------------------------------------------------------ boot */
-let booted=false;
-function ready(){
-  if(booted) return; booted=true;
-  makeTrees();
+/* Two gates, because they finish in either order: the shared assets (textures,
+   tree geometry, the car) load from the moment the page opens, while the world
+   cannot be built until a track is chosen -- and for an imported one, not until
+   its model has arrived and given up its centreline. */
+let booted=false, assetsDone=false, worldDone=false;
+
+function applyTrackConstants(t){
+  TRACK=t;
+  ROAD_HALF=t.roadHalf; LANE_EDGE=t.laneEdge; KERB_W=t.kerbW;
+  SHOULDER=t.shoulder;  TREE_CLEAR=t.treeClear;
+  BARRIER_LAT=SHOULDER+t.barrierOut;
+  WALL_N=BARRIER_LAT-CAR_HALF_W;
+}
+
+/* Everything with a dependency on the centreline, in order. Pinewood generates
+   its own scenery; the imported circuit brings its own, so the terrain, road
+   surface, kerbs, trees, mountains and distance boards are all skipped for it
+   and only the pieces the model lacks -- barriers, racing line, grid lights --
+   are generated on top. */
+function buildWorld(){
+  buildDistGrid();
+  if(TRACK.scenery){
+    buildTerrain();
+    buildRoad();
+    buildBoards();
+    buildMountains();
+  }
+  buildBarriers();
+  buildRacingLine();
+  buildStartLine();
+  buildStartLights();
+  worldDone=true;
+  maybeStart();
+}
+
+function maybeStart(){
+  if(booted || !assetsDone || !worldDone) return;
+  booted=true;
+  if(TRACK.scenery) makeTrees();
   buildMap();
   armStart();
   applyDetail();
   updateStatus();
+  document.getElementById('tag').firstChild.textContent=TRACK.name;
   document.getElementById('tagsub').textContent =
     (LAP/1000).toFixed(3)+' km · McLaren MCL39';
   document.getElementById('boot').classList.add('gone');
   requestAnimationFrame(frame);
 }
+function ready(){ assetsDone=true; maybeStart(); }
+
+const bootEl=document.getElementById('boot');
+const pickEl=document.getElementById('pick');
+const bootMsg=document.getElementById('bootmsg');
+
+function startTrack(id){
+  const t=TRACKS[id];
+  pickEl.style.display='none';
+  applyTrackConstants(t);
+  if(t.procedural){
+    bootMsg.textContent='Building '+t.name;
+    buildTrack(null,true);
+    buildWorld();
+    return;
+  }
+  bootMsg.textContent='Loading '+t.name;
+  const loader=new THREE.GLTFLoader();
+  if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  loader.load(t.glb, gltf=>{
+    const root=gltf.scene;
+    // find the road surface by the material the model names it with
+    let road=null;
+    root.traverse(o=>{
+      if(road||!o.isMesh) return;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      if(ms.some(m=>m&&m.name===t.matchMaterial)) road=o;
+    });
+    if(!road){ bootMsg.textContent='No road mesh in '+t.glb; return; }
+    const cl=centrelineFromMesh(road);
+    if(!cl){ bootMsg.textContent='Could not read a centreline'; return; }
+
+    /* One scale for both the model and the centreline taken out of it, so the
+       two cannot drift apart: the road measures cl.width across, and we want
+       it TRACK.roadMetres wide. */
+    const k=t.roadMetres/cl.width;
+    let sy=0; cl.pts.forEach(p=>sy+=p[1]); sy/=cl.pts.length;
+    const src=cl.pts.map(p=>[p[0]*k,p[2]*k]);
+    buildTrack(src,false);
+    // buildTrack centred the centreline; move the model by the same amount so
+    // the mesh still sits under the line that was extracted from it
+    root.scale.setScalar(k);
+    root.position.set(-trackShift.x, -sy*k, -trackShift.z);
+    root.traverse(o=>{ if(o.isMesh){ o.receiveShadow=true;
+      if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
+        .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
+    scene.add(root);
+    scene.fog.density=0.0016;          // a much smaller world than Pinewood
+    buildWorld();
+  }, ev=>{
+    if(ev.lengthComputable)
+      bootMsg.textContent='Loading '+t.name+' '+Math.round(ev.loaded/ev.total*100)+'%';
+  }, err=>{
+    console.error('track load failed',err);
+    bootMsg.textContent='Track failed to load';
+  });
+}
+
+Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
+  btn.addEventListener('click',()=>startTrack(btn.dataset.track));
+});
 
 addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;
