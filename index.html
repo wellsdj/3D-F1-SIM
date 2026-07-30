@@ -2447,7 +2447,17 @@ function drive(dt){
      the head always falls into the corner the wheels are pointing at.
      Curvature alone would leave the head dead level while you sawed at the
      wheel on a straight. */
-  const leanT=clamp(-steerAng*0.075, -0.085, 0.085);   // up to ~4.9 deg
+  /* The lean already scales with speed for free, because steerAng is itself
+     scaled by the speed-dependent lock -- so the same input leans the head
+     hard through a slow corner and barely at all at 300 kph, exactly the way
+     the rack behaves. What was throwing that away was the clamp: at 0.085 rad
+     it saturated everywhere below about 150 kph, flattening the whole
+     low-speed half to one value. Opening it up lets the progression show.
+
+     Deliberately off steerAng and not off lateral load: cornering g rises with
+     speed, so a g-based lean would tilt the head most at 300 kph, which is the
+     opposite of what a driver does and of how this should feel. */
+  const leanT=clamp(-steerAng*0.078, -0.155, 0.155);   // up to ~8.9 deg
   headLean += (leanT-headLean)*(1-Math.pow(0.02,dt));
 
   // Wheels roll at v/r -- faster car, faster spin, no slip.
