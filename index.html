@@ -1778,6 +1778,10 @@ function buildMountains(){
 const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
+/* Contact patches and low points of the bodywork, in carGroup space, measured
+   from the model once it loads rather than assumed. */
+const CARPTS=[], CARLOW=[];
+let CAR_WB=3.4, CAR_TR=1.9, RIDE=0.125;
 const STEER_AXIS=new THREE.Vector3(0,0.456,0.890).normalize();
 const CAR_LEN=5.60;                     // 2025-spec car length, metres
 const WHEELBASE=3.60;
@@ -1862,7 +1866,39 @@ const WHEELBASE=3.60;
       const ms=Array.isArray(o.material)?o.material:[o.material];
       ms.forEach(m=>{ if(m && m.map) m.map.anisotropy=MAXANISO; });
     });
-    carGroup.position.y=0.125;          // road deck sits at 0.12
+    /* The ground code needs to know the shape of the thing it is standing up.
+       Guessing it was the bug: the surface was sampled 1.6 m fore and aft while
+       the car is 5.6 m long, and the body was then rotated about its middle, so
+       the nose and tail swung well outside anything that had been measured and
+       dug into the road. These are the real contact patches -- each wheel's
+       centre dropped by its own radius -- plus the lowest corners of the
+       bodywork, all in the group's own space. */
+    carGroup.updateMatrixWorld(true);
+    const _lp=new THREE.Vector3();
+    CARPTS.length=0; CARLOW.length=0;
+    wheels.forEach(w=>{
+      const wb=new THREE.Box3().setFromObject(w);
+      wb.getCenter(_lp); carGroup.worldToLocal(_lp);
+      CARPTS.push({x:_lp.x, y:_lp.y-(wb.max.y-wb.min.y)/2, z:_lp.z});
+    });
+    const bb=new THREE.Box3().setFromObject(car);
+    const lo=carGroup.worldToLocal(bb.min.clone()), hi=carGroup.worldToLocal(bb.max.clone());
+    for(const cx of [lo.x,hi.x]) for(const cz of [lo.z,hi.z]) CARLOW.push({x:cx,y:lo.y,z:cz});
+    CARPTS.forEach(c=>CARLOW.push(c));
+    if(CARPTS.length===4){
+      CAR_WB=Math.abs(CARPTS[0].z-CARPTS[2].z)||3.4;
+      CAR_TR=Math.abs(CARPTS[0].x-CARPTS[1].x)||1.9;
+      // order them so the plane fit knows which end is which
+      CARPTS.sort((a,b)=>b.z-a.z);
+      if(CARPTS[0].x<CARPTS[1].x) CARPTS.splice(0,2,CARPTS[1],CARPTS[0]);
+      if(CARPTS[2].x<CARPTS[3].x) CARPTS.splice(2,2,CARPTS[3],CARPTS[2]);
+      CAR_WB=Math.abs((CARPTS[0].z+CARPTS[1].z)/2-(CARPTS[2].z+CARPTS[3].z)/2)||3.4;
+      CAR_TR=Math.abs((CARPTS[0].x+CARPTS[2].x)/2-(CARPTS[1].x+CARPTS[3].x)/2)||1.9;
+    }
+    RIDE = -(CARPTS.length?Math.min(...CARPTS.map(c=>c.y)):-0.125);
+    console.log('car footprint: wheelbase '+CAR_WB.toFixed(2)+' m, track '+CAR_TR.toFixed(2)
+                +' m, ride offset '+RIDE.toFixed(3)+' m, '+CARLOW.length+' low points');
+    carGroup.position.y=RIDE;           // wheels exactly on the deck
     loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
     if(loaded>=pending) ready();
   }, undefined, err=>{
@@ -2557,6 +2593,7 @@ function updateStart(dt){
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
 let carPitch=0, carRoll=0, groundY=0, carVY=0;
+const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
@@ -2845,56 +2882,87 @@ function frame(now){
        instead of sliding along at a fixed height. Resolved about the car's own
        heading, so pitch is the slope you are driving up and roll is the camber
        across you. Both eased, or every triangle edge would snap the body. */
-    /* A rigid chassis rests on its contact patches, so the surface is sampled
-       at four of them rather than at one point under the middle. Taking the
-       highest is what a rigid body actually does: it rides over a crest and
-       bridges a dip, and -- the point here -- its nose cannot bury itself
-       where the slope breaks upward. */
+    /* Stand the car on the ground properly, in two stages.
+
+       First the attitude: probe the ground under each of the four wheels and
+       fit a plane through them. Averaging the two wheels on each axle is a
+       least-squares fit for four symmetric points, and averaging is what makes
+       it smooth -- the road is only 1683 triangles over 7 km, so a single
+       probe kicks at every facet edge, while two averaged and then eased ride
+       straight over them.
+
+       Then the height: with that attitude settled, work out where the body has
+       to sit so that nothing on it is underground. Every low point -- the four
+       contact patches and the four bottom corners of the bodywork -- is swung
+       through the car's actual rotation, the ground is probed beneath where it
+       really ends up, and the body is lifted to clear the worst of them. That
+       is the part that was missing: height and attitude used to be computed
+       independently, so rotating the car afterwards drove its ends into the
+       road no matter how carefully the height had been chosen. */
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
-    const HL=1.6, HW=0.85, ref=groundY;
-    const gF=groundAt(carState.wx+fx*HL, carState.wz+fz*HL, ref).y, hF=_gnd.hit;
-    const gR=groundAt(carState.wx-fx*HL, carState.wz-fz*HL, ref).y, hR=_gnd.hit;
-    const gL=groundAt(carState.wx-fz*HW, carState.wz+fx*HW, ref).y, hL=_gnd.hit;
-    const gRt=groundAt(carState.wx+fz*HW, carState.wz-fx*HW, ref).y, hRt=_gnd.hit;
-    const g=groundAt(carState.wx, carState.wz, ref);
-    /* Rest height is the highest of the centre and the two axle midpoints, not
-       the highest single contact. Using the highest contact lifted the body by
-       the whole rise across the wheelbase on any gradient -- 0.6 m on the 38%
-       stretch -- because the uphill wheel alone carried it. An axle midpoint
-       equals the centre on a constant slope, so a gradient no longer lifts it,
-       while a crest still rides on the middle and a dip is still bridged. */
-    let top=-1e9, any=false;
-    if(hF&&hR){ top=Math.max(top,(gF+gR)*0.5); any=true; }
-    else { if(hF){top=Math.max(top,gF);any=true;} if(hR){top=Math.max(top,gR);any=true;} }
-    if(hL&&hRt){ top=Math.max(top,(gL+gRt)*0.5); any=true; }
-    else { if(hL){top=Math.max(top,gL);any=true;} if(hRt){top=Math.max(top,gRt);any=true;} }
-    if(g.hit){top=Math.max(top,g.y);any=true;}
-    if(any){
-      /* Rising ground is followed at once -- easing it was what put the car
-         under the surface, eight metres behind the climb at 0.13 s of lag and
-         60 m/s. Ground falling away is the other half, and it is not a lag at
-         all: it is the car leaving the surface, so it falls under gravity.
-         Easing that instead left it flying up to 2.18 m above the road down
-         the steep stretch. Gravity glues it to any descent it can physically
-         follow and lets it get light over a crest, which is the right answer
-         to both. */
-      if(top>groundY){ groundY=top; carVY=0; }
-      else {
-        carVY -= 9.81*dt;
-        groundY += carVY*dt;
-        if(groundY<=top){ groundY=top; carVY=0; }
+    const probe1=(lx,lz)=>{                      // car space -> world, ground there
+      const wx=carState.wx + lx*fz + lz*fx;
+      const wz=carState.wz - lx*fx + lz*fz;
+      const g=groundAt(wx,wz,groundY);
+      return g.hit?g.y:null;
+    };
+    /* Each wheel is read as the mean of a short patch rather than a single
+       point. The road is 1683 triangles over 7 km, so one probe steps at every
+       facet edge and the car twitched by up to 4 degrees crossing them. A
+       patch averages the edge away where it happens, which is better than
+       easing harder afterwards -- that would only smear the twitch into a
+       wallow and add lag to every real slope as well. */
+    const probe=(lx,lz)=>{
+      let sum=0,n=0;
+      for(const d of [-0.45,0,0.45]){
+        const v=probe1(lx,lz+d); if(v!==null){sum+=v;n++;}
+        const u=probe1(lx+d,lz); if(u!==null){sum+=u;n++;}
+      }
+      return n?sum/n:null;
+    };
+    let tp=carPitch, tr=carRoll;
+    if(CARPTS.length===4){
+      const y0=probe(CARPTS[0].x,CARPTS[0].z), y1=probe(CARPTS[1].x,CARPTS[1].z),
+            y2=probe(CARPTS[2].x,CARPTS[2].z), y3=probe(CARPTS[3].x,CARPTS[3].z);
+      if(y0!==null&&y1!==null&&y2!==null&&y3!==null){
+        tp=Math.atan2(((y0+y1)-(y2+y3))*0.5, CAR_WB);   // front axle vs rear
+        tr=Math.atan2(((y0+y2)-(y1+y3))*0.5, CAR_TR);   // left vs right
       }
     }
-    carGroup.position.set(carState.wx, groundY+0.125, carState.wz);
-    /* Attitude off the contact points rather than off one triangle's normal,
-       so it is the plane the car is actually standing on and does not flicker
-       as it crosses edges. */
-    const tp = (hF&&hR) ? Math.atan2(gF-gR, 2*HL)
-                        : Math.atan2(-(g.nx*fx+g.nz*fz), Math.max(g.ny,0.15));
-    const tr = (hL&&hRt)? Math.atan2(gL-gRt, 2*HW)
-                        : Math.atan2( (g.nx*fz-g.nz*fx), Math.max(g.ny,0.15));
-    carPitch += (tp-carPitch)*(1-Math.pow(1e-12,dt));
-    carRoll  += (tr-carRoll )*(1-Math.pow(1e-12,dt));
+    // eased, but only lightly -- the averaging above has already taken the
+    // facet noise out, so this does not need to hide anything
+    carPitch += (tp-carPitch)*(1-Math.pow(2e-4,dt));
+    carRoll  += (tr-carRoll )*(1-Math.pow(2e-4,dt));
+
+    _rq.setFromEuler(_re.set(carPitch,h,carRoll,'YXZ'));
+    /* Two passes. groundAt picks the surface nearest the height it is given,
+       so the answer depends on the reference -- solving once could settle the
+       body onto a different surface than the one it was measured against, and
+       leave a low point a few centimetres under. The second pass re-probes
+       against the height the first produced. */
+    let need=-1e9, any=false;
+    for(let pass=0; pass<2; pass++){
+      const ref = any ? need : groundY;
+      need=-1e9; any=false;
+      for(let i=0;i<CARLOW.length;i++){
+        const q=CARLOW[i];
+        _lv.set(q.x,q.y,q.z).applyQuaternion(_rq);    // where it truly ends up
+        const g=groundAt(carState.wx+_lv.x, carState.wz+_lv.z, ref);
+        if(!g.hit) continue;
+        const r=g.y-_lv.y;                            // body height clearing it
+        if(r>need){need=r;any=true;}
+      }
+      if(!any) break;
+    }
+    if(any){
+      /* Rising ground is followed at once -- a car cannot be inside the road.
+         Ground falling away is not lag but the car leaving the surface, so it
+         falls under gravity: glued to any descent it can physically follow,
+         and light over a crest. */
+      if(need>groundY){ groundY=need; carVY=0; }
+      else { carVY-=9.81*dt; groundY+=carVY*dt; if(groundY<=need){groundY=need;carVY=0;} }
+    }
+    carGroup.position.set(carState.wx, groundY, carState.wz);
     carGroup.rotation.order='YXZ';
     carGroup.rotation.set(carPitch, h, carRoll);
   }else{
@@ -2914,7 +2982,7 @@ function frame(now){
      them tens of metres underground the moment the car climbed -- at Spa the
      road reaches 66 m, so a chase camera pinned to y=3.15 sat inside the hill.
      On flat ground base is 0 and the framing is exactly what it was. */
-  const camBase=carGroup.position.y-0.125;
+  const camBase=FREEROAM?carGroup.position.y-RIDE:0;
   /* And a camera can still end up inside a slope even at the right height --
      behind the car on a descent, the ground behind is higher than the car. So
      lift it clear of whatever is under it. */
@@ -3183,8 +3251,10 @@ function startTrack(id){
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '+stats.refs+' refs');
     const g=groundAt(0,0,1e9);
     carState.wx=0; carState.wz=0; carState.hdg=0; carState.speed=0;
-    groundY = g.hit?g.y:0;
-    carGroup.position.set(0, groundY+0.125, 0);
+    // groundY is the body's height, not the ground's -- the clearance guard
+    // works in body space, so seed it the same way
+    groundY = (g.hit?g.y:0)+RIDE; carVY=0;
+    carGroup.position.set(0, groundY, 0);
     console.log('ground under the spawn: '+(g.hit?g.y.toFixed(3):'MISSING'));
 
     scene.fog.density=0.00035;         // a real valley circuit, long sightlines
