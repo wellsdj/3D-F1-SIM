@@ -2382,6 +2382,10 @@ addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 
 /* Camera rig. Cockpit p is a point in the car model's own space (metres
    before the fit-to-5.6 m scale). Chase rides the centreline behind the car. */
+/* How hard the view leans with the ground. Above 1 so a descent is opened
+   up rather than merely followed -- looking exactly along the slope still
+   buries the far end of the road behind the nose. */
+const CAM_SLOPE=1.35;
 const CAMS=[
   // Seated down in the tub: rim at 0.68 is just below the lens, the halo at
   // 0.87 arcs overhead, the wheel at 0.51-0.68 sits in the lower frame.
@@ -2905,14 +2909,30 @@ function frame(now){
   const sp=carState.speed/MAXSPEED;
   const C=CAMS[camMode];
 
+  /* Every camera height below is measured from the car rather than from y=0.
+     They were absolute, which was invisible while the track was flat and put
+     them tens of metres underground the moment the car climbed -- at Spa the
+     road reaches 66 m, so a chase camera pinned to y=3.15 sat inside the hill.
+     On flat ground base is 0 and the framing is exactly what it was. */
+  const camBase=carGroup.position.y-0.125;
+  /* And a camera can still end up inside a slope even at the right height --
+     behind the car on a descent, the ground behind is higher than the car. So
+     lift it clear of whatever is under it. */
+  const clearGround=(v,pad)=>{
+    const g=groundAt(v.x,v.z,v.y);
+    if(g.hit && v.y < g.y+pad) v.y=g.y+pad;
+    return v;
+  };
+
   if(orbit){
     const cx=carGroup.position.x, cz=carGroup.position.z;
     camera.position.set(
       cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
-      1.0+Math.sin(orbPitch)*orbDist,
+      camBase+1.0+Math.sin(orbPitch)*orbDist,
       cz+Math.cos(orbYaw)*Math.cos(orbPitch)*orbDist);
+    clearGround(camera.position,1.0);
     camera.up.set(0,1,0);
-    camera.lookAt(cx,0.9,cz);
+    camera.lookAt(cx,camBase+0.9,cz);
     camera.fov=52;
   }else{
     /* Both of these used to be built off the centreline, which was fine while
@@ -2923,10 +2943,16 @@ function frame(now){
     const h=carGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
 
     if(C.chase){
-      camera.position.set(carGroup.position.x-hx*C.back, C.up,
+      /* Sits behind at the car's own height, lifted clear if the ground
+         behind happens to be higher, and aims down the slope the car is on so
+         a descent shows the road rather than the sky. */
+      camera.position.set(carGroup.position.x-hx*C.back, camBase+C.up,
                           carGroup.position.z-hz*C.back);
+      clearGround(camera.position,1.2);
       camera.up.set(0,1,0);
-      camera.lookAt(carGroup.position.x+hx*8, 1.15, carGroup.position.z+hz*8);
+      camera.lookAt(carGroup.position.x+hx*8,
+                    camBase+1.15+Math.sin(carPitch)*8*CAM_SLOPE,
+                    carGroup.position.z+hz*8);
     }else if(freeLook){
       /* Head moved and aimed in the car's own space, so it rides the shell.
          The eye offset is clamped at source, and the aim is built from the
@@ -2936,7 +2962,8 @@ function frame(now){
       camera.position.copy(carPoint(ex,ey,ez));
       // aim: a model-space point 24 m ahead of the eye along the yawed and
       // pitched gaze, then taken to world -- a point, so localToWorld is valid
-      const cy=Math.cos(fPitch), R=24;
+      const cy=Math.cos(fPitch), R=24;   // fPitch is the head; the body's own
+      // pitch already rides in through carObj's transform
       _fwd.set(ex + Math.sin(fYaw)*cy*R,
                ey + Math.sin(fPitch)*R,
                ez + Math.cos(fYaw)*cy*R);
@@ -2949,7 +2976,13 @@ function frame(now){
       // the seat trim applies here too, not just in free look.
       const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]+fFwd);
       camera.position.copy(P);
-      _aim.set(P.x+hx*LA, P.y+0.06, P.z+hz*LA);
+      /* The aim was horizontal, so going downhill you looked at the horizon
+         and could not see the road falling away underneath you. It now runs
+         out along the slope the car is standing on, over-driven a little so a
+         descent opens up properly rather than just clipping the nose. */
+      const aimP=clamp(carPitch*CAM_SLOPE, -0.62, 0.52);
+      _aim.set(P.x+hx*LA*Math.cos(aimP), P.y+0.06+Math.sin(aimP)*LA,
+               P.z+hz*LA*Math.cos(aimP));
       camera.up.set(0,1,0);
       camera.lookAt(_aim);
     }
