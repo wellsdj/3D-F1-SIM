@@ -110,7 +110,7 @@
   <p id="bootmsg">Choose a circuit</p>
   <div id="pick">
     <button data-track="pinewood"><b>Pinewood</b><span>Generated · 5.00 km · wide and fast</span></button>
-    <button data-track="autodromo"><b>Autodromo</b><span>Imported · 0.78 km · tight and technical</span></button>
+    <button data-track="spa"><b>Spa-Francorchamps</b><span>Imported · free roam · 102 m of elevation</span></button>
   </div>
   <div id="bar"><i></i></div>
 </div>
@@ -169,10 +169,9 @@ let TREE_CLEAR  = 22.0;     // nearest trunk to the centreline
 let LAP_TARGET  = 5000;     // circuit length, metres
 
 /* ------------------------------------------------------------------ tracks */
-/* Pinewood is authored from control points. Autodromo is imported: its
-   centreline is recovered from the road mesh in the GLB, so the driving
-   surface and everything derived from it line up with the model exactly
-   rather than being eyeballed into place. */
+/* Pinewood is authored from control points and driven in track space, so it
+   has a lap, barriers and a racing line. Spa is an imported scan driven in
+   free roam: you go where you like and the ground comes from the model. */
 const TRACKS={
   pinewood:{
     id:'pinewood', name:'Pinewood', sub:'Generated · 5.00 km',
@@ -180,21 +179,24 @@ const TRACKS={
     roadHalf:7.6, laneEdge:6.75, kerbW:2.0, shoulder:11.4, treeClear:22.0,
     barrierOut:2.4, scenery:true
   },
-  autodromo:{
-    id:'autodromo', name:'Autodromo', sub:'Imported · 0.78 km',
-    procedural:false, glb:'race_track.glb',
-    /* The model carries no unit declaration, so the scale is pinned off the
-       geometry: the road mesh measures 578 units across and its crash walls
-       58 units tall. Taking the road as 12 m puts the walls at 1.20 m, which
-       is right for a crash wall, and every other object in the scene lands
-       at a sensible size too. */
-    roadMetres:12.0,
+  spa:{
+    id:'spa', name:'Spa-Francorchamps', sub:'Imported · free roam',
+    procedural:false, glb:'spa.glb', freeRoam:true, scenery:false,
+    /* This model needs no scale guessing: its footprint measures 2554 x 2440 m
+       and its road climbs 102.1 m, against a real Spa of about 2.5 km across
+       with roughly 100 m of elevation. It is already 1 unit = 1 metre. The
+       road surface is mesh 89 -- 83826 m2 of upward-facing triangles, which
+       over the real 6968 m lap is a road 12.0 m wide. */
+    roadMaterial:'ROAD1X_78', roadMetres:12.0,
     roadHalf:6.0, laneEdge:5.2, kerbW:1.6, shoulder:8.0, treeClear:26.0,
-    barrierOut:2.6, scenery:false,
-    matchMaterial:'Asfalto'      // the mesh the centreline is recovered from
+    barrierOut:2.6,
+    // somewhere flat and unambiguously on the tarmac to be put down, in the
+    // model's own Z-up coordinates; the height is resolved off the surface
+    spawn:[-1285.4,-701.3]
   }
 };
 let TRACK=TRACKS.pinewood;
+let FREEROAM=false;
 /* Declared here rather than with the drive model: the racing line is built at
    load and needs both, and it is built long before that section is reached. */
 const MAXSPEED    = 100;    // m/s = 360 km/h exactly
@@ -238,6 +240,98 @@ let sx=null, sz=null, tanx=null, tanz=null, kap=null;
 let START_S=6, FINISH_S=0, STRAIGHT_S0=0, STRAIGHT_S1=0;
 const trackShift=new THREE.Vector3();   // model units removed when centring
 let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
+
+/* ---------------------------------------------------- ground height field --
+   Free roam means the car can be anywhere, so its height has to come from the
+   scenery itself rather than from a track model. Raycasting the whole circuit
+   every frame is far too slow -- a quarter of a million triangles -- so the
+   drivable ones are binned into a flat grid by their footprint once at load.
+   A downward probe then only tests the handful sharing its cell.
+
+   Only surfaces you could plausibly sit on are kept (normal.y > 0.3), which
+   drops building walls, barrier faces and the backdrop, so the car cannot end
+   up perched on the side of something. */
+const HF={cell:6, minx:0, minz:0, nx:0, nz:0, bins:null, tri:null};
+function buildHeightField(root){
+  const tris=[]; const v=new THREE.Vector3();
+  root.updateWorldMatrix(true,true);
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+    const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
+    const n=idx?idx.count:pos.count;
+    const P=new Float32Array(pos.count*3);
+    for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
+      P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
+    for(let t=0;t+2<n;t+=3){
+      const a=idx?idx.getX(t):t, b=idx?idx.getX(t+1):t+1, c=idx?idx.getX(t+2):t+2;
+      const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
+            cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
+      const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const L=Math.hypot(nx,ny,nz); if(L<1e-9) continue;
+      if(ny/L<0.3 && -ny/L<0.3) continue;              // a wall, not a floor
+      tris.push(ax,ay,az,bx,by,bz,cx,cy,cz);
+    }
+  });
+  const T=new Float32Array(tris); const nt=T.length/9;
+  let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9;
+  for(let i=0;i<nt;i++){ for(let k=0;k<3;k++){ const x=T[i*9+k*3], z=T[i*9+k*3+2];
+    if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(z<mnz)mnz=z; if(z>mxz)mxz=z; } }
+  HF.minx=mnx-4; HF.minz=mnz-4;
+  HF.nx=Math.max(1,Math.ceil((mxx-mnx+8)/HF.cell));
+  HF.nz=Math.max(1,Math.ceil((mxz-mnz+8)/HF.cell));
+  const counts=new Uint32Array(HF.nx*HF.nz);
+  const span=i=>{ let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+    for(let k=0;k<3;k++){ const x=T[i*9+k*3], z=T[i*9+k*3+2];
+      if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z; }
+    return [Math.max(0,((x0-HF.minx)/HF.cell)|0), Math.min(HF.nx-1,((x1-HF.minx)/HF.cell)|0),
+            Math.max(0,((z0-HF.minz)/HF.cell)|0), Math.min(HF.nz-1,((z1-HF.minz)/HF.cell)|0)]; };
+  for(let i=0;i<nt;i++){ const [a,b,c,d]=span(i);
+    for(let gx=a;gx<=b;gx++) for(let gz=c;gz<=d;gz++) counts[gz*HF.nx+gx]++; }
+  const start=new Uint32Array(HF.nx*HF.nz+1);
+  for(let i=0;i<counts.length;i++) start[i+1]=start[i]+counts[i];
+  const items=new Uint32Array(start[counts.length]); const fill=start.slice();
+  for(let i=0;i<nt;i++){ const [a,b,c,d]=span(i);
+    for(let gx=a;gx<=b;gx++) for(let gz=c;gz<=d;gz++) items[fill[gz*HF.nx+gx]++]=i; }
+  HF.tri=T; HF.bins={start,items};
+  return {tris:nt, cells:HF.nx*HF.nz, refs:items.length};
+}
+
+/* Highest surface at (x,z) at or below refY+2, so driving under a bridge does
+   not snap the car onto its deck. Falls back to the highest surface found. */
+const _gnd={y:0,nx:0,ny:1,nz:0,hit:false};
+function groundAt(x,z,refY){
+  _gnd.hit=false; _gnd.y=0; _gnd.nx=0; _gnd.ny=1; _gnd.nz=0;
+  if(!HF.bins) return _gnd;
+  const gx=((x-HF.minx)/HF.cell)|0, gz=((z-HF.minz)/HF.cell)|0;
+  if(gx<0||gz<0||gx>=HF.nx||gz>=HF.nz) return _gnd;
+  const {start,items}=HF.bins, T=HF.tri;
+  const lim=(refY===undefined?1e9:refY+2.0);
+  let bestUnder=-1e9, bU=-1, bestAny=-1e9, bA=-1;
+  for(let p=start[gz*HF.nx+gx]; p<start[gz*HF.nx+gx+1]; p++){
+    const i=items[p];
+    const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
+          cx=T[i*9+6],cy=T[i*9+7],cz=T[i*9+8];
+    const d=(bx-ax)*(cz-az)-(cx-ax)*(bz-az); if(Math.abs(d)<1e-12) continue;
+    const w0=((bx-x)*(cz-z)-(cx-x)*(bz-z))/d;
+    const w1=((cx-x)*(az-z)-(ax-x)*(cz-z))/d;
+    const w2=1-w0-w1;
+    if(w0<-1e-4||w1<-1e-4||w2<-1e-4) continue;
+    const y=w0*ay+w1*by+w2*cy;
+    if(y>bestAny){bestAny=y;bA=i;}
+    if(y<=lim && y>bestUnder){bestUnder=y;bU=i;}
+  }
+  const i=bU>=0?bU:bA; if(i<0) return _gnd;
+  _gnd.y=bU>=0?bestUnder:bestAny; _gnd.hit=true;
+  const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
+        cx=T[i*9+6],cy=T[i*9+7],cz=T[i*9+8];
+  let nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay), ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az),
+      nz=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+  const L=Math.hypot(nx,ny,nz)||1; nx/=L; ny/=L; nz/=L;
+  if(ny<0){nx=-nx;ny=-ny;nz=-nz;}
+  _gnd.nx=nx; _gnd.ny=ny; _gnd.nz=nz;
+  return _gnd;
+}
 
 /* ------------------------------------------- centreline from a road mesh --
    The imported circuit has no path or spline in it, only geometry, so the
@@ -2443,7 +2537,10 @@ function updateStart(dt){
    a corner covers less centreline than a metre on the outside. It only
    degenerates at n = 1/k, and the barriers stop us at 13.8 m while the
    tightest corner has a 25.8 m radius, so it is never close. */
-const carState={ s:START_S, n:0, psi:0, speed:0 };
+/* s/n drive the generated circuit in track space; wx/wz/hdg drive free roam
+   in world space. Only one pair is live at a time, chosen by FREEROAM. */
+const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
+let carPitch=0, carRoll=0, groundY=0;
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
@@ -2584,6 +2681,14 @@ function drive(dt){
     const yawMax = v>0.5 ? A_GRIP/v : 8;
     yawRate=clamp(yawRate,-yawMax,yawMax);
 
+    if(FREEROAM){
+      /* World-space integration. Nothing to be confined by and nothing to
+         measure against, so heading is absolute and position is plain
+         dead-reckoning across the ground. */
+      carState.hdg += yawRate*dt;
+      carState.wx  += Math.sin(carState.hdg)*v*dt;
+      carState.wz  += Math.cos(carState.hdg)*v*dt;
+    } else {
     const k=trackK(carState.s);
     const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
     const sdot=v*Math.cos(carState.psi)/denom;
@@ -2611,6 +2716,7 @@ function drive(dt){
         carState.psi=-carState.psi*0.28;                      // glance off
         carState.speed=Math.max(1.5, carState.speed*(1-clamp(vIn*0.05,0.02,0.5)));
       }
+    }
     }
   }
 
@@ -2717,10 +2823,28 @@ function frame(now){
 
   // place the car at (s, n) with its own heading. Matrices must be current
   // before carPoint() reads mount positions off the bodywork.
-  trackPos(carState.s,carState.n,0.125,_carP);
-  trackDir(carState.s,_d2);
-  carGroup.position.copy(_carP);
-  carGroup.rotation.y=Math.atan2(_d2.x,_d2.y)+carState.psi;
+  if(FREEROAM){
+    /* Sit on whatever is underneath and take the car's attitude from the
+       surface normal, so it leans into cambers and pitches up the climbs
+       instead of sliding along at a fixed height. Resolved about the car's own
+       heading, so pitch is the slope you are driving up and roll is the camber
+       across you. Both eased, or every triangle edge would snap the body. */
+    const g=groundAt(carState.wx,carState.wz,carGroup.position.y);
+    if(g.hit) groundY += (g.y-groundY)*(1-Math.pow(0.0005,dt));
+    carGroup.position.set(carState.wx, groundY+0.125, carState.wz);
+    const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+    const tp=Math.atan2(-(g.nx*fx+g.nz*fz), Math.max(g.ny,0.15));
+    const tr=Math.atan2( (g.nx*fz-g.nz*fx), Math.max(g.ny,0.15));
+    carPitch += (tp-carPitch)*(1-Math.pow(0.0005,dt));
+    carRoll  += (tr-carRoll )*(1-Math.pow(0.0005,dt));
+    carGroup.rotation.order='YXZ';
+    carGroup.rotation.set(carPitch, h, carRoll);
+  }else{
+    trackPos(carState.s,carState.n,0.125,_carP);
+    trackDir(carState.s,_d2);
+    carGroup.position.copy(_carP);
+    carGroup.rotation.y=Math.atan2(_d2.x,_d2.y)+carState.psi;
+  }
   carGroup.updateMatrixWorld(true);
   updateDebris(dt);
 
@@ -2848,8 +2972,7 @@ function frame(now){
   sun.position.copy(tmp).addScaledVector(SUN_DIR,190);
 
   renderer.render(scene,camera);
-  drawMap();
-  drawCornerMap();
+  if(!FREEROAM){ drawMap(); drawCornerMap(); }
 
 }
 
@@ -2861,7 +2984,7 @@ function frame(now){
 let booted=false, assetsDone=false, worldDone=false;
 
 function applyTrackConstants(t){
-  TRACK=t;
+  TRACK=t; FREEROAM=!!t.freeRoam;
   ROAD_HALF=t.roadHalf; LANE_EDGE=t.laneEdge; KERB_W=t.kerbW;
   SHOULDER=t.shoulder;  TREE_CLEAR=t.treeClear;
   BARRIER_LAT=SHOULDER+t.barrierOut;
@@ -2874,6 +2997,15 @@ function applyTrackConstants(t){
    and only the pieces the model lacks -- barriers, racing line, grid lights --
    are generated on top. */
 function buildWorld(){
+  if(FREEROAM){
+    /* Nothing here is available without a centreline: barriers, racing line,
+       grid lights, boards and the lap itself are all measured along one. Free
+       roam has no such line, so the world is just the model and the ground
+       under it. Those come back when the barrier work lands. */
+    document.getElementById('map').style.display='none';
+    document.getElementById('cmap').style.display='none';
+    worldDone=true; maybeStart(); return;
+  }
   buildDistGrid();
   if(TRACK.scenery){
     buildTerrain();
@@ -2893,13 +3025,13 @@ function maybeStart(){
   if(booted || !assetsDone || !worldDone) return;
   booted=true;
   if(TRACK.scenery) makeTrees();
-  buildMap();
-  armStart();
+  if(!FREEROAM){ buildMap(); armStart(); }
+  else { startPhase='go'; }
   applyDetail();
   updateStatus();
   document.getElementById('tag').firstChild.textContent=TRACK.name;
   document.getElementById('tagsub').textContent =
-    (LAP/1000).toFixed(3)+' km · McLaren MCL39';
+    (FREEROAM?'Free roam':(LAP/1000).toFixed(3)+' km')+' · McLaren MCL39';
   document.getElementById('boot').classList.add('gone');
   requestAnimationFrame(frame);
 }
@@ -2924,33 +3056,51 @@ function startTrack(id){
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
   loader.load(t.glb, gltf=>{
     const root=gltf.scene;
-    // find the road surface by the material the model names it with
-    let road=null;
-    root.traverse(o=>{
-      if(road||!o.isMesh) return;
-      const ms=Array.isArray(o.material)?o.material:[o.material];
-      if(ms.some(m=>m&&m.name===t.matchMaterial)) road=o;
-    });
-    if(!road){ bootMsg.textContent='No road mesh in '+t.glb; return; }
-    const cl=centrelineFromMesh(road);
-    if(!cl){ bootMsg.textContent='Could not read a centreline'; return; }
+    bootMsg.textContent='Reading the ground';
+    root.updateWorldMatrix(true,true);
 
-    /* One scale for both the model and the centreline taken out of it, so the
-       two cannot drift apart: the road measures cl.width across, and we want
-       it TRACK.roadMetres wide. */
-    const k=t.roadMetres/cl.width;
-    let sy=0; cl.pts.forEach(p=>sy+=p[1]); sy/=cl.pts.length;
-    const src=cl.pts.map(p=>[p[0]*k,p[2]*k]);
-    buildTrack(src,false);
-    // buildTrack centred the centreline; move the model by the same amount so
-    // the mesh still sits under the line that was extracted from it
-    root.scale.setScalar(k);
-    root.position.set(-trackShift.x, -sy*k, -trackShift.z);
+    /* The model is already 1 unit = 1 metre, so it is placed rather than
+       scaled -- only re-centred, and dropped so the spawn point sits at y=0.
+       The loader has already applied the exporter's Z-up to Y-up rotation, so
+       the spawn recorded in the model's own coordinates comes across as
+       (x, -y) here. */
+    /* Rather than guess how the exporter rotated the model, find the road by
+       the material it carries and use its own geometry. The spawn was chosen
+       offline in the model's untransformed coordinates, so match it against
+       the raw attribute and then push that one vertex through the mesh's world
+       matrix -- whatever the rotation turns out to be, this lands on tarmac. */
+    let road=null;
+    root.traverse(o=>{ if(road||!o.isMesh) return;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      if(ms.some(m=>m&&m.name===t.roadMaterial)) road=o; });
+    const start=new THREE.Vector3();
+    if(road){
+      const pos=road.geometry.attributes.position;
+      let bi=0,bd=Infinity;
+      for(let i=0;i<pos.count;i++){
+        const d=(pos.getX(i)-t.spawn[0])**2+(pos.getY(i)-t.spawn[1])**2;
+        if(d<bd){bd=d;bi=i;}
+      }
+      road.updateWorldMatrix(true,false);
+      start.fromBufferAttribute(pos,bi).applyMatrix4(road.matrixWorld);
+      console.log('spawn vertex %s m from the point picked offline', Math.sqrt(bd).toFixed(1));
+    }else console.warn('road material '+t.roadMaterial+' not found; spawning at the origin');
+    // put that point at the world origin so the car starts on it
+    root.position.set(-start.x, -start.y, -start.z);
     root.traverse(o=>{ if(o.isMesh){ o.receiveShadow=true;
       if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
         .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
     scene.add(root);
-    scene.fog.density=0.0016;          // a much smaller world than Pinewood
+
+    const stats=buildHeightField(root);
+    console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '+stats.refs+' refs');
+    const g=groundAt(0,0,1e9);
+    carState.wx=0; carState.wz=0; carState.hdg=0; carState.speed=0;
+    groundY = g.hit?g.y:0;
+    carGroup.position.set(0, groundY+0.125, 0);
+    console.log('ground under the spawn: '+(g.hit?g.y.toFixed(3):'MISSING'));
+
+    scene.fog.density=0.00035;         // a real valley circuit, long sightlines
     buildWorld();
   }, ev=>{
     if(ev.lengthComputable)
