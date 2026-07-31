@@ -306,8 +306,18 @@ function groundAt(x,z,refY){
   const gx=((x-HF.minx)/HF.cell)|0, gz=((z-HF.minz)/HF.cell)|0;
   if(gx<0||gz<0||gx>=HF.nx||gz>=HF.nz) return _gnd;
   const {start,items}=HF.bins, T=HF.tri;
-  const lim=(refY===undefined?1e9:refY+2.0);
-  let bestUnder=-1e9, bU=-1, bestAny=-1e9, bA=-1;
+  /* Pick the surface nearest the height we were already at, rather than the
+     highest one below a fixed window. The window was the bug: climbing more
+     than its 2 m put the road out of reach, and this model has a single large
+     terrain slab running underneath the circuit, so that slab then won and the
+     car was placed *below* the road it was driving on.
+
+     Continuity gets every case right for one rule -- on a climb the road ahead
+     is the closest surface, on a bridge the deck is closest from above and the
+     ground is closest from underneath. A very large refY means "no history,
+     give me the topmost", which is what the initial placement wants. */
+  const fresh=!(refY<1e8);
+  let bestD=Infinity, bI=-1, hiY=-1e9, hiI=-1;
   for(let p=start[gz*HF.nx+gx]; p<start[gz*HF.nx+gx+1]; p++){
     const i=items[p];
     const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
@@ -318,11 +328,13 @@ function groundAt(x,z,refY){
     const w2=1-w0-w1;
     if(w0<-1e-4||w1<-1e-4||w2<-1e-4) continue;
     const y=w0*ay+w1*by+w2*cy;
-    if(y>bestAny){bestAny=y;bA=i;}
-    if(y<=lim && y>bestUnder){bestUnder=y;bU=i;}
+    if(y>hiY){hiY=y;hiI=i;}
+    const dd=Math.abs(y-refY);
+    if(dd<bestD){bestD=dd;bI=i;_gnd.y=y;}
   }
-  const i=bU>=0?bU:bA; if(i<0) return _gnd;
-  _gnd.y=bU>=0?bestUnder:bestAny; _gnd.hit=true;
+  if(fresh){ bI=hiI; _gnd.y=hiY; }
+  const i=bI; if(i<0) return _gnd;
+  _gnd.hit=true;
   const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
         cx=T[i*9+6],cy=T[i*9+7],cz=T[i*9+8];
   let nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay), ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az),
@@ -2540,7 +2552,7 @@ function updateStart(dt){
 /* s/n drive the generated circuit in track space; wx/wz/hdg drive free roam
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
-let carPitch=0, carRoll=0, groundY=0;
+let carPitch=0, carRoll=0, groundY=0, carVY=0;
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let lockF=1;                      // eased speed-dependent lock multiplier
@@ -2829,14 +2841,56 @@ function frame(now){
        instead of sliding along at a fixed height. Resolved about the car's own
        heading, so pitch is the slope you are driving up and roll is the camber
        across you. Both eased, or every triangle edge would snap the body. */
-    const g=groundAt(carState.wx,carState.wz,carGroup.position.y);
-    if(g.hit) groundY += (g.y-groundY)*(1-Math.pow(0.0005,dt));
-    carGroup.position.set(carState.wx, groundY+0.125, carState.wz);
+    /* A rigid chassis rests on its contact patches, so the surface is sampled
+       at four of them rather than at one point under the middle. Taking the
+       highest is what a rigid body actually does: it rides over a crest and
+       bridges a dip, and -- the point here -- its nose cannot bury itself
+       where the slope breaks upward. */
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
-    const tp=Math.atan2(-(g.nx*fx+g.nz*fz), Math.max(g.ny,0.15));
-    const tr=Math.atan2( (g.nx*fz-g.nz*fx), Math.max(g.ny,0.15));
-    carPitch += (tp-carPitch)*(1-Math.pow(0.0005,dt));
-    carRoll  += (tr-carRoll )*(1-Math.pow(0.0005,dt));
+    const HL=1.6, HW=0.85, ref=groundY;
+    const gF=groundAt(carState.wx+fx*HL, carState.wz+fz*HL, ref).y, hF=_gnd.hit;
+    const gR=groundAt(carState.wx-fx*HL, carState.wz-fz*HL, ref).y, hR=_gnd.hit;
+    const gL=groundAt(carState.wx-fz*HW, carState.wz+fx*HW, ref).y, hL=_gnd.hit;
+    const gRt=groundAt(carState.wx+fz*HW, carState.wz-fx*HW, ref).y, hRt=_gnd.hit;
+    const g=groundAt(carState.wx, carState.wz, ref);
+    /* Rest height is the highest of the centre and the two axle midpoints, not
+       the highest single contact. Using the highest contact lifted the body by
+       the whole rise across the wheelbase on any gradient -- 0.6 m on the 38%
+       stretch -- because the uphill wheel alone carried it. An axle midpoint
+       equals the centre on a constant slope, so a gradient no longer lifts it,
+       while a crest still rides on the middle and a dip is still bridged. */
+    let top=-1e9, any=false;
+    if(hF&&hR){ top=Math.max(top,(gF+gR)*0.5); any=true; }
+    else { if(hF){top=Math.max(top,gF);any=true;} if(hR){top=Math.max(top,gR);any=true;} }
+    if(hL&&hRt){ top=Math.max(top,(gL+gRt)*0.5); any=true; }
+    else { if(hL){top=Math.max(top,gL);any=true;} if(hRt){top=Math.max(top,gRt);any=true;} }
+    if(g.hit){top=Math.max(top,g.y);any=true;}
+    if(any){
+      /* Rising ground is followed at once -- easing it was what put the car
+         under the surface, eight metres behind the climb at 0.13 s of lag and
+         60 m/s. Ground falling away is the other half, and it is not a lag at
+         all: it is the car leaving the surface, so it falls under gravity.
+         Easing that instead left it flying up to 2.18 m above the road down
+         the steep stretch. Gravity glues it to any descent it can physically
+         follow and lets it get light over a crest, which is the right answer
+         to both. */
+      if(top>groundY){ groundY=top; carVY=0; }
+      else {
+        carVY -= 9.81*dt;
+        groundY += carVY*dt;
+        if(groundY<=top){ groundY=top; carVY=0; }
+      }
+    }
+    carGroup.position.set(carState.wx, groundY+0.125, carState.wz);
+    /* Attitude off the contact points rather than off one triangle's normal,
+       so it is the plane the car is actually standing on and does not flicker
+       as it crosses edges. */
+    const tp = (hF&&hR) ? Math.atan2(gF-gR, 2*HL)
+                        : Math.atan2(-(g.nx*fx+g.nz*fz), Math.max(g.ny,0.15));
+    const tr = (hL&&hRt)? Math.atan2(gL-gRt, 2*HW)
+                        : Math.atan2( (g.nx*fz-g.nz*fx), Math.max(g.ny,0.15));
+    carPitch += (tp-carPitch)*(1-Math.pow(1e-12,dt));
+    carRoll  += (tr-carRoll )*(1-Math.pow(1e-12,dt));
     carGroup.rotation.order='YXZ';
     carGroup.rotation.set(carPitch, h, carRoll);
   }else{
