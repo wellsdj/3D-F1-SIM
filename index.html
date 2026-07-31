@@ -2944,8 +2944,14 @@ function frame(now){
       if(groundY<tgt){ groundY=tgt; if(carVY<0) carVY=0; }
     }
     carGroup.position.set(carState.wx, groundY, carState.wz);
+    /* carPitch is positive climbing, which is how the cameras read it. It has
+       to be negated going into rotation.x: a positive rotation about +X takes
+       +Z toward -Y, and the nose is at +z, so feeding it straight in pitched
+       the car the wrong way -- nose down every climb, nose up every descent.
+       Roll needs no flip: car-local +x is the left-hand side, and a positive
+       rotation about +Z lifts +x, which is what a higher left wheel wants. */
     carGroup.rotation.order='YXZ';
-    carGroup.rotation.set(carPitch, h, carRoll);
+    carGroup.rotation.set(-carPitch, h, carRoll);
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
