@@ -192,7 +192,15 @@ const TRACKS={
     barrierOut:2.6,
     // somewhere flat and unambiguously on the tarmac to be put down, in the
     // model's own Z-up coordinates; the height is resolved off the surface
-    spawn:[-1285.4,-701.3]
+    /* Start/finish. Found by rasterising the road and taking the longest
+       straight run adjoining the widest paved area -- the paddock, 45 m across
+       -- which at Spa is the pit straight. 168 m of straight with 134 m of
+       clear road ahead of where the car is put down. Two points, because the
+       heading has to come from the model rather than from an assumption about
+       which way it was exported: both are matched to real road vertices and
+       pushed through the mesh's world matrix, and the direction between them
+       is the way to face. */
+    spawn:[-704.1,167.4], spawnAim:[-674.2,164.7]
   }
 };
 let TRACK=TRACKS.pinewood;
@@ -2589,7 +2597,7 @@ function updateStart(dt){
 /* s/n drive the generated circuit in track space; wx/wz/hdg drive free roam
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
-let carPitch=0, carRoll=0, groundY=0, carVY=0;
+let carPitch=0, carRoll=0, groundY=0, carVY=0, tgtPrev=null, tgtVel=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
@@ -2928,14 +2936,27 @@ function frame(now){
     carRoll  += (tr-carRoll )*(1-Math.pow(2e-4,dt));
 
     if(tgt!==null){
+      if(tgtPrev===null) tgtPrev=tgt;
       /* w is the suspension frequency; 2*w damping is exactly critical, so the
          body settles as fast as it can without ever passing the target and
          having to come back. The spring may push up as hard as it likes but
          may never pull down harder than gravity, which is what lets the car go
          light over a crest and fly if it is thrown clear, instead of being
          sucked back onto the road. */
+      /* The damping term is measured against the ground's own vertical speed,
+         not against zero. A critically damped spring chasing a ramp settles at
+         a standing error of 2*v/w -- descending 38% at 80 km/h the road drops
+         about 8.4 m/s, which at this stiffness parked the car 0.74 m above it.
+         That is why it floated only at speed and sat down again as you slowed:
+         the error is proportional to how fast the ground is moving under you.
+         Feeding that rate forward leaves the spring only the residual to
+         correct, so a constant gradient is tracked with no standing error at
+         any speed. */
+      const tv=(tgt-tgtPrev)/Math.max(dt,1e-4);
+      tgtVel += (tv-tgtVel)*(1-Math.pow(1e-4,dt));   // rate is noisy; ease it
+      tgtPrev=tgt;
       const w=2*Math.PI*3.6;
-      let a=w*w*(tgt-groundY) - 2*w*carVY;
+      let a=w*w*(tgt-groundY) + 2*w*(tgtVel-carVY);
       if(a<-9.81) a=-9.81;
       carVY += a*dt;
       groundY += carVY*dt;
@@ -3215,17 +3236,25 @@ function startTrack(id){
     root.traverse(o=>{ if(road||!o.isMesh) return;
       const ms=Array.isArray(o.material)?o.material:[o.material];
       if(ms.some(m=>m&&m.name===t.roadMaterial)) road=o; });
-    const start=new THREE.Vector3();
+    const start=new THREE.Vector3(), aim=new THREE.Vector3();
+    let heading=0;
     if(road){
       const pos=road.geometry.attributes.position;
-      let bi=0,bd=Infinity;
-      for(let i=0;i<pos.count;i++){
-        const d=(pos.getX(i)-t.spawn[0])**2+(pos.getY(i)-t.spawn[1])**2;
-        if(d<bd){bd=d;bi=i;}
-      }
       road.updateWorldMatrix(true,false);
-      start.fromBufferAttribute(pos,bi).applyMatrix4(road.matrixWorld);
-      console.log('spawn vertex %s m from the point picked offline', Math.sqrt(bd).toFixed(1));
+      const nearest=(tx,tz,out)=>{
+        let bi=0,bd=Infinity;
+        for(let i=0;i<pos.count;i++){
+          const d=(pos.getX(i)-tx)**2+(pos.getY(i)-tz)**2;
+          if(d<bd){bd=d;bi=i;}
+        }
+        out.fromBufferAttribute(pos,bi).applyMatrix4(road.matrixWorld);
+        return Math.sqrt(bd);
+      };
+      const d0=nearest(t.spawn[0],t.spawn[1],start);
+      nearest(t.spawnAim[0],t.spawnAim[1],aim);
+      heading=Math.atan2(aim.x-start.x, aim.z-start.z);
+      console.log('spawn vertex '+d0.toFixed(1)+' m from the point picked offline, facing '
+                  +(heading*57.3).toFixed(0)+' deg');
     }else console.warn('road material '+t.roadMaterial+' not found; spawning at the origin');
     // put that point at the world origin so the car starts on it
     root.position.set(-start.x, -start.y, -start.z);
@@ -3236,13 +3265,15 @@ function startTrack(id){
 
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '+stats.refs+' refs');
-    const g=groundAt(0,0,1e9);
-    carState.wx=0; carState.wz=0; carState.hdg=0; carState.speed=0;
-    // groundY is the body's height, not the ground's -- the clearance guard
-    // works in body space, so seed it the same way
-    groundY = (g.hit?g.y:0)+RIDE; carVY=0;
+    carState.wx=0; carState.wz=0; carState.hdg=heading; carState.speed=0;
+    /* The model was moved so the chosen road vertex is the origin, so the road
+       here is exactly y=0 -- no need to search for it, and searching was wrong:
+       it asked for the topmost surface and found the gantry over the start
+       line, standing the car 1.05 m up in the air until it drove off the mark.
+       groundY is the body's height, not the ground's. */
+    groundY = RIDE; carVY=0; tgtPrev=null; tgtVel=0;
     carGroup.position.set(0, groundY, 0);
-    console.log('ground under the spawn: '+(g.hit?g.y.toFixed(3):'MISSING'));
+
 
     scene.fog.density=0.00035;         // a real valley circuit, long sightlines
     buildWorld();
