@@ -249,6 +249,68 @@ let START_S=6, FINISH_S=0, STRAIGHT_S0=0, STRAIGHT_S1=0;
 const trackShift=new THREE.Vector3();   // model units removed when centring
 let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
 
+/* ------------------------------------------------ imported scenery repair --
+   Two faults in this model's materials, and between them they are why the
+   trees came out as pale rectangles and black cut-outs.
+
+   The foliage is 23 alpha-BLENDED materials with no cutoff. Blending needs the
+   triangles drawn back to front, which nothing does for a forest of camera-
+   facing cards, so they wash each other out and the quad each tree is drawn on
+   shows as a pale rectangle. Foliage does not want blending at all: the alpha
+   is a stencil, not a translucency. Switching to an alpha test makes each pixel
+   simply present or absent, which is order-independent and lets the cards write
+   depth like anything else.
+
+   Separately, 7 materials declare full metalness. A metal surface shows its
+   surroundings and nothing else, so with no environment map to reflect it
+   renders black -- which is the other half of what you were seeing. There is no
+   environment map here, so the metalness is dropped to match. */
+function fixSceneryMaterials(root){
+  const seen=new Set(); let cutout=0, demetal=0, back=0;
+  /* The four painted backdrops -- kilometres wide, a dozen triangles each --
+     are blended for a reason: they are a soft panorama meant to sit behind
+     everything and fade out. Alpha-testing those turned them into solid black
+     slabs standing over the treeline. They are told apart by size, since no
+     real object here is a kilometre across AND made of a dozen triangles --
+     size alone caught 85 of them, because the scenery is merged into meshes
+     that legitimately span the whole circuit. They are left blended but pushed
+     behind the scene and stopped from writing depth. */
+  const bb=new THREE.Box3(), sz=new THREE.Vector3();
+  const backdrop=new Set();
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry) return;
+    o.geometry.computeBoundingBox();
+    bb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld); bb.getSize(sz);
+    const ix=o.geometry.index, tri=(ix?ix.count:o.geometry.attributes.position.count)/3;
+    if(Math.max(sz.x,sz.z)>800 && tri<100){
+      o.renderOrder=-1;
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+        if(!m) return; backdrop.add(m.uuid);
+        m.transparent=true; m.depthWrite=false; m.alphaTest=0;
+        m.side=THREE.DoubleSide; m.needsUpdate=true; });
+      back++;
+    }
+  });
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+      if(!m||seen.has(m.uuid)) return; seen.add(m.uuid);
+      if(backdrop.has(m.uuid)) return;
+      if(m.transparent && m.map){
+        m.transparent=false;
+        m.alphaTest=0.42;          // low enough to keep needles, high enough to
+        m.depthWrite=true;         // cut the card edge cleanly
+        m.side=THREE.DoubleSide;   // a leaf card is lit from either face
+        cutout++;
+      }
+      if(m.metalness!==undefined && m.metalness>0.3 && !m.envMap){ m.metalness=0.0; demetal++; }
+      if(m.roughness!==undefined && m.roughness<0.25) m.roughness=0.6;  // no envmap to be shiny against
+      m.needsUpdate=true;
+    });
+  });
+  return {cutout, demetal, back, total:seen.size};
+}
+
 /* ---------------------------------------------------- ground height field --
    Free roam means the car can be anywhere, so its height has to come from the
    scenery itself rather than from a track model. Raycasting the whole circuit
@@ -3257,6 +3319,9 @@ function startTrack(id){
         .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
     scene.add(root);
 
+    const mf=fixSceneryMaterials(root);
+    console.log('scenery materials: '+mf.cutout+' blended foliage switched to alpha test, '
+                +mf.demetal+' metallic dropped, '+mf.back+' backdrops kept blended, of '+mf.total);
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '+stats.refs+' refs');
     carState.wx=0; carState.wz=0; carState.hdg=heading; carState.speed=0;
