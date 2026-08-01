@@ -2597,7 +2597,7 @@ function updateStart(dt){
 /* s/n drive the generated circuit in track space; wx/wz/hdg drive free roam
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
-let carPitch=0, carRoll=0, groundY=0, carVY=0, tgtPrev=null, tgtVel=0;
+let carPitch=0, carRoll=0, groundY=0, carVY=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
@@ -2932,37 +2932,31 @@ function frame(now){
     }
     if(tgt===null){ const g=groundAt(carState.wx,carState.wz,groundY-RIDE);
                     if(g.hit) tgt=g.y+RIDE; }
-    carPitch += (tp-carPitch)*(1-Math.pow(2e-4,dt));
-    carRoll  += (tr-carRoll )*(1-Math.pow(2e-4,dt));
+    carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
+    carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
 
     if(tgt!==null){
-      if(tgtPrev===null) tgtPrev=tgt;
-      /* w is the suspension frequency; 2*w damping is exactly critical, so the
-         body settles as fast as it can without ever passing the target and
-         having to come back. The spring may push up as hard as it likes but
-         may never pull down harder than gravity, which is what lets the car go
-         light over a crest and fly if it is thrown clear, instead of being
-         sucked back onto the road. */
-      /* The damping term is measured against the ground's own vertical speed,
-         not against zero. A critically damped spring chasing a ramp settles at
-         a standing error of 2*v/w -- descending 38% at 80 km/h the road drops
-         about 8.4 m/s, which at this stiffness parked the car 0.74 m above it.
-         That is why it floated only at speed and sat down again as you slowed:
-         the error is proportional to how fast the ground is moving under you.
-         Feeding that rate forward leaves the spring only the residual to
-         correct, so a constant gradient is tracked with no standing error at
-         any speed. */
-      const tv=(tgt-tgtPrev)/Math.max(dt,1e-4);
-      tgtVel += (tv-tgtVel)*(1-Math.pow(1e-4,dt));   // rate is noisy; ease it
-      tgtPrev=tgt;
-      const w=2*Math.PI*3.6;
-      let a=w*w*(tgt-groundY) + 2*w*(tgtVel-carVY);
-      if(a<-9.81) a=-9.81;
-      carVY += a*dt;
-      groundY += carVY*dt;
-      // a wheel may not go through the road: a floor, not a snap, so it only
-      // ever acts on the last centimetre or two the spring has not caught
-      if(groundY<tgt){ groundY=tgt; if(carVY<0) carVY=0; }
+      /* Downforce. The car is held on the road rather than balanced above it
+         on a spring, and that removes the whole class of problem the spring
+         kept producing.
+
+         A spring is second order, so it can oscillate -- that was the bouncing
+         -- and it lags a moving target, so it floated at speed and sat down
+         again when you stopped. Feeding the ground's rate forward to cancel
+         that lag made it worse still, because the rate has to be got by
+         differencing the sampled height between frames, and a 1 cm step at a
+         mesh facet reads as 0.6 m/s over one frame. Multiplied by the damping
+         gain that is an acceleration spike, so the cure was itself a bounce
+         generator.
+
+         There is nothing to tune here and nothing that can ring: the body is
+         put on the plane through its wheels, every frame. No lag at any speed,
+         no overshoot, no float. The smoothing that makes this look right is
+         entirely spatial -- each wheel already reads the mean of a half-metre
+         patch, which is what takes out the facet steps, and doing it in space
+         rather than in time costs nothing in response. */
+      groundY = tgt;
+      carVY = 0;
     }
     carGroup.position.set(carState.wx, groundY, carState.wz);
     /* carPitch is positive climbing, which is how the cameras read it. It has
@@ -3271,7 +3265,7 @@ function startTrack(id){
        it asked for the topmost surface and found the gantry over the start
        line, standing the car 1.05 m up in the air until it drove off the mark.
        groundY is the body's height, not the ground's. */
-    groundY = RIDE; carVY=0; tgtPrev=null; tgtVel=0;
+    groundY = RIDE; carVY=0;
     carGroup.position.set(0, groundY, 0);
 
 
