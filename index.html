@@ -110,7 +110,8 @@
   <p id="bootmsg">Choose a circuit</p>
   <div id="pick">
     <button data-track="pinewood"><b>Pinewood</b><span>Generated · 5.00 km · wide and fast</span></button>
-    <button data-track="spa"><b>Spa-Francorchamps</b><span>Imported · free roam · 102 m of elevation</span></button>
+    <button data-track="spa"><b>Spa 1998</b><span>Imported · free roam · 102 m of elevation</span></button>
+    <button data-track="spa22"><b>Spa 2022</b><span>Imported · free roam · full layout</span></button>
   </div>
   <div id="bar"><i></i></div>
 </div>
@@ -180,27 +181,16 @@ const TRACKS={
     barrierOut:2.4, scenery:true
   },
   spa:{
-    id:'spa', name:'Spa-Francorchamps', sub:'Imported · free roam',
+    id:'spa', name:'Spa 1998', sub:'Imported · free roam',
     procedural:false, glb:'spa.glb', freeRoam:true, scenery:false,
-    /* This model needs no scale guessing: its footprint measures 2554 x 2440 m
-       and its road climbs 102.1 m, against a real Spa of about 2.5 km across
-       with roughly 100 m of elevation. It is already 1 unit = 1 metre. The
-       road surface is mesh 89 -- 83826 m2 of upward-facing triangles, which
-       over the real 6968 m lap is a road 12.0 m wide. */
-    roadMaterial:'ROAD1X_78', roadMetres:12.0,
     roadHalf:6.0, laneEdge:5.2, kerbW:1.6, shoulder:8.0, treeClear:26.0,
-    barrierOut:2.6,
-    // somewhere flat and unambiguously on the tarmac to be put down, in the
-    // model's own Z-up coordinates; the height is resolved off the surface
-    /* Start/finish. Found by rasterising the road and taking the longest
-       straight run adjoining the widest paved area -- the paddock, 45 m across
-       -- which at Spa is the pit straight. 168 m of straight with 134 m of
-       clear road ahead of where the car is put down. Two points, because the
-       heading has to come from the model rather than from an assumption about
-       which way it was exported: both are matched to real road vertices and
-       pushed through the mesh's world matrix, and the direction between them
-       is the way to face. */
-    spawn:[-704.1,167.4], spawnAim:[-674.2,164.7]
+    barrierOut:2.6
+  },
+  spa22:{
+    id:'spa22', name:'Spa 2022', sub:'Imported · free roam · full layout',
+    procedural:false, glb:'spa2022.glb', freeRoam:true, scenery:false,
+    roadHalf:6.0, laneEdge:5.2, kerbW:1.6, shoulder:8.0, treeClear:26.0,
+    barrierOut:2.6
   }
 };
 let TRACK=TRACKS.pinewood;
@@ -248,6 +238,124 @@ let sx=null, sz=null, tanx=null, tanz=null, kap=null;
 let START_S=6, FINISH_S=0, STRAIGHT_S0=0, STRAIGHT_S1=0;
 const trackShift=new THREE.Vector3();   // model units removed when centring
 let TRK_MINX=0, TRK_MAXX=0, TRK_MINZ=0, TRK_MAXZ=0;
+
+/* --------------------------------------------------- track auto-detection --
+   Everything a new circuit needs, worked out from the model rather than hand
+   derived per track: which mesh is the road, what its units are, and where on
+   it to start. Adding a track becomes dropping in a file.
+
+   Finding the road. Not simply the largest horizontal surface -- that is the
+   terrain, which on this model is 1.3 million square metres against the road's
+   84 thousand. What separates them is shape: a road is a ribbon and fills
+   almost none of its own bounding box, about 2% here, while terrain and the
+   painted backdrops fill a quarter or more. So take the largest upward-facing
+   area among meshes that are long, thin and actually made of triangles. */
+function findRoadMesh(root){
+  const v=new THREE.Vector3(); let best=null;
+  root.updateWorldMatrix(true,true);
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+    const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
+    const nt=(idx?idx.count:pos.count)/3;
+    if(nt<200) return;                       // backdrops are a dozen triangles
+    const P=new Float32Array(pos.count*3);
+    for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
+      P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
+    let area=0, x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+    for(let t=0;t<nt;t++){
+      const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2;
+      const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
+            cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
+      const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const L=Math.hypot(nx,ny,nz); if(L<1e-9||ny/L<0.5) continue;
+      area+=L/2;
+      x0=Math.min(x0,ax,bx,cx); x1=Math.max(x1,ax,bx,cx);
+      z0=Math.min(z0,az,bz,cz); z1=Math.max(z1,az,bz,cz);
+    }
+    if(area<3000) return;
+    const box=Math.max((x1-x0)*(z1-z0),1), fill=area/box;
+    if(fill>0.10) return;                    // terrain and backdrops fill their box
+    if(Math.max(x1-x0,z1-z0)<200) return;    // a circuit spans hundreds of metres
+    if(!best||area>best.area) best={mesh:o, area, span:Math.max(x1-x0,z1-z0), fill};
+  });
+  return best;
+}
+
+/* Where to start. Rasterise the road looking down, measure how far every point
+   is from an edge, and the widest place by far is the paddock -- 45 m across on
+   the 1998 model against a 12 m road. That locates the pits without naming
+   anything. Then take the longest straight run of ordinary racing width near
+   it, which is the pit straight, and stand on that facing along it. This is
+   what keeps the car out of a garage. */
+function findGrid(mesh){
+  const CELL=1.5, v=new THREE.Vector3();
+  const g=mesh.geometry, pos=g.attributes.position, idx=g.index, m=mesh.matrixWorld;
+  const P=new Float32Array(pos.count*3);
+  for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
+    P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+  for(let i=0;i<pos.count;i++){ const x=P[i*3],z=P[i*3+2];
+    if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z; }
+  x0-=8; z0-=8; x1+=8; z1+=8;
+  const W=Math.ceil((x1-x0)/CELL), H=Math.ceil((z1-z0)/CELL);
+  if(W*H>4.2e6) return null;                 // refuse to chew a vast grid
+  const occ=new Uint8Array(W*H);
+  const nt=(idx?idx.count:pos.count)/3;
+  for(let t=0;t<nt;t++){
+    const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2;
+    const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
+          cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
+    const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    const L=Math.hypot(nx,ny,nz); if(L<1e-9||ny/L<0.5) continue;
+    const d=(bx-ax)*(cz-az)-(cx-ax)*(bz-az); if(Math.abs(d)<1e-12) continue;
+    const i0=Math.max(0,((Math.min(ax,bx,cx)-x0)/CELL)|0), i1=Math.min(W-1,((Math.max(ax,bx,cx)-x0)/CELL|0)+1);
+    const k0=Math.max(0,((Math.min(az,bz,cz)-z0)/CELL)|0), k1=Math.min(H-1,((Math.max(az,bz,cz)-z0)/CELL|0)+1);
+    for(let ix=i0;ix<=i1;ix++)for(let iz=k0;iz<=k1;iz++){
+      const px=x0+(ix+0.5)*CELL, pz=z0+(iz+0.5)*CELL;
+      const w0=((bx-px)*(cz-pz)-(cx-px)*(bz-pz))/d;
+      const w1=((cx-px)*(az-pz)-(ax-px)*(cz-pz))/d;
+      if(w0<-0.02||w1<-0.02||1-w0-w1<-0.02) continue;
+      occ[iz*W+ix]=1;
+    }
+  }
+  const BIG=1e9, D=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++) D[i]=occ[i]?BIG:0;
+  const rel=(a,b)=>Math.hypot(a,b)*CELL;
+  for(let z=0;z<H;z++)for(let x=0;x<W;x++){ const i=z*W+x; if(!occ[i])continue; let mn=D[i];
+    for(const[dx,dz]of[[-1,0],[0,-1],[-1,-1],[1,-1]]){ const a=x+dx,b=z+dz;
+      mn=Math.min(mn,(a<0||b<0||a>=W||b>=H)?rel(dx,dz):D[b*W+a]+rel(dx,dz)); } D[i]=mn; }
+  for(let z=H-1;z>=0;z--)for(let x=W-1;x>=0;x--){ const i=z*W+x; if(!occ[i])continue; let mn=D[i];
+    for(const[dx,dz]of[[1,0],[0,1],[1,1],[-1,1]]){ const a=x+dx,b=z+dz;
+      mn=Math.min(mn,(a<0||b<0||a>=W||b>=H)?rel(dx,dz):D[b*W+a]+rel(dx,dz)); } D[i]=mn; }
+  let wid=0,wi=0; for(let i=0;i<W*H;i++) if(D[i]<BIG&&D[i]>wid){wid=D[i];wi=i;}
+  const gx=i=>x0+((i%W)+0.5)*CELL, gz=i=>z0+((i/W|0)+0.5)*CELL;
+  const at=(px,pz)=>{ const a=(px-x0)/CELL-0.5,b=(pz-z0)/CELL-0.5;
+    const a0=Math.floor(a),b0=Math.floor(b),fa=a-a0,fb=b-b0;
+    const q=(u,v2)=>(u<0||v2<0||u>=W||v2>=H)?0:(D[v2*W+u]<BIG?D[v2*W+u]:0);
+    return q(a0,b0)*(1-fa)*(1-fb)+q(a0+1,b0)*fa*(1-fb)+q(a0,b0+1)*(1-fa)*fb+q(a0+1,b0+1)*fa*fb; };
+  const run=(px,pz,th)=>{ const sx=Math.sin(th),cz2=Math.cos(th); let f=0,b=0;
+    for(let d=2;d<900;d+=3){ if(at(px+sx*d,pz+cz2*d)<4.5) break; f=d; }
+    for(let d=2;d<900;d+=3){ if(at(px-sx*d,pz-cz2*d)<4.5) break; b=d; }
+    return {f,b,tot:f+b}; };
+  const px0=gx(wi), pz0=gz(wi);
+  let best=null;
+  for(let iz=1;iz<H-1;iz+=2)for(let ix=1;ix<W-1;ix+=2){
+    const i=iz*W+ix; if(!occ[i]||D[i]<5||D[i]>8) continue;
+    const px=gx(i), pz=gz(i);
+    if(Math.hypot(px-px0,pz-pz0)>300) continue;
+    let bt=null;
+    for(let th=0;th<Math.PI;th+=Math.PI/48){ const r=run(px,pz,th);
+      if(!bt||r.tot>bt.tot) bt={...r,th}; }
+    if(bt&&(!best||bt.tot>best.tot)) best={px,pz,...bt};
+  }
+  if(!best) return null;
+  const th=best.f>=best.b?best.th:best.th+Math.PI;
+  const back=Math.min(best.f,best.b)*0.55;
+  return { x:best.px-Math.sin(th)*back, z:best.pz-Math.cos(th)*back,
+           hdg:th, straight:best.tot, pitWidth:wid*2 };
+}
 
 /* ------------------------------------------------ imported scenery repair --
    Two faults in this model's materials, and between them they are why the
@@ -3275,64 +3383,56 @@ function startTrack(id){
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
   loader.load(t.glb, gltf=>{
     const root=gltf.scene;
-    bootMsg.textContent='Reading the ground';
+    bootMsg.textContent='Reading the circuit';
     root.updateWorldMatrix(true,true);
 
-    /* The model is already 1 unit = 1 metre, so it is placed rather than
-       scaled -- only re-centred, and dropped so the spawn point sits at y=0.
-       The loader has already applied the exporter's Z-up to Y-up rotation, so
-       the spawn recorded in the model's own coordinates comes across as
-       (x, -y) here. */
-    /* Rather than guess how the exporter rotated the model, find the road by
-       the material it carries and use its own geometry. The spawn was chosen
-       offline in the model's untransformed coordinates, so match it against
-       the raw attribute and then push that one vertex through the mesh's world
-       matrix -- whatever the rotation turns out to be, this lands on tarmac. */
-    let road=null;
-    root.traverse(o=>{ if(road||!o.isMesh) return;
-      const ms=Array.isArray(o.material)?o.material:[o.material];
-      if(ms.some(m=>m&&m.name===t.roadMaterial)) road=o; });
-    const start=new THREE.Vector3(), aim=new THREE.Vector3();
+    /* Nothing below is hand-derived per track: the road, the units and the
+       grid slot all come out of the model, so a new circuit is just a file. */
+    const rd = findRoadMesh(root);
+    if(!rd){ bootMsg.textContent='No road surface found in '+t.glb; return; }
+    console.log('road: '+Math.round(rd.area)+' m2 of surface, '+Math.round(rd.span)
+                +' across, filling '+(rd.fill*100).toFixed(1)+'% of its box');
+
+    /* Units. A real circuit is one to three kilometres across, so a road
+       spanning that is already in metres and must not be touched. Anything far
+       off that was authored in some other unit and is scaled to suit. */
+    let k=1;
+    if(rd.span<300 || rd.span>8000){
+      k=2500/rd.span;
+      root.scale.setScalar(k);
+      root.updateWorldMatrix(true,true);
+      console.log('model is not in metres ('+Math.round(rd.span)+' units across); scaled by '+k.toFixed(4));
+    } else console.log('model is already 1 unit = 1 metre');
+
+    bootMsg.textContent='Finding the grid';
+    const grid = findGrid(rd.mesh);
     let heading=0;
-    if(road){
-      const pos=road.geometry.attributes.position;
-      road.updateWorldMatrix(true,false);
-      const nearest=(tx,tz,out)=>{
-        let bi=0,bd=Infinity;
-        for(let i=0;i<pos.count;i++){
-          const d=(pos.getX(i)-tx)**2+(pos.getY(i)-tz)**2;
-          if(d<bd){bd=d;bi=i;}
-        }
-        out.fromBufferAttribute(pos,bi).applyMatrix4(road.matrixWorld);
-        return Math.sqrt(bd);
-      };
-      const d0=nearest(t.spawn[0],t.spawn[1],start);
-      nearest(t.spawnAim[0],t.spawnAim[1],aim);
-      heading=Math.atan2(aim.x-start.x, aim.z-start.z);
-      console.log('spawn vertex '+d0.toFixed(1)+' m from the point picked offline, facing '
-                  +(heading*57.3).toFixed(0)+' deg');
-    }else console.warn('road material '+t.roadMaterial+' not found; spawning at the origin');
-    // put that point at the world origin so the car starts on it
-    root.position.set(-start.x, -start.y, -start.z);
+    if(grid){
+      console.log('grid: '+grid.straight.toFixed(0)+' m straight, pits '
+                  +grid.pitWidth.toFixed(0)+' m wide, facing '+(grid.hdg*57.3).toFixed(0)+' deg');
+      // move the world so the grid slot is the origin, and face down the road
+      root.position.set(-grid.x, 0, -grid.z);
+      heading=grid.hdg;
+    } else console.warn('no grid slot found; starting at the model origin');
+    root.updateWorldMatrix(true,true);
+
+    const mf=fixSceneryMaterials(root);
+    console.log('scenery materials: '+mf.cutout+' blended foliage switched to alpha test, '
+                +mf.demetal+' metallic dropped, '+mf.back+' backdrops kept blended, of '+mf.total);
     root.traverse(o=>{ if(o.isMesh){ o.receiveShadow=true;
       if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
         .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
     scene.add(root);
 
-    const mf=fixSceneryMaterials(root);
-    console.log('scenery materials: '+mf.cutout+' blended foliage switched to alpha test, '
-                +mf.demetal+' metallic dropped, '+mf.back+' backdrops kept blended, of '+mf.total);
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '+stats.refs+' refs');
+
+    // drop the whole model so the road under the grid slot is exactly y=0
+    const g0=groundAt(0,0,1e9);
+    if(g0.hit){ root.position.y-=g0.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
     carState.wx=0; carState.wz=0; carState.hdg=heading; carState.speed=0;
-    /* The model was moved so the chosen road vertex is the origin, so the road
-       here is exactly y=0 -- no need to search for it, and searching was wrong:
-       it asked for the topmost surface and found the gantry over the start
-       line, standing the car 1.05 m up in the air until it drove off the mark.
-       groundY is the body's height, not the ground's. */
     groundY = RIDE; carVY=0;
     carGroup.position.set(0, groundY, 0);
-
 
     scene.fog.density=0.00035;         // a real valley circuit, long sightlines
     buildWorld();
