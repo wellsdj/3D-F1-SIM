@@ -201,11 +201,12 @@ const MAXSPEED    = 100;    // m/s = 360 km/h exactly
 /* Lateral grip. One number, and everything that depends on grip reads it, so
    raising it stays self-consistent: the steering lock available at speed, the
    ceiling on yaw rate, and the speed the racing line is drawn for all move
-   together. 42 was about 4.3 g, which is real but conservative -- a modern F1
-   car peaks nearer 6. At 62 the car holds an arc half again as tight at any
-   given speed, carries far more entry speed, and stops running wide when you
-   ask for more lock mid-corner. */
-const A_GRIP      = 62;     // m/s^2 of lateral grip, ~6.3 g
+   together. 62 was about 6.3 g -- near the real peak for an F1 car, and too
+   much of it: raising grip also raises the lock the rack is allowed to reach,
+   so the car turned in harder than it could be steered. 50 keeps a car that
+   plainly sticks, 5.1 g and still well above the 4.3 it started at, without
+   the twitch that came with the last of it. */
+const A_GRIP      = 50;     // m/s^2 of lateral grip, ~5.1 g
 
 const shadowCasters=[];
 const treeCells=[];
