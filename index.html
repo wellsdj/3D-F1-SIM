@@ -84,7 +84,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
@@ -93,7 +93,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -2596,6 +2596,7 @@ addEventListener('keydown',e=>{
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
   if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
+  if(k==='t'){ AIDS=!AIDS; updateStatus(); }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -2620,6 +2621,7 @@ function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   document.getElementById('lname').textContent = (rlMesh&&rlMesh.visible)?'On':'Off';
+  const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
 }
 /* Full detail, always. There is no longer a quality toggle and nothing
    downgrades it behind your back -- the old adaptive check could drop the
@@ -2783,6 +2785,7 @@ let carPitch=0, carRoll=0, groundY=0, carVY=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
+let AIDS=true;                    // steering aids, toggled with T
 let lockF=1;                      // eased speed-dependent lock multiplier
 let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
 const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
@@ -2905,8 +2908,36 @@ function drive(dt){
      holding the car to the crown of the road. The speed-scaled lock does real
      work here rather than being decoration: it is what stops the rack being
      unusably twitchy at 300 kph. */
-  const target=clamp(steerIn*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
-  steerAng += (target-steerAng)*(1-Math.pow(0.0009,dt));
+  /* Driving aids. Raising grip is what made the car nervous: lockGrip hands you
+     more lock the more grip there is, so the same nudge produced far more yaw
+     at speed. The grip itself was not the problem -- the car should stick --
+     so the aids work on the input rather than on the tyres, and the car keeps
+     every bit of its 6.3 g.
+
+     Three of them, and they matter most in that order:
+
+     1. Progressive rack. Input is curved rather than linear, so a small nudge
+        is a genuinely small angle and the last of the lock still reaches full
+        travel. This is what makes it possible to hold a line at all -- on a
+        keyboard the stick is either hard over or centred, and a linear rack
+        turns that into all or nothing.
+     2. A slew limit that tightens with speed. You cannot throw the wheel at
+        300 kph, so neither can the input: the rack takes about four times as
+        long to reach a new angle up there as it does at walking pace.
+     3. Self-centring. Let go and the wheel unwinds itself, so the car runs
+        straight instead of holding whatever angle it was left at. */
+  const kphNow=carState.speed*3.6;
+  const fast=clamp(kphNow/300,0,1);
+  let inp=steerIn;
+  if(AIDS){
+    const g=Math.abs(inp);
+    inp = Math.sign(inp) * (g*g*0.72 + g*0.28);   // curved, still reaches 1
+    inp *= 1 - 0.34*fast;                          // and softer the faster you go
+  }
+  const target=clamp(inp*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
+  const rack = AIDS ? 0.0009 + 0.10*fast : 0.0009;
+  steerAng += (target-steerAng)*(1-Math.pow(rack,dt));
+  if(AIDS && Math.abs(steerIn)<0.04) steerAng *= Math.pow(0.05,dt);
   if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
 
   let yawRate=0;
