@@ -198,7 +198,14 @@ let FREEROAM=false;
 /* Declared here rather than with the drive model: the racing line is built at
    load and needs both, and it is built long before that section is reached. */
 const MAXSPEED    = 100;    // m/s = 360 km/h exactly
-const A_GRIP      = 42;     // m/s^2 of lateral grip, ~4.3 g
+/* Lateral grip. One number, and everything that depends on grip reads it, so
+   raising it stays self-consistent: the steering lock available at speed, the
+   ceiling on yaw rate, and the speed the racing line is drawn for all move
+   together. 42 was about 4.3 g, which is real but conservative -- a modern F1
+   car peaks nearer 6. At 62 the car holds an arc half again as tight at any
+   given speed, carries far more entry speed, and stops running wide when you
+   ask for more lock mid-corner. */
+const A_GRIP      = 62;     // m/s^2 of lateral grip, ~6.3 g
 
 const shadowCasters=[];
 const treeCells=[];
@@ -1961,7 +1968,12 @@ let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
 const CARPTS=[], CARLOW=[];
 let CAR_WB=3.4, CAR_TR=1.9, RIDE=0.125;
 const STEER_AXIS=new THREE.Vector3(0,0.456,0.890).normalize();
-const CAR_LEN=5.60;                     // 2025-spec car length, metres
+/* A real 2025 car is 5.60 m and that is what this was, but it read too large
+   against the circuits, so it is deliberately under scale now. Everything that
+   touches the ground is measured off the model after this is applied -- the
+   contact patches, the wheelbase, the track -- so the physics follow the size
+   rather than having to be retuned for it. */
+const CAR_LEN=4.85;                     // under the real 5.60 m, by eye
 const WHEELBASE=3.60;
 
 (function loadCar(){
