@@ -2954,7 +2954,20 @@ let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
 let AIDS=true;                    // steering aids, toggled with T
 let lockF=1;                      // eased speed-dependent lock multiplier
 let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
-const STEER_LOCK=2.36;            // rad at full lock (~135 deg each way)
+/* Raised from 2.36 for 50% more turn below 100 kph. The turn multiplier could
+   not do this: under about 100 kph the grip ceiling is not what binds, the
+   steering lock is, so the multiplier had no effect down there at all -- which
+   is why the low-speed feel never changed through any of those adjustments.
+
+   This lever touches only the low-speed end, and that falls out of the maths
+   rather than being arranged. Above the knee the available lock is
+   STEER_RATIO*atan(...)/STEER_LOCK, and it gets multiplied by STEER_LOCK again
+   to make the angle, so the two cancel and the fast end is untouched no matter
+   what this is set to.
+
+   Yaw rate goes as tan of the tyre angle, so 1.5x wants 19.0 deg to become
+   27.4, which is 3.392 rad at the wheel. */
+const STEER_LOCK=3.392;           // rad at full lock (~194 deg each way)
 const STEER_RATIO=7.1;            // rack ratio: 135 deg of wheel -> ~19 deg of tyre
 
 /* Available lock falls away with speed, like a real rack loading up. These
