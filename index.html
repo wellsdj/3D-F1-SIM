@@ -3047,7 +3047,11 @@ function drive(dt){
        throttle simply balances the drag and you sit there driving at a steady
        20 kph through a trap, which is what was happening: the car should bog
        down and stay bogged, not find an equilibrium and cruise. */
-    const bog = onLoose ? 1 - 0.88*looseFrac : 1;
+    /* 0.88 left 12% of the engine, which could not overcome the drag at any
+       speed. 0.55 leaves enough to crawl: throttle and drag now balance around
+       20 kph, so a trap traps you at a walking pace rather than either welding
+       you in place or letting you drive out of it. */
+    const bog = onLoose ? 1 - 0.55*looseFrac : 1;
     carState.speed += 26.0*(1.0 - v*v)*bog*dt;
   }
   else if(brk) carState.speed -= 46*dt;
@@ -3131,10 +3135,13 @@ function drive(dt){
       if(onLoose){
         const f=looseFrac;
         // bites much harder than before: gravel is meant to stop you
-        /* Retardation cut by 30%: 26.0 and 1.9 were the numbers, now 18.2 and
-           1.33. Gravel still stops you, it just does not stand the car on its
-           nose doing it. */
-        carState.speed = Math.max(0, carState.speed - (18.2 + carState.speed*1.33)*f*dt);
+        /* Almost all of this belongs on the speed-dependent term, not the
+           constant one. An 18.2 m/s2 floor is nearly two g of braking applied
+           just as hard at walking pace as at 300 kph, and against a throttle
+           the bog had already cut to 12% it pinned the car at a standstill --
+           gravel you cannot crawl out of at all. 2.5 leaves it draggy at rest
+           while 1.6v still scrubs 60 m/s2 off a car arriving at 300. */
+        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*f*dt);
         looseSpray += carState.speed*f*dt;
       }
       carState.hdg += yawRate*dt;
