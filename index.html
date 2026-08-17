@@ -441,14 +441,28 @@ const HF={cell:6, minx:0, minz:0, nx:0, nz:0, bins:null, tri:null, tag:null};
    and sand, two meshes running the length of the circuit. Each triangle in the
    height field carries a flag, so asking what is underneath the car already
    answers whether it is gravel -- no second lookup, no second spatial index. */
-const LOOSE_RE=/sand|gravel/i;
+/* sand_new only, not sand. Both are single-material meshes, so the earlier
+   theory that a merged mesh was over-tagging was simply wrong -- the two rules
+   tag the same 11728 triangles. The false positives come from sand.001 itself,
+   7414 triangles that this model also lays under car parks, service roads and
+   verges. sand_new.001 is the 4314 that are actually trap. If a real trap now
+   feels like tarmac it is because it belongs to the other mesh, and adding
+   |^sand\. back to this pattern restores it. */
+const LOOSE_RE=/sand_new|gravel/i;
 function buildHeightField(root){
   const tris=[], tags=[]; const v=new THREE.Vector3();
   root.updateWorldMatrix(true,true);
   root.traverse(o=>{
     if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
-    const ms=Array.isArray(o.material)?o.material:[o.material];
-    const loose=ms.some(m=>m&&m.name&&LOOSE_RE.test(m.name))?1:0;
+    /* Only a mesh that is entirely sand counts. This used to accept a mesh if
+       any one of its materials matched, and then tagged every triangle in it --
+       so a merged mesh holding sand alongside asphalt marked the whole thing
+       loose, which is why car parks and side roads were behaving like gravel
+       traps. A multi-material mesh cannot be split without walking its geometry
+       groups, so it is simply excluded: better to miss a trap than to turn a
+       service road into one. */
+    const ms=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
+    const loose=(ms.length===1 && ms[0].name && LOOSE_RE.test(ms[0].name))?1:0;
     const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
     const n=idx?idx.count:pos.count;
     const P=new Float32Array(pos.count*3);
@@ -3029,7 +3043,12 @@ function drive(dt){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
     const v=carState.speed/MAXSPEED;
-    carState.speed += 26.0*(1.0 - v*v)*dt;
+    /* Gravel robs the engine as well as dragging on the car. Without this the
+       throttle simply balances the drag and you sit there driving at a steady
+       20 kph through a trap, which is what was happening: the car should bog
+       down and stay bogged, not find an equilibrium and cruise. */
+    const bog = onLoose ? 1 - 0.88*looseFrac : 1;
+    carState.speed += 26.0*(1.0 - v*v)*bog*dt;
   }
   else if(brk) carState.speed -= 46*dt;
   else carState.speed -= (0.8 + carState.speed*0.028)*dt;
@@ -3112,7 +3131,10 @@ function drive(dt){
       if(onLoose){
         const f=looseFrac;
         // bites much harder than before: gravel is meant to stop you
-        carState.speed = Math.max(0, carState.speed - (26.0 + carState.speed*1.9)*f*dt);
+        /* Retardation cut by 30%: 26.0 and 1.9 were the numbers, now 18.2 and
+           1.33. Gravel still stops you, it just does not stand the car on its
+           nose doing it. */
+        carState.speed = Math.max(0, carState.speed - (18.2 + carState.speed*1.33)*f*dt);
         looseSpray += carState.speed*f*dt;
       }
       carState.hdg += yawRate*dt;
@@ -3322,8 +3344,20 @@ function frame(now){
        edge of the road counted as being in a trap. Below a quarter it is
        ignored entirely, and the effect ramps from there, so the edging is out
        while a wheel genuinely off the road still counts. */
+    /* Two jobs, and the old mapping only did one. Keeping the roadside strip
+       out needs a floor, which 0.25 gave. But dividing the rest by 0.75 meant a
+       car sitting in the middle of a trap read 0.09, because even there only
+       about a third of the probes land on sand -- the traps are narrow against
+       the spread of the wheel patches. Drag, engine bog and particle rate all
+       scale off this one number, so all three were running at a tenth of their
+       intended strength, which is why gravel barely slowed the car, let it
+       cruise at 20 kph, and dribbled sand.
+
+       Floor stays at 0.15, but it saturates by 0.40 instead of 1.0: brushing
+       the edging is still nothing, and being in a trap now reads as being in
+       it. */
     const raw = groundHits>0 ? looseHits/groundHits : 0;
-    looseFrac = raw<0.25 ? 0 : (raw-0.25)/0.75;
+    looseFrac = clamp((raw-0.15)/0.25, 0, 1);
     onLoose = looseFrac > 0;
     carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
     carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
@@ -3383,14 +3417,18 @@ function frame(now){
     carGroup.rotation.y=Math.atan2(_d2.x,_d2.y)+carState.psi;
   }
   carGroup.updateMatrixWorld(true);
-  /* More of it the faster you go, and metered by distance rather than by
-     frame so the plume does not thin out when the frame rate does. The divisor
-     falls with speed, so a crawl leaves a trickle and a fast excursion throws
-     a wall of it. */
-  if(onLoose && carState.speed>1.2){
-    const every = Math.max(0.10, 0.9 - carState.speed*0.020);
+  /* A rate rather than a backlog. Accumulating distance and draining it
+     against a threshold let a debt build up whenever the loop was capped, and
+     then paid it off all at once -- which is why the sand came out in packets
+     that stopped rather than as a stream. This emits a set number per second,
+     spreads them across frames, and throws any surplus away instead of banking
+     it, so the plume is continuous at any frame rate and cannot burst. */
+  if(onLoose && carState.speed>0.8){
+    const rate = 30 + carState.speed*3.4;        // particles per second
+    looseSpray += rate*looseFrac*dt;
     let guard=0;
-    while(looseSpray>every && guard++<40){ looseSpray-=every; spawnDust(carState.speed); }
+    while(looseSpray>=1 && guard++<8){ looseSpray-=1; spawnDust(carState.speed); }
+    if(looseSpray>2) looseSpray=2;               // never bank a debt
   } else looseSpray=0;
   updateDust(dt);
   updateDebris(dt);
