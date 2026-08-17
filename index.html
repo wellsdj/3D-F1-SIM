@@ -2220,8 +2220,8 @@ let dustPts=null, dustPos=null, dustVel=null, dustLife=null, dustMax=null, dustH
   geo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
   geo.setAttribute('color',new THREE.BufferAttribute(col,3));
   const mat=new THREE.PointsMaterial({
-    size:0.85, sizeAttenuation:true, map:tex, vertexColors:true,
-    transparent:true, depthWrite:false, opacity:0.9 });
+    size:1.5, sizeAttenuation:true, map:tex, vertexColors:true,
+    transparent:true, depthWrite:false, opacity:1.0 });
   dustPts=new THREE.Points(geo,mat);
   dustPts.frustumCulled=false;
   scene.add(dustPts);
@@ -2877,7 +2877,7 @@ function updateStart(dt){
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
 let carPitch=0, carRoll=0, groundY=0, carVY=0;
-let onLoose=false, looseFrac=0, looseSpray=0;
+let onLoose=false, looseFrac=0, looseSpray=0, slipAng=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
@@ -3111,10 +3111,8 @@ function drive(dt){
          smooth and the car should not track perfectly straight across one. */
       if(onLoose){
         const f=looseFrac;
-        carState.speed = Math.max(0, carState.speed - (9.0 + carState.speed*0.55)*f*dt);
-        const slide = -steerAng*carState.speed*0.055*f
-                    + (Math.random()-0.5)*carState.speed*0.035*f;
-        carState.hdg += slide*dt;
+        // bites much harder than before: gravel is meant to stop you
+        carState.speed = Math.max(0, carState.speed - (26.0 + carState.speed*1.9)*f*dt);
         looseSpray += carState.speed*f*dt;
       }
       carState.hdg += yawRate*dt;
@@ -3319,8 +3317,14 @@ function frame(now){
        fraction that is loose now scales the effect, so one wheel in the gravel
        drags a little and a car buried in it drags fully -- and there is no
        boundary at which the behaviour snaps. */
-    looseFrac = groundHits>0 ? looseHits/groundHits : 0;
-    onLoose = looseFrac > 0.02;
+    /* A real fraction of the car has to be in it. The threshold was 0.02 --
+       one probe in fifty -- so clipping the sandy strip that runs along the
+       edge of the road counted as being in a trap. Below a quarter it is
+       ignored entirely, and the effect ramps from there, so the edging is out
+       while a wheel genuinely off the road still counts. */
+    const raw = groundHits>0 ? looseHits/groundHits : 0;
+    looseFrac = raw<0.25 ? 0 : (raw-0.25)/0.75;
+    onLoose = looseFrac > 0;
     carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
     carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
 
@@ -3354,8 +3358,24 @@ function frame(now){
        the car the wrong way -- nose down every climb, nose up every descent.
        Roll needs no flip: car-local +x is the left-hand side, and a positive
        rotation about +Z lifts +x, which is what a higher left wheel wants. */
+    /* Slip angle. Adding yaw to the heading -- which is what this did before --
+       does not make the rear step out, it just turns the car harder, because
+       the car travels exactly where it points. Oversteer is the body pointing
+       wide of the direction of travel, so it belongs on the drawn rotation and
+       nowhere else: the path through the gravel is unchanged and only the
+       attitude goes sideways. */
+    /* Gain set so this is actually visible: at 0.055 it produced 0.3 degrees,
+       which is nothing. The steering term is what points the tail wide through
+       a turn, and a slow wander is added on top so the car looks unsettled even
+       running straight through a trap. Capped at 35 degrees -- past that it
+       stops looking like a slide and starts looking like a bug. */
+    const slipT = onLoose
+      ? clamp((-steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
+              * clamp(carState.speed/14,0,1) * looseFrac, -0.61, 0.61)
+      : 0;
+    slipAng += (slipT-slipAng)*(1-Math.pow(0.05,dt));
     carGroup.rotation.order='YXZ';
-    carGroup.rotation.set(-carPitch, h, carRoll);
+    carGroup.rotation.set(-carPitch, h+slipAng, carRoll);
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
@@ -3368,9 +3388,9 @@ function frame(now){
      falls with speed, so a crawl leaves a trickle and a fast excursion throws
      a wall of it. */
   if(onLoose && carState.speed>1.2){
-    const every = Math.max(0.22, 2.2 - carState.speed*0.045);
+    const every = Math.max(0.10, 0.9 - carState.speed*0.020);
     let guard=0;
-    while(looseSpray>every && guard++<12){ looseSpray-=every; spawnDust(carState.speed); }
+    while(looseSpray>every && guard++<40){ looseSpray-=every; spawnDust(carState.speed); }
   } else looseSpray=0;
   updateDust(dt);
   updateDebris(dt);
