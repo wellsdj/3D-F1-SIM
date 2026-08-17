@@ -3047,11 +3047,12 @@ function drive(dt){
        throttle simply balances the drag and you sit there driving at a steady
        20 kph through a trap, which is what was happening: the car should bog
        down and stay bogged, not find an equilibrium and cruise. */
-    /* 0.88 left 12% of the engine, which could not overcome the drag at any
-       speed. 0.55 leaves enough to crawl: throttle and drag now balance around
-       20 kph, so a trap traps you at a walking pace rather than either welding
-       you in place or letting you drive out of it. */
-    const bog = onLoose ? 1 - 0.55*looseFrac : 1;
+    /* Solved rather than dialled: the coefficient is whatever makes throttle
+       and gravel drag balance at the speed a trap should hold you to. 0.88 left
+       12% of the engine and pinned the car at a standstill, 0.55 balanced at
+       20 kph, and 0.121 balances at 45. Change the target speed and this is the
+       one number that follows from it. */
+    const bog = onLoose ? 1 - 0.121*looseFrac : 1;
     carState.speed += 26.0*(1.0 - v*v)*bog*dt;
   }
   else if(brk) carState.speed -= 46*dt;
