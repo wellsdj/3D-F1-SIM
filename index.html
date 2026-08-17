@@ -354,14 +354,31 @@ function findGrid(mesh, anchor){
     for(let d=2;d<900;d+=3){ if(at(px+sx*d,pz+cz2*d)<4.5) break; f=d; }
     for(let d=2;d<900;d+=3){ if(at(px-sx*d,pz-cz2*d)<4.5) break; b=d; }
     return {f,b,tot:f+b}; };
-  const px0 = anchor ? anchor.x : gx(wi);
-  const pz0 = anchor ? anchor.z : gz(wi);
-  const reach = anchor ? 45 : 300;
+  /* With an anchor there is nothing to search for. The lights hang directly
+     over the line, so straight down from them IS the line -- looking for
+     "racing-width road within 45 m" instead found the pit apron on the far side
+     of the fence, because that is road-shaped too. Only the heading has to be
+     worked out. */
+  if(anchor){
+    let bt=null;
+    for(let th=0;th<Math.PI;th+=Math.PI/96){ const r=run(anchor.x,anchor.z,th);
+      if(!bt||r.tot>bt.tot) bt={...r,th}; }
+    if(bt&&bt.tot>30){
+      /* Which way along it. The rule was "whichever has more road ahead" and
+         that pointed the car back down the straight, so it is the other one.
+         A start line has most of a lap behind it and the shorter run to the
+         first corner in front, which is exactly why the longer side is wrong. */
+      const th = bt.f<=bt.b ? bt.th : bt.th+Math.PI;
+      return { x:anchor.x, z:anchor.z, hdg:th, straight:bt.tot,
+               pitWidth:wid*2, anchored:true };
+    }
+  }
+  const px0 = gx(wi), pz0 = gz(wi);
   let best=null;
   for(let iz=1;iz<H-1;iz+=2)for(let ix=1;ix<W-1;ix+=2){
     const i=iz*W+ix; if(!occ[i]||D[i]<5||D[i]>8) continue;
     const px=gx(i), pz=gz(i);
-    if(Math.hypot(px-px0,pz-pz0)>reach) continue;
+    if(Math.hypot(px-px0,pz-pz0)>300) continue;
     let bt=null;
     for(let th=0;th<Math.PI;th+=Math.PI/48){ const r=run(px,pz,th);
       if(!bt||r.tot>bt.tot) bt={...r,th}; }
@@ -369,11 +386,9 @@ function findGrid(mesh, anchor){
   }
   if(!best) return null;
   const th=best.f>=best.b?best.th:best.th+Math.PI;
-  /* Anchored on the start line, stand on it rather than backing down the
-     straight from the middle of it -- the whole point is to be on the line. */
-  const back = anchor ? 0 : Math.min(best.f,best.b)*0.55;
+  const back = Math.min(best.f,best.b)*0.55;
   return { x:best.px-Math.sin(th)*back, z:best.pz-Math.cos(th)*back,
-           hdg:th, straight:best.tot, pitWidth:wid*2, anchored:!!anchor };
+           hdg:th, straight:best.tot, pitWidth:wid*2, anchored:false };
 }
 
 /* ------------------------------------------------ imported scenery repair --
