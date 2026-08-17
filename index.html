@@ -45,6 +45,15 @@
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
   #boot.gone{opacity:0;pointer-events:none}
+  #markbtn{position:fixed;left:18px;top:64px;z-index:40;font-family:var(--mono);
+        font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
+        color:var(--paper);background:rgba(10,10,12,.62);border:1px solid var(--line);
+        border-radius:5px;padding:8px 12px}
+  #markbtn:hover{background:rgba(242,162,12,.18);border-color:var(--amber)}
+  #markout{position:fixed;left:18px;top:104px;z-index:40;font-family:var(--mono);
+        font-size:11px;line-height:1.5;color:var(--amber);background:rgba(10,10,12,.72);
+        border:1px solid var(--line);border-radius:5px;padding:9px 12px;display:none;
+        user-select:text;-webkit-user-select:text;max-width:340px;word-break:break-all}
   #pick{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
   #pick button{font-family:var(--mono);cursor:pointer;color:var(--paper);
         background:rgba(236,234,228,.05);border:1px solid var(--line);
@@ -84,6 +93,8 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
+<button id="markbtn">Set start here</button>
+<div id="markout"></div>
 <div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
@@ -187,6 +198,11 @@ const TRACKS={
   spa22:{
     id:'spa22', name:'Spa 2022', sub:'Imported · free roam · full layout',
     procedural:false, glb:'spa2022.glb', freeRoam:true, scenery:false,
+    /* Where to start, in the model's own coordinates: [x, z, heading degrees].
+       Set this and none of the pit-lane and start-lights inference runs -- it
+       is only there for a track nobody has stood on yet. Fill it from the
+       "Set start here" button: park the car, press it, paste the line. */
+    spawnAt:null,
     roadHalf:6.0, laneEdge:5.2, kerbW:1.6, shoulder:8.0, treeClear:26.0,
     barrierOut:2.6
   }
@@ -3742,6 +3758,31 @@ function startTrack(id){
     } else console.log('model is already 1 unit = 1 metre');
 
     bootMsg.textContent='Finding the grid';
+    /* An explicit spawn beats anything derived, so it is checked first and
+       short-circuits the rest. */
+    if(t.spawnAt){
+      const [sx,sz,sdeg]=t.spawnAt;
+      root.position.set(-sx, 0, -sz);
+      root.updateWorldMatrix(true,true);
+      const mf0=fixSceneryMaterials(root);
+      console.log('scenery materials: '+mf0.cutout+' foliage, '+mf0.demetal+' metallic, '
+                  +mf0.back+' backdrops, of '+mf0.total);
+      root.traverse(o=>{ if(o.isMesh){ o.receiveShadow=true;
+        if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
+          .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
+      scene.add(root);
+      const st0=buildHeightField(root);
+      console.log('height field: '+st0.tris+' triangles, '+st0.loose+' of them gravel');
+      const gg=groundAt(0,0,1e9);
+      if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
+      carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
+      groundY=RIDE; carVY=0;
+      carGroup.position.set(0, groundY, 0);
+      console.log('spawn: explicit, at model '+sx+', '+sz+' facing '+sdeg+' deg');
+      scene.fog.density=0.00035;
+      buildWorld();
+      return;
+    }
     /* The start lights hang over the start line, so their position is the line.
        Averaged over the object's vertices rather than taken from a bounding box
        centre, which a gantry arm would drag off to one side. */
@@ -3821,6 +3862,32 @@ function startTrack(id){
 Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
   btn.addEventListener('click',()=>startTrack(btn.dataset.track));
 });
+
+/* Park the car where the start should be, press this, and it reports the spot
+   in the coordinates the spawn code uses. Faster and more certain than me
+   inferring the line from the model twice more and landing in a car park.
+
+   The numbers are relative to wherever the loader put the world origin, which
+   moves with the anchor -- so they are converted back to the model's own frame
+   before being shown, and that is stable between loads. */
+(function initMark(){
+  const btn=document.getElementById('markbtn');
+  const out=document.getElementById('markout');
+  if(!btn) return;
+  btn.addEventListener('click',()=>{
+    if(!booted){ out.style.display='block'; out.textContent='Load a track first.'; return; }
+    const g=scene.children.find(o=>o.isGroup&&o.children.length>8);
+    const ox=g?g.position.x:0, oz=g?g.position.z:0;
+    const mx=carState.wx-ox, mz=carState.wz-oz;   // back into the model's frame
+    const deg=((carState.hdg*180/Math.PI)%360+360)%360;
+    const line='spawnAt:['+mx.toFixed(1)+','+mz.toFixed(1)+','+deg.toFixed(1)+']';
+    out.style.display='block';
+    out.textContent=line+'\n(world '+carState.wx.toFixed(1)+', '+carState.wz.toFixed(1)+
+                    ' · heading '+deg.toFixed(1)+' deg)\ncopied — paste it to Claude';
+    if(navigator.clipboard) navigator.clipboard.writeText(line).catch(()=>{});
+    console.log(line);
+  });
+})();
 
 addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;
