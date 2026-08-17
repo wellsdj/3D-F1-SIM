@@ -3178,7 +3178,7 @@ function drive(dt){
     /* Grass is slippery rather than draggy: what it takes away is grip. The
        yaw ceiling is what represents grip here, so cutting it means the car
        simply will not turn as hard on grass -- it washes out and runs on. */
-    const slick = onGrass ? 1 - 0.62*grassFrac : 1;
+    const slick = onGrass ? 1 - 0.465*grassFrac : 1;   // a quarter less slippery
     const yawMax = v>0.5 ? A_GRIP*turnBoost(v*3.6)*slick/v : 8;
     yawRate=clamp(yawRate,-yawMax,yawMax);
 
@@ -3207,8 +3207,8 @@ function drive(dt){
         looseSpray += carState.speed*f*dt;
       }
       else if(onGrass){
-        // half the retardation of gravel, same shape
-        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*0.5*grassFrac*dt);
+        // a quarter of gravel's retardation, same shape
+        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*0.25*grassFrac*dt);
       }
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;
@@ -3480,7 +3480,7 @@ function frame(now){
        running straight through a trap. Capped at 35 degrees -- past that it
        stops looking like a slide and starts looking like a bug. */
     // and the tail swings on both, further on grass because it is slicker
-    const slipSrc = onLoose ? looseFrac*1.0 : onGrass ? grassFrac*1.35 : 0;
+    const slipSrc = onLoose ? looseFrac*1.0 : onGrass ? grassFrac*1.01 : 0;
     const slipT = slipSrc>0
       ? clamp((-steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
               * clamp(carState.speed/14,0,1) * slipSrc, -0.61, 0.61)
