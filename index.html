@@ -360,6 +360,15 @@ function findGrid(mesh, anchor){
      of the fence, because that is road-shaped too. Only the heading has to be
      worked out. */
   if(anchor){
+    /* The start lights turned out not to sit over the racing surface in this
+       model -- dropping straight down from them lands on the apron behind the
+       pit wall, which is what put the car in a car park twice. So the pit lane
+       is the anchor instead, taken at the point beside the lights, and the car
+       is stepped across from it onto the track.
+
+       Which way is across: try both perpendiculars and keep the one that lands
+       further from any edge. The track is far wider than the lane, so the open
+       side wins on that measure and the garages lose. */
     let bt=null;
     for(let th=0;th<Math.PI;th+=Math.PI/96){ const r=run(anchor.x,anchor.z,th);
       if(!bt||r.tot>bt.tot) bt={...r,th}; }
@@ -369,8 +378,13 @@ function findGrid(mesh, anchor){
          A start line has most of a lap behind it and the shorter run to the
          first corner in front, which is exactly why the longer side is wrong. */
       const th = bt.f<=bt.b ? bt.th : bt.th+Math.PI;
-      return { x:anchor.x, z:anchor.z, hdg:th, straight:bt.tot,
-               pitWidth:wid*2, anchored:true };
+      const px=-Math.sin(th+Math.PI/2), pz=-Math.cos(th+Math.PI/2);
+      const OFF=7;
+      const a={x:anchor.x+px*OFF, z:anchor.z+pz*OFF};
+      const b2={x:anchor.x-px*OFF, z:anchor.z-pz*OFF};
+      const pick = at(a.x,a.z) >= at(b2.x,b2.z) ? a : b2;
+      return { x:pick.x, z:pick.z, hdg:th, straight:bt.tot,
+               pitWidth:wid*2, anchored:true, offset:OFF };
     }
   }
   const px0 = gx(wi), pz0 = gz(wi);
@@ -3731,20 +3745,37 @@ function startTrack(id){
     /* The start lights hang over the start line, so their position is the line.
        Averaged over the object's vertices rather than taken from a bounding box
        centre, which a gantry arm would drag off to one side. */
-    let anchor=null;
-    root.traverse(o=>{
-      if(anchor||!o.isMesh||!o.material) return;
-      const ms=Array.isArray(o.material)?o.material:[o.material];
-      if(!ms.some(m=>m&&m.name&&/start.?light/i.test(m.name))) return;
-      const pos=o.geometry.attributes.position; o.updateWorldMatrix(true,false);
-      const v=new THREE.Vector3(); let sx=0,sy=0,sz=0;
+    const nearMat=(re,fn)=>{
+      root.traverse(o=>{
+        if(!o.isMesh||!o.material||!o.geometry.attributes.position) return;
+        const ms=Array.isArray(o.material)?o.material:[o.material];
+        if(!ms.some(m=>m&&m.name&&re.test(m.name))) return;
+        o.updateWorldMatrix(true,false); fn(o);
+      });
+    };
+    // the lights locate the right end of the pit lane, even though they do not
+    // sit over the track themselves
+    let lights=null;
+    nearMat(/start.?light/i, o=>{
+      if(lights) return;
+      const pos=o.geometry.attributes.position, v=new THREE.Vector3();
+      let sx=0,sy=0,sz=0;
       for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld);
         sx+=v.x; sy+=v.y; sz+=v.z; }
-      anchor={x:sx/pos.count, y:sy/pos.count, z:sz/pos.count};
+      lights={x:sx/pos.count, y:sy/pos.count, z:sz/pos.count};
     });
-    if(anchor) console.log('start lights found at '+anchor.x.toFixed(1)+', '+anchor.z.toFixed(1)
-                           +' -- using them as the start line');
-    else console.log('no start lights in this model; falling back to the pit straight');
+    let anchor=null, bestD=Infinity;
+    nearMat(/pitlane/i, o=>{
+      const pos=o.geometry.attributes.position, v=new THREE.Vector3();
+      for(let i=0;i<pos.count;i++){
+        v.fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld);
+        const d=lights ? (v.x-lights.x)**2+(v.z-lights.z)**2 : v.x*v.x+v.z*v.z;
+        if(d<bestD){ bestD=d; anchor={x:v.x,y:v.y,z:v.z}; }
+      }
+    });
+    if(anchor) console.log('pit lane found at '+anchor.x.toFixed(1)+', '+anchor.z.toFixed(1)
+                           +(lights?' (beside the start lights)':'')+' -- stepping 7 m onto the track');
+    else console.log('no pit lane in this model; falling back to the widest paved area');
     const grid = findGrid(rd.mesh, anchor);
     let heading=0;
     if(grid){
