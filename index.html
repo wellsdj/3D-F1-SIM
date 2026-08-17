@@ -2824,16 +2824,18 @@ function lockTable(kph){
    speed, and never more. Below ~130 kph the table is already inside that and
    wins unchanged, so the low-speed feel is untouched. */
 /* How much harder than the tyres alone the car is allowed to turn: twice up to
-   100 kph, three times past it. Both limits on turning come off the same
-   number -- the lock the rack may reach, and the ceiling on yaw rate -- so the
-   multiplier is applied to that number rather than to either of them, and they
-   cannot disagree.
+   100 kph, three times past it, six times past 150. Both limits on turning come
+   off the same number -- the lock the rack may reach, and the ceiling on yaw
+   rate -- so the multiplier is applied to that number rather than to either of
+   them, and they cannot disagree.
 
-   Stepped over 95-105 kph rather than exactly at 100. A hard step would double
-   the wheel angle between one frame and the next while you were mid-corner,
-   which reads as a jolt; ten kph is narrow enough to still feel like a
-   threshold and wide enough not to snap. */
-function turnBoost(kph){ return 2 + clamp((kph-95)/10, 0, 1); }
+   Each step is spread over ten kph rather than landing on a single speed. A
+   hard step would multiply the wheel angle between one frame and the next while
+   you were mid-corner, which reads as a jolt; ten kph is narrow enough to still
+   feel like a threshold and wide enough not to snap. */
+function turnBoost(kph){
+  return 2 + clamp((kph-95)/10, 0, 1) + 3*clamp((kph-145)/10, 0, 1);
+}
 
 function lockGrip(kph){
   const v=kph/3.6;
