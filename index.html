@@ -2834,7 +2834,15 @@ function lockTable(kph){
    you were mid-corner, which reads as a jolt; ten kph is narrow enough to still
    feel like a threshold and wide enough not to snap. */
 function turnBoost(kph){
-  return 2 + clamp((kph-95)/10, 0, 1) + 3*clamp((kph-145)/10, 0, 1);
+  /* Four times up to 100 kph, twice from there, four times again past 150.
+     Note it dips in the middle rather than climbing all the way: that is what
+     doubling the low-speed figure and dividing the high-speed ones by 1.5
+     produces, so turning authority drops as you cross 100 and comes back at
+     150. Left as asked, but it is one number to change if the dip is not
+     wanted. */
+  const LOW=4, MID=2, HIGH=4;
+  return LOW + (MID-LOW)*clamp((kph-95)/10, 0, 1)
+             + (HIGH-MID)*clamp((kph-145)/10, 0, 1);
 }
 
 function lockGrip(kph){
@@ -2867,10 +2875,10 @@ const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
 /* Divided by five. This was the real latency, not the rack downstream of it:
    at 0.62 s to apply, swapping from one lock to the other meant unwinding for
    most of a second before the car began to answer, and it stacked on top of
-   everything else in the chain. 0.124 s still eases a keypress into a
-   proportional input rather than slamming it to full lock, which is what this
-   easing is for, but it no longer reads as delay. */
-const STEER_ON=0.124, STEER_OFF=0.028;  // seconds, application and return
+   everything else in the chain. Now 0.7 of that again at 0.0868 s, which still
+   eases a keypress into a proportional input rather than slamming it to full
+   lock -- what this easing is for -- without reading as delay. */
+const STEER_ON=0.0868, STEER_OFF=0.0196; // seconds, application and return
 const CAR_HALF_W=1.0;             // half the car's width, for the wall test
 let WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
