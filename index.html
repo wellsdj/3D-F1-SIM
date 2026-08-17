@@ -497,6 +497,10 @@ const HF={cell:6, minx:0, minz:0, nx:0, nz:0, bins:null, tri:null, tag:null};
    feels like tarmac it is because it belongs to the other mesh, and adding
    |^sand\. back to this pattern restores it. */
 const LOOSE_RE=/sand_new|gravel/i;
+/* Grass is the second loose surface. Tagged the same way and in the same byte
+   -- 1 for gravel, 2 for grass -- so a single probe still answers what is
+   underneath the car and there is still only one spatial index. */
+const GRASS_RE=/grass/i;
 function buildHeightField(root){
   const tris=[], tags=[]; const v=new THREE.Vector3();
   root.updateWorldMatrix(true,true);
@@ -510,7 +514,8 @@ function buildHeightField(root){
        groups, so it is simply excluded: better to miss a trap than to turn a
        service road into one. */
     const ms=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
-    const loose=(ms.length===1 && ms[0].name && LOOSE_RE.test(ms[0].name))?1:0;
+    const nm=(ms.length===1 && ms[0].name)?ms[0].name:'';
+    const loose = LOOSE_RE.test(nm) ? 1 : (GRASS_RE.test(nm) ? 2 : 0);
     const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
     const n=idx?idx.count:pos.count;
     const P=new Float32Array(pos.count*3);
@@ -549,15 +554,16 @@ function buildHeightField(root){
   for(let i=0;i<nt;i++){ const [a,b,c,d]=span(i);
     for(let gx=a;gx<=b;gx++) for(let gz=c;gz<=d;gz++) items[fill[gz*HF.nx+gx]++]=i; }
   HF.tri=T; HF.tag=TAG; HF.bins={start,items};
-  let loose=0; for(let i=0;i<nt;i++) if(TAG[i]) loose++;
-  return {tris:nt, cells:HF.nx*HF.nz, refs:items.length, loose};
+  let loose=0, grass=0;
+  for(let i=0;i<nt;i++){ if(TAG[i]===1) loose++; else if(TAG[i]===2) grass++; }
+  return {tris:nt, cells:HF.nx*HF.nz, refs:items.length, loose, grass};
 }
 
 /* Highest surface at (x,z) at or below refY+2, so driving under a bridge does
    not snap the car onto its deck. Falls back to the highest surface found. */
-const _gnd={y:0,nx:0,ny:1,nz:0,hit:false,loose:false};
+const _gnd={y:0,nx:0,ny:1,nz:0,hit:false,loose:false,grass:false};
 function groundAt(x,z,refY){
-  _gnd.hit=false; _gnd.y=0; _gnd.nx=0; _gnd.ny=1; _gnd.nz=0; _gnd.loose=false;
+  _gnd.hit=false; _gnd.y=0; _gnd.nx=0; _gnd.ny=1; _gnd.nz=0; _gnd.loose=false; _gnd.grass=false;
   if(!HF.bins) return _gnd;
   const gx=((x-HF.minx)/HF.cell)|0, gz=((z-HF.minz)/HF.cell)|0;
   if(gx<0||gz<0||gx>=HF.nx||gz>=HF.nz) return _gnd;
@@ -590,7 +596,8 @@ function groundAt(x,z,refY){
   }
   if(fresh){ bI=hiI; _gnd.y=hiY; }
   const i=bI; if(i<0) return _gnd;
-  _gnd.hit=true; _gnd.loose=!!(HF.tag&&HF.tag[i]);
+  _gnd.hit=true;
+  const tg=HF.tag?HF.tag[i]:0; _gnd.loose=(tg===1); _gnd.grass=(tg===2);
   const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
         cx=T[i*9+6],cy=T[i*9+7],cz=T[i*9+8];
   let nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay), ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az),
@@ -2940,6 +2947,7 @@ function updateStart(dt){
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
 let carPitch=0, carRoll=0, groundY=0, carVY=0;
 let onLoose=false, looseFrac=0, looseSpray=0, slipAng=0;
+let onGrass=false, grassFrac=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
@@ -3100,7 +3108,8 @@ function drive(dt){
        12% of the engine and pinned the car at a standstill, 0.55 balanced at
        20 kph, and 0.121 balances at 45. Change the target speed and this is the
        one number that follows from it. */
-    const bog = onLoose ? 1 - 0.121*looseFrac : 1;
+    const bog = onLoose ? 1 - 0.121*looseFrac
+              : onGrass ? 1 - 0.06*grassFrac : 1;
     carState.speed += 26.0*(1.0 - v*v)*bog*dt;
   }
   else if(brk) carState.speed -= 46*dt;
@@ -3166,7 +3175,11 @@ function drive(dt){
        hold -- which is also what gives the car its understeer at speed. */
     const dTyre=-steerAng/STEER_RATIO;              // +ve = left
     yawRate=v*Math.tan(dTyre)/WHEELBASE;
-    const yawMax = v>0.5 ? A_GRIP*turnBoost(v*3.6)/v : 8;
+    /* Grass is slippery rather than draggy: what it takes away is grip. The
+       yaw ceiling is what represents grip here, so cutting it means the car
+       simply will not turn as hard on grass -- it washes out and runs on. */
+    const slick = onGrass ? 1 - 0.62*grassFrac : 1;
+    const yawMax = v>0.5 ? A_GRIP*turnBoost(v*3.6)*slick/v : 8;
     yawRate=clamp(yawRate,-yawMax,yawMax);
 
     if(FREEROAM){
@@ -3192,6 +3205,10 @@ function drive(dt){
            while 1.6v still scrubs 60 m/s2 off a car arriving at 300. */
         carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*f*dt);
         looseSpray += carState.speed*f*dt;
+      }
+      else if(onGrass){
+        // half the retardation of gravel, same shape
+        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*0.5*grassFrac*dt);
       }
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;
@@ -3360,11 +3377,11 @@ function frame(now){
        it chose its surface by continuity against a different reference, so it
        could answer for a different layer than the wheels were standing on and
        report tarmac while the car sat in a gravel trap. */
-    let looseHits=0, groundHits=0;
+    let looseHits=0, grassHits=0, groundHits=0;
     const probe1=(lx,lz)=>{
       const g=groundAt(carState.wx + lx*fz + lz*fx,
                        carState.wz - lx*fx + lz*fz, groundY-RIDE);
-      if(g.hit){ groundHits++; if(g.loose) looseHits++; }
+      if(g.hit){ groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++; }
       return g.hit?g.y:null;
     };
     /* Each wheel reads the mean of a patch, not a point. The road is 1683
@@ -3415,6 +3432,9 @@ function frame(now){
     const raw = groundHits>0 ? looseHits/groundHits : 0;
     looseFrac = clamp((raw-0.15)/0.25, 0, 1);
     onLoose = looseFrac > 0;
+    const rawG = groundHits>0 ? grassHits/groundHits : 0;
+    grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
+    onGrass = grassFrac > 0 && looseFrac <= 0;   // gravel wins where they meet
     carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
     carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
 
@@ -3459,9 +3479,11 @@ function frame(now){
        a turn, and a slow wander is added on top so the car looks unsettled even
        running straight through a trap. Capped at 35 degrees -- past that it
        stops looking like a slide and starts looking like a bug. */
-    const slipT = onLoose
+    // and the tail swings on both, further on grass because it is slicker
+    const slipSrc = onLoose ? looseFrac*1.0 : onGrass ? grassFrac*1.35 : 0;
+    const slipT = slipSrc>0
       ? clamp((-steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
-              * clamp(carState.speed/14,0,1) * looseFrac, -0.61, 0.61)
+              * clamp(carState.speed/14,0,1) * slipSrc, -0.61, 0.61)
       : 0;
     slipAng += (slipT-slipAng)*(1-Math.pow(0.05,dt));
     carGroup.rotation.order='YXZ';
@@ -3762,7 +3784,7 @@ function startTrack(id){
           .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
       scene.add(root);
       const st0=buildHeightField(root);
-      console.log('height field: '+st0.tris+' triangles, '+st0.loose+' of them gravel');
+      console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass');
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
