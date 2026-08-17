@@ -411,6 +411,108 @@ function findGrid(mesh, anchor){
            hdg:th, straight:best.tot, pitWidth:wid*2, anchored:false };
 }
 
+/* ------------------------------------------------------------- barriers --
+   Barriers are vertical, so the height field never sees them -- it keeps only
+   surfaces you could stand on. They need their own index: every near-vertical
+   triangle from a wall, guardrail, fence or jersey block, flattened to the line
+   it makes on the ground and binned by that. A wall is the same obstacle at any
+   height a car can reach, so throwing the vertical away costs nothing and turns
+   a quarter of a million triangles into a cheap 2D lookup.
+
+   The response is entirely about angle, which is the whole point of it. Split
+   the car's velocity into the part driving into the wall and the part running
+   along it. The first is destroyed, the second is kept less a little scrub.
+   Hit square and everything is in the first part, so the car stops dead. Graze
+   it and almost everything is in the second, so the car is turned to follow the
+   wall and keeps its speed. Nothing has to test for "head on" or "glancing" --
+   both fall out of the same projection. */
+const BARRIER_RE=/barrie|jersey|wall|grail|guard|fence|armco|tyre|tire/i;
+const BR={cell:8, minx:0, minz:0, nx:0, nz:0, bins:null, seg:null};
+function buildBarrierField(root){
+  const segs=[]; const v=new THREE.Vector3();
+  root.updateWorldMatrix(true,true);
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+    const ms=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
+    if(!(ms.length===1&&ms[0].name&&BARRIER_RE.test(ms[0].name))) return;
+    const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
+    const nT=(idx?idx.count:pos.count)/3;
+    const P=new Float32Array(pos.count*3);
+    for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
+      P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
+    for(let t=0;t<nT;t++){
+      const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2;
+      const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
+            cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
+      const ux=bx-ax,uy=by-ay,uz=bz-az,vx2=cx-ax,vy2=cy-ay,vz2=cz-az;
+      const nx=uy*vz2-uz*vy2, ny=uz*vx2-ux*vz2, nz=ux*vy2-uy*vx2;
+      const L=Math.hypot(nx,ny,nz); if(L<1e-9) continue;
+      if(Math.abs(ny)/L>0.5) continue;                 // a roof or a floor
+      if(Math.max(ay,by,cy)-Math.min(ay,by,cy)<0.25) continue;  // too low to hit
+      // flatten to the longest edge of its ground footprint
+      const pts=[[ax,az],[bx,bz],[cx,cz]];
+      let p0=pts[0],p1=pts[1],best=-1;
+      for(let i=0;i<3;i++)for(let k=i+1;k<3;k++){
+        const d=(pts[i][0]-pts[k][0])**2+(pts[i][1]-pts[k][1])**2;
+        if(d>best){best=d;p0=pts[i];p1=pts[k];}
+      }
+      if(best<0.01) continue;                          // degenerate footprint
+      segs.push(p0[0],p0[1],p1[0],p1[1]);
+    }
+  });
+  const S=new Float32Array(segs); const ns=S.length/4;
+  if(!ns){ BR.bins=null; return {segs:0}; }
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+  for(let i=0;i<ns;i++){ const a=S[i*4],b=S[i*4+1],c=S[i*4+2],d=S[i*4+3];
+    x0=Math.min(x0,a,c); x1=Math.max(x1,a,c); z0=Math.min(z0,b,d); z1=Math.max(z1,b,d); }
+  BR.minx=x0-4; BR.minz=z0-4;
+  BR.nx=Math.max(1,Math.ceil((x1-x0+8)/BR.cell));
+  BR.nz=Math.max(1,Math.ceil((z1-z0+8)/BR.cell));
+  const counts=new Uint32Array(BR.nx*BR.nz);
+  const span=i=>{ const a=S[i*4],b=S[i*4+1],c=S[i*4+2],d=S[i*4+3];
+    return [Math.max(0,((Math.min(a,c)-BR.minx)/BR.cell)|0), Math.min(BR.nx-1,((Math.max(a,c)-BR.minx)/BR.cell)|0),
+            Math.max(0,((Math.min(b,d)-BR.minz)/BR.cell)|0), Math.min(BR.nz-1,((Math.max(b,d)-BR.minz)/BR.cell)|0)]; };
+  for(let i=0;i<ns;i++){ const [a,b,c,d]=span(i);
+    for(let gx=a;gx<=b;gx++)for(let gz=c;gz<=d;gz++) counts[gz*BR.nx+gx]++; }
+  const start=new Uint32Array(BR.nx*BR.nz+1);
+  for(let i=0;i<counts.length;i++) start[i+1]=start[i]+counts[i];
+  const items=new Uint32Array(start[counts.length]); const fill=start.slice();
+  for(let i=0;i<ns;i++){ const [a,b,c,d]=span(i);
+    for(let gx=a;gx<=b;gx++)for(let gz=c;gz<=d;gz++) items[fill[gz*BR.nx+gx]++]=i; }
+  BR.seg=S; BR.bins={start,items};
+  return {segs:ns, cells:BR.nx*BR.nz, refs:items.length};
+}
+
+/* Nearest barrier to a point, within r. Returns how deep in it is and the way
+   out, which is all the response needs. */
+const _bh={hit:false, depth:0, nx:0, nz:0};
+function barrierAt(x,z,r){
+  _bh.hit=false;
+  if(!BR.bins) return _bh;
+  const g0x=((x-r-BR.minx)/BR.cell)|0, g1x=((x+r-BR.minx)/BR.cell)|0;
+  const g0z=((z-r-BR.minz)/BR.cell)|0, g1z=((z+r-BR.minz)/BR.cell)|0;
+  const {start,items}=BR.bins, S=BR.seg;
+  let bestD=r*r, bx=0, bz=0, found=false;
+  for(let gx=Math.max(0,g0x);gx<=Math.min(BR.nx-1,g1x);gx++)
+  for(let gz=Math.max(0,g0z);gz<=Math.min(BR.nz-1,g1z);gz++){
+    for(let p=start[gz*BR.nx+gx]; p<start[gz*BR.nx+gx+1]; p++){
+      const i=items[p];
+      const ax=S[i*4],az=S[i*4+1],cx=S[i*4+2],cz=S[i*4+3];
+      const ex=cx-ax, ez=cz-az;
+      const ll=ex*ex+ez*ez; if(ll<1e-12) continue;
+      let tt=((x-ax)*ex+(z-az)*ez)/ll; tt=tt<0?0:tt>1?1:tt;
+      const qx=ax+ex*tt, qz=az+ez*tt;
+      const dx=x-qx, dz=z-qz, d2=dx*dx+dz*dz;
+      if(d2<bestD){ bestD=d2; bx=dx; bz=dz; found=true; }
+    }
+  }
+  if(!found) return _bh;
+  const d=Math.sqrt(bestD);
+  if(d<1e-6){ _bh.hit=true; _bh.depth=r; _bh.nx=1; _bh.nz=0; return _bh; }
+  _bh.hit=true; _bh.depth=r-d; _bh.nx=bx/d; _bh.nz=bz/d;
+  return _bh;
+}
+
 /* ------------------------------------------------ imported scenery repair --
    Two faults in this model's materials, and between them they are why the
    trees came out as pale rectangles and black cut-outs.
@@ -3226,6 +3328,7 @@ function drive(dt){
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;
       carState.wz  += Math.cos(carState.hdg)*v*dt;
+      hitBarriers(dt);
     } else {
     const k=trackK(carState.s);
     const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
@@ -3330,6 +3433,45 @@ function drive(dt){
   }
 
   kmhEl.textContent = Math.round(carState.speed*3.6);
+}
+
+/* Barrier contact. Tested at the nose and the tail rather than at one point in
+   the middle, or the car would bury half its length in a wall before anything
+   noticed, and a car sliding backwards into one would never notice at all.
+
+   Everything here is confined to this function and runs after the move: it can
+   correct where the car ended up and how fast it is going, and it touches
+   nothing else. Driving away from a wall is untouched, because a contact whose
+   closing speed is outward is ignored. */
+const CAR_R=1.05;
+function hitBarriers(dt){
+  if(!BR.bins) return;
+  const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+  for(const off of [1.7,-1.7]){
+    const px=carState.wx+fx*off, pz=carState.wz+fz*off;
+    const b=barrierAt(px,pz,CAR_R);
+    if(!b.hit) continue;
+    // out of the wall first, so it cannot be pushed through by a fast frame
+    carState.wx += b.nx*b.depth;
+    carState.wz += b.nz*b.depth;
+    let vx=Math.sin(carState.hdg)*carState.speed;
+    let vz=Math.cos(carState.hdg)*carState.speed;
+    const vn=vx*b.nx + vz*b.nz;          // negative = still going into it
+    if(vn>=0) continue;                  // already leaving; leave it alone
+    /* The split that does all the work. Take out the part heading into the
+       wall and keep the part running along it: square on there is nothing left
+       and the car stops, at a shallow angle almost all of it survives and the
+       car is turned to follow the wall. */
+    const tx=vx-vn*b.nx, tz=vz-vn*b.nz;
+    const KEEP=0.86, BOUNCE=0.12;
+    let nvx=tx*KEEP - b.nx*vn*BOUNCE;
+    let nvz=tz*KEEP - b.nz*vn*BOUNCE;
+    const sp=Math.hypot(nvx,nvz);
+    carState.speed=sp;
+    if(sp>0.4) carState.hdg=Math.atan2(nvx,nvz);
+    const into=-vn;
+    if(into>3) hitBarrier(Math.min(into,14));   // the shower of bits, no damage
+  }
 }
 
 /* ------------------------------------------------------------- main loop */
@@ -3798,6 +3940,8 @@ function startTrack(id){
       scene.add(root);
       const st0=buildHeightField(root);
       console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass');
+      const br0=buildBarrierField(root);
+      console.log('barriers: '+br0.segs+' wall segments over '+br0.cells+' cells');
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
@@ -3865,6 +4009,8 @@ function startTrack(id){
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '
                 +stats.refs+' refs, '+stats.loose+' of them gravel');
+    const brs=buildBarrierField(root);
+    console.log('barriers: '+brs.segs+' wall segments over '+brs.cells+' cells');
 
     // drop the whole model so the road under the grid slot is exactly y=0
     const g0=groundAt(0,0,1e9);
