@@ -2864,7 +2864,13 @@ const _AXIS_X=new THREE.Vector3(1,0,0), _AXIS_Y=new THREE.Vector3(0,1,0);
    it stops steering the moment you release instead of trailing away. Holding
    still reaches full lock in about two seconds, which is what keeps the whole
    of the car's grip available in a corner. */
-const STEER_ON=0.62, STEER_OFF=0.14;   // seconds, application and return
+/* Divided by five. This was the real latency, not the rack downstream of it:
+   at 0.62 s to apply, swapping from one lock to the other meant unwinding for
+   most of a second before the car began to answer, and it stacked on top of
+   everything else in the chain. 0.124 s still eases a keypress into a
+   proportional input rather than slamming it to full lock, which is what this
+   easing is for, but it no longer reads as delay. */
+const STEER_ON=0.124, STEER_OFF=0.028;  // seconds, application and return
 const CAR_HALF_W=1.0;             // half the car's width, for the wall test
 let WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
@@ -2951,9 +2957,25 @@ function drive(dt){
     inp *= 1 - 0.34*fast;                          // and softer the faster you go
   }
   const target=clamp(inp*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
+  /* The 5*dt is the latency divided by five. These are exponential
+     approaches, so the time constant is -1/ln(base) seconds and raising the
+     base to the fifth power -- which is what multiplying dt by five does --
+     divides that time by exactly five.
+
+     It was worst where it was most annoying: the slew term made the rack take
+     0.436 s to reach a new angle at top speed, so coming off one lock and onto
+     the other took the best part of a second before the car began to answer.
+     That is now 0.087 s. The unwind, which is what makes turning back feel
+     heavy, goes from 0.334 s to 0.067 s, and the low-speed rack from 0.143 s
+     to 0.029 s.
+
+     The slew limit is kept, just made five times quicker: it still takes about
+     three times as long to move the wheel at 300 kph as at walking pace, which
+     is the part that stops the car being twitchy. Only the absolute delay
+     goes. */
   const rack = AIDS ? 0.0009 + 0.10*fast : 0.0009;
-  steerAng += (target-steerAng)*(1-Math.pow(rack,dt));
-  if(AIDS && Math.abs(steerIn)<0.04) steerAng *= Math.pow(0.05,dt);
+  steerAng += (target-steerAng)*(1-Math.pow(rack,5*dt));
+  if(AIDS && Math.abs(steerIn)<0.04) steerAng *= Math.pow(0.05,5*dt);
   if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
 
   let yawRate=0;
