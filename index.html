@@ -3114,15 +3114,25 @@ function lockTable(kph){
    you were mid-corner, which reads as a jolt; ten kph is narrow enough to still
    feel like a threshold and wide enough not to snap. */
 function turnBoost(kph){
-  /* Four times up to 100 kph, twice from there, four times again past 150.
-     Note it dips in the middle rather than climbing all the way: that is what
-     doubling the low-speed figure and dividing the high-speed ones by 1.5
-     produces, so turning authority drops as you cross 100 and comes back at
-     150. Left as asked, but it is one number to change if the dip is not
-     wanted. */
-  const LOW=4, MID=2, HIGH=4;
-  return LOW + (MID-LOW)*clamp((kph-95)/10, 0, 1)
-             + (HIGH-MID)*clamp((kph-145)/10, 0, 1);
+  /* Control points rather than stacked ramps, because the bands are now tuned
+     independently and a stack makes each one change all the ones above it.
+     Radius goes as one over this in the grip-limited range, so a band is made
+     20% tighter by multiplying its value by 1.25 -- which is what happened to
+     100-200 kph: 2 became 2.5 and 4 became 5, and the value above 205 is left
+     where it was so nothing outside the band moved.
+
+     Each pair is [kph, multiplier] and the value ramps between them, so a step
+     is written as two points 10 kph apart and never lands on a single speed --
+     the wheel angle must not multiply between one frame and the next while you
+     are mid-corner. */
+  const P=[[0,4],[95,4],[105,2.5],[145,2.5],[155,5],[195,5],[205,4],[9999,4]];
+  for(let i=1;i<P.length;i++){
+    if(kph<=P[i][0]){
+      const a2=P[i-1][0], va=P[i-1][1], b2=P[i][0], vb=P[i][1];
+      return b2===a2 ? vb : va+(vb-va)*((kph-a2)/(b2-a2));
+    }
+  }
+  return P[P.length-1][1];
 }
 
 function lockGrip(kph){
