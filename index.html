@@ -2188,35 +2188,91 @@ function spawnPiece(vIn){
   pool.mesh.setColorAt(slot, pool.cols[(Math.random()*pool.cols.length)|0]);
   if(pool.mesh.instanceColor) pool.mesh.instanceColor.needsUpdate=true;
 }
-/* Dust off the back. The same instanced pools the crash debris uses, so there
-   is no second particle system: thrown low and backwards rather than up and
-   outward, coloured pale, scaled small and given a short life so it reads as a
-   plume rather than as parts falling off the car. */
-function spawnDust(){
-  const pool=debrisPools[(Math.random()*debrisPools.length)|0];
-  const items=pool.items;
-  let slot=0, oldest=1e9;
-  for(let i=0;i<items.length;i++){
-    if(items[i].life<=0){ slot=i; oldest=-1; break; }
-    if(items[i].life<oldest){ oldest=items[i].life; slot=i; }
-  }
-  const d=items[slot];
+/* Sand thrown out of the traps.
+
+   This used the crash-debris pools before, which is why it came out as white
+   rectangles: those pools are wing elements and body panels, the wrong shape
+   and the wrong colour for dust. This is a proper particle system instead --
+   soft round points, sand coloured, on one draw call.
+
+   Points rather than instanced quads because a point sprite always faces the
+   camera for free, which is what makes a puff read as a puff from any angle.
+   The sprite is a radial falloff drawn once into a canvas, so there is no
+   texture to fetch and no hard edge anywhere in it. */
+const DUST_N=900;
+let dustPts=null, dustPos=null, dustVel=null, dustLife=null, dustMax=null, dustHead=0;
+(function initDust(){
+  const c=document.createElement('canvas'); c.width=c.height=64;
+  const g2=c.getContext('2d');
+  const grd=g2.createRadialGradient(32,32,0,32,32,32);
+  grd.addColorStop(0,   'rgba(255,255,255,1)');
+  grd.addColorStop(0.45,'rgba(255,255,255,0.55)');
+  grd.addColorStop(1,   'rgba(255,255,255,0)');
+  g2.fillStyle=grd; g2.fillRect(0,0,64,64);
+  const tex=new THREE.CanvasTexture(c);
+  const geo=new THREE.BufferGeometry();
+  dustPos=new Float32Array(DUST_N*3);
+  dustVel=new Float32Array(DUST_N*3);
+  dustLife=new Float32Array(DUST_N);
+  dustMax=new Float32Array(DUST_N);
+  const col=new Float32Array(DUST_N*3);
+  for(let i=0;i<DUST_N;i++) dustPos[i*3+1]=-9999;      // park the unused ones
+  geo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const mat=new THREE.PointsMaterial({
+    size:0.85, sizeAttenuation:true, map:tex, vertexColors:true,
+    transparent:true, depthWrite:false, opacity:0.9 });
+  dustPts=new THREE.Points(geo,mat);
+  dustPts.frustumCulled=false;
+  scene.add(dustPts);
+})();
+
+const _dustC=new THREE.Color();
+function spawnDust(speed){
+  const i=dustHead; dustHead=(dustHead+1)%DUST_N;
   const h=carGroup.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
-  d.x=carGroup.position.x-fx*1.7+(Math.random()-0.5)*1.5;
-  d.y=carGroup.position.y+0.10+Math.random()*0.35;
-  d.z=carGroup.position.z-fz*1.7+(Math.random()-0.5)*1.5;
-  const back=-carState.speed*(0.10+Math.random()*0.22);
-  d.vx=fx*back+(Math.random()-0.5)*3.2;
-  d.vy=0.9+Math.random()*1.9;
-  d.vz=fz*back+(Math.random()-0.5)*3.2;
-  d.wx=(Math.random()-0.5)*4; d.wy=(Math.random()-0.5)*4; d.wz=(Math.random()-0.5)*4;
-  d.rx=Math.random()*6.283; d.ry=Math.random()*6.283; d.rz=Math.random()*6.283;
-  d.sc=0.22+Math.random()*0.30;
-  d.life=0.5+Math.random()*0.7;
-  pool.mesh.setColorAt(slot, _dustCol.setHex(0xe9e4d6).offsetHSL(0,0,(Math.random()-0.5)*0.10));
-  if(pool.mesh.instanceColor) pool.mesh.instanceColor.needsUpdate=true;
+  // out of the back, off to one side or the other, never from under the nose
+  const side=(Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7);
+  dustPos[i*3]  =carGroup.position.x - fx*1.8 - fz*side;
+  dustPos[i*3+1]=carGroup.position.y + 0.05 + Math.random()*0.20;
+  dustPos[i*3+2]=carGroup.position.z - fz*1.8 + fx*side;
+  /* Thrown backwards relative to the car and given a lot of sideways spread,
+     so the plume drifts outward and hangs rather than trailing in a line. */
+  const back=speed*(0.18+Math.random()*0.30);
+  dustVel[i*3]  =-fx*back - fz*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
+  dustVel[i*3+1]= 1.1+Math.random()*2.4 + speed*0.035;
+  dustVel[i*3+2]=-fz*back + fx*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
+  dustMax[i]=dustLife[i]=0.7+Math.random()*0.9;
+  // sand: warm, desaturated, and varied so the plume is not one flat colour
+  _dustC.setHSL(0.108+Math.random()*0.035, 0.34+Math.random()*0.16,
+                0.56+Math.random()*0.16);
+  const col=dustPts.geometry.attributes.color.array;
+  col[i*3]=_dustC.r; col[i*3+1]=_dustC.g; col[i*3+2]=_dustC.b;
 }
-const _dustCol=new THREE.Color();
+
+function updateDust(dt){
+  if(!dustPts) return;
+  let live=false;
+  for(let i=0;i<DUST_N;i++){
+    if(dustLife[i]<=0) continue;
+    live=true;
+    dustLife[i]-=dt;
+    if(dustLife[i]<=0){ dustPos[i*3+1]=-9999; continue; }
+    /* Heavy air drag and light gravity: sand slows fast and then hangs, which
+       is what makes it drift instead of arcing away like a thrown object. */
+    const d=Math.pow(0.12,dt);
+    dustVel[i*3]*=d; dustVel[i*3+2]*=d;
+    dustVel[i*3+1]=dustVel[i*3+1]*d - 2.4*dt;
+    dustPos[i*3]  +=dustVel[i*3]  *dt;
+    dustPos[i*3+1]+=dustVel[i*3+1]*dt;
+    dustPos[i*3+2]+=dustVel[i*3+2]*dt;
+  }
+  if(live||dustPts.visible){
+    dustPts.geometry.attributes.position.needsUpdate=true;
+    dustPts.geometry.attributes.color.needsUpdate=true;
+  }
+  dustPts.visible=live;
+}
 
 function hitBarrier(vIn){
   const n=clamp(Math.round(vIn*0.75),1,8);
@@ -2821,7 +2877,7 @@ function updateStart(dt){
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
 let carPitch=0, carRoll=0, groundY=0, carVY=0;
-let onLoose=false, looseSpray=0;
+let onLoose=false, looseFrac=0, looseSpray=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
 let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
@@ -3054,11 +3110,12 @@ function drive(dt){
          does not. And a little noise on top, because a gravel trap is not
          smooth and the car should not track perfectly straight across one. */
       if(onLoose){
-        carState.speed = Math.max(0, carState.speed - (9.0 + carState.speed*0.55)*dt);
-        const slide = -steerAng*carState.speed*0.055
-                    + (Math.random()-0.5)*carState.speed*0.035;
+        const f=looseFrac;
+        carState.speed = Math.max(0, carState.speed - (9.0 + carState.speed*0.55)*f*dt);
+        const slide = -steerAng*carState.speed*0.055*f
+                    + (Math.random()-0.5)*carState.speed*0.035*f;
         carState.hdg += slide*dt;
-        looseSpray += carState.speed*dt;
+        looseSpray += carState.speed*f*dt;
       }
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;
@@ -3222,9 +3279,16 @@ function frame(now){
        Critical damping is the whole point -- it is the fastest approach that
        cannot overshoot, so there is no bounce to tune out. */
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+    /* Looseness is read off the very probes that place the car, rather than
+       from a separate lookup at the centre. That separate lookup was the bug:
+       it chose its surface by continuity against a different reference, so it
+       could answer for a different layer than the wheels were standing on and
+       report tarmac while the car sat in a gravel trap. */
+    let looseHits=0, groundHits=0;
     const probe1=(lx,lz)=>{
       const g=groundAt(carState.wx + lx*fz + lz*fx,
                        carState.wz - lx*fx + lz*fz, groundY-RIDE);
+      if(g.hit){ groundHits++; if(g.loose) looseHits++; }
       return g.hit?g.y:null;
     };
     /* Each wheel reads the mean of a patch, not a point. The road is 1683
@@ -3249,8 +3313,14 @@ function frame(now){
     }
     if(tgt===null){ const g=groundAt(carState.wx,carState.wz,groundY-RIDE);
                     if(g.hit) tgt=g.y+RIDE; }
-    { const c=groundAt(carState.wx,carState.wz,groundY-RIDE);
-      onLoose = c.hit && c.loose; }
+    /* Proportional, not a threshold. Requiring half the probes to be on gravel
+       meant a car straddling the edge of a trap felt nothing at all, and since
+       the probes cover a patch around each wheel that edge is metres wide. The
+       fraction that is loose now scales the effect, so one wheel in the gravel
+       drags a little and a car buried in it drags fully -- and there is no
+       boundary at which the behaviour snaps. */
+    looseFrac = groundHits>0 ? looseHits/groundHits : 0;
+    onLoose = looseFrac > 0.02;
     carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
     carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
 
@@ -3293,9 +3363,16 @@ function frame(now){
     carGroup.rotation.y=Math.atan2(_d2.x,_d2.y)+carState.psi;
   }
   carGroup.updateMatrixWorld(true);
-  if(onLoose && carState.speed>1.5){
-    while(looseSpray>1.1){ looseSpray-=1.1; spawnDust(); }
+  /* More of it the faster you go, and metered by distance rather than by
+     frame so the plume does not thin out when the frame rate does. The divisor
+     falls with speed, so a crawl leaves a trickle and a fast excursion throws
+     a wall of it. */
+  if(onLoose && carState.speed>1.2){
+    const every = Math.max(0.22, 2.2 - carState.speed*0.045);
+    let guard=0;
+    while(looseSpray>every && guard++<12){ looseSpray-=every; spawnDust(carState.speed); }
   } else looseSpray=0;
+  updateDust(dt);
   updateDebris(dt);
 
   const sp=carState.speed/MAXSPEED;
