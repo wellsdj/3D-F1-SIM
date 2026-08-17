@@ -288,13 +288,22 @@ function findRoadMesh(root){
   return best;
 }
 
-/* Where to start. Rasterise the road looking down, measure how far every point
-   is from an edge, and the widest place by far is the paddock -- 45 m across on
-   the 1998 model against a 12 m road. That locates the pits without naming
-   anything. Then take the longest straight run of ordinary racing width near
-   it, which is the pit straight, and stand on that facing along it. This is
-   what keeps the car out of a garage. */
-function findGrid(mesh){
+/* Where to start.
+
+   Best case, the model says so outright: a start-lights object sits directly
+   over the start line at every circuit, so if one can be found by name its
+   position is the start line, no inference required. That is passed in as the
+   anchor and the search happens within 45 m of it.
+
+   Failing that, fall back to geometry. Rasterise the road looking down, measure
+   how far every point is from an edge, and the widest place by far is the
+   paddock -- 45 m across against a 12 m road -- which locates the pits without
+   naming anything. The longest straight of ordinary racing width near it is the
+   pit straight.
+
+   Either way the car ends up on racing-width road facing along it, rather than
+   in a garage or across the track. */
+function findGrid(mesh, anchor){
   const CELL=1.5, v=new THREE.Vector3();
   const g=mesh.geometry, pos=g.attributes.position, idx=g.index, m=mesh.matrixWorld;
   const P=new Float32Array(pos.count*3);
@@ -345,12 +354,14 @@ function findGrid(mesh){
     for(let d=2;d<900;d+=3){ if(at(px+sx*d,pz+cz2*d)<4.5) break; f=d; }
     for(let d=2;d<900;d+=3){ if(at(px-sx*d,pz-cz2*d)<4.5) break; b=d; }
     return {f,b,tot:f+b}; };
-  const px0=gx(wi), pz0=gz(wi);
+  const px0 = anchor ? anchor.x : gx(wi);
+  const pz0 = anchor ? anchor.z : gz(wi);
+  const reach = anchor ? 45 : 300;
   let best=null;
   for(let iz=1;iz<H-1;iz+=2)for(let ix=1;ix<W-1;ix+=2){
     const i=iz*W+ix; if(!occ[i]||D[i]<5||D[i]>8) continue;
     const px=gx(i), pz=gz(i);
-    if(Math.hypot(px-px0,pz-pz0)>300) continue;
+    if(Math.hypot(px-px0,pz-pz0)>reach) continue;
     let bt=null;
     for(let th=0;th<Math.PI;th+=Math.PI/48){ const r=run(px,pz,th);
       if(!bt||r.tot>bt.tot) bt={...r,th}; }
@@ -358,9 +369,11 @@ function findGrid(mesh){
   }
   if(!best) return null;
   const th=best.f>=best.b?best.th:best.th+Math.PI;
-  const back=Math.min(best.f,best.b)*0.55;
+  /* Anchored on the start line, stand on it rather than backing down the
+     straight from the middle of it -- the whole point is to be on the line. */
+  const back = anchor ? 0 : Math.min(best.f,best.b)*0.55;
   return { x:best.px-Math.sin(th)*back, z:best.pz-Math.cos(th)*back,
-           hdg:th, straight:best.tot, pitWidth:wid*2 };
+           hdg:th, straight:best.tot, pitWidth:wid*2, anchored:!!anchor };
 }
 
 /* ------------------------------------------------ imported scenery repair --
@@ -3700,11 +3713,29 @@ function startTrack(id){
     } else console.log('model is already 1 unit = 1 metre');
 
     bootMsg.textContent='Finding the grid';
-    const grid = findGrid(rd.mesh);
+    /* The start lights hang over the start line, so their position is the line.
+       Averaged over the object's vertices rather than taken from a bounding box
+       centre, which a gantry arm would drag off to one side. */
+    let anchor=null;
+    root.traverse(o=>{
+      if(anchor||!o.isMesh||!o.material) return;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      if(!ms.some(m=>m&&m.name&&/start.?light/i.test(m.name))) return;
+      const pos=o.geometry.attributes.position; o.updateWorldMatrix(true,false);
+      const v=new THREE.Vector3(); let sx=0,sy=0,sz=0;
+      for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld);
+        sx+=v.x; sy+=v.y; sz+=v.z; }
+      anchor={x:sx/pos.count, y:sy/pos.count, z:sz/pos.count};
+    });
+    if(anchor) console.log('start lights found at '+anchor.x.toFixed(1)+', '+anchor.z.toFixed(1)
+                           +' -- using them as the start line');
+    else console.log('no start lights in this model; falling back to the pit straight');
+    const grid = findGrid(rd.mesh, anchor);
     let heading=0;
     if(grid){
-      console.log('grid: '+grid.straight.toFixed(0)+' m straight, pits '
-                  +grid.pitWidth.toFixed(0)+' m wide, facing '+(grid.hdg*57.3).toFixed(0)+' deg');
+      console.log('grid: '+(grid.anchored?'on the start line':'on the pit straight')
+                  +', '+grid.straight.toFixed(0)+' m of straight, facing '
+                  +(grid.hdg*57.3).toFixed(0)+' deg');
       // move the world so the grid slot is the origin, and face down the road
       root.position.set(-grid.x, 0, -grid.z);
       heading=grid.hdg;
