@@ -60,6 +60,20 @@
               padding:6px 10px;cursor:pointer}
   #gridtoggle:hover{background:rgba(255,255,255,.12)}
   #gridtoggle.hide{display:none}
+  #gridpanel .tabs{margin-bottom:9px}
+  #gridpanel button.tab{opacity:.5;background:none}
+  #gridpanel button.tab.on{opacity:1;background:rgba(255,255,255,.14);color:var(--amber)}
+  #panegrid,#paneline{display:none}
+  #panegrid.on,#paneline.on{display:block}
+  #linesel{margin:0 0 8px;font-size:10.5px;line-height:1.7;opacity:.85}
+  #linesel b{color:var(--amber);font-weight:600}
+  #pedalrow{display:flex;gap:6px;margin:7px 0 6px}
+  #pedalrow button{flex:1}
+  #pedalrow button.on{background:var(--amber);color:#111;border-color:var(--amber)}
+  #pedalval{font-size:26px;font-weight:600;color:var(--amber);font-variant-numeric:tabular-nums;
+            letter-spacing:-.02em;cursor:ns-resize;user-select:none;padding:2px 0}
+  #pedalval small{font-size:10px;letter-spacing:.14em;opacity:.6;margin-left:4px}
+  #pedalhint{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.45}
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
@@ -109,15 +123,39 @@
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
 <div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em></div>
-<button id="gridtoggle">Grid slots</button>
+<button id="gridtoggle">Editor</button>
 <div id="gridpanel">
-  <h4>Grid slots <span id="gridcount">0 / 10</span></h4>
-  <div id="gridlist"></div>
-  <div class="row">
-    <button id="gridcopy">Copy</button>
-    <button id="gridundo">Undo</button>
-    <button id="gridclear">Clear</button>
+  <div class="row tabs">
+    <button id="tabgrid" class="tab">Grid</button>
+    <button id="tabline" class="tab">Racing line</button>
   </div>
+
+  <div id="panegrid">
+    <h4>Grid slots <span id="gridcount">0 / 10</span></h4>
+    <div id="gridlist"></div>
+    <div class="row">
+      <button id="gridcopy">Copy</button>
+      <button id="gridundo">Undo</button>
+      <button id="gridclear">Clear</button>
+    </div>
+  </div>
+
+  <div id="paneline">
+    <h4>Racing line <span id="linecount">0 points</span></h4>
+    <div id="linesel">
+      <div style="opacity:.55">Click the track to drop a point.<br>Click a dot to set its pedal.</div>
+    </div>
+    <div class="row">
+      <button id="linecopy">Copy</button>
+      <button id="lineundo">Undo</button>
+      <button id="lineclear">Clear</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="linepreview">Preview</button>
+      <button id="linereset">Reset</button>
+    </div>
+  </div>
+
   <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
 </div>
 <canvas id="map" width="372" height="372"></canvas>
@@ -128,7 +166,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>P</kbd> grid slots · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -201,6 +239,30 @@ let KERB_W      = 2.0;      // kerb width, outboard of the edge line
 let SHOULDER    = 11.4;     // gravel outer edge
 let TREE_CLEAR  = 22.0;     // nearest trunk to the centreline
 let LAP_TARGET  = 5000;     // circuit length, metres
+
+/* ------------------------------------------------------------- grid slots */
+/* The ten starting positions at Spa, in the model's own coordinate frame --
+   the frame spawnAt is written in. Hand-clicked in the running game with the
+   grid picker (P), not derived from the model, for the same reason spawnAt is
+   hand-measured: nothing in this GLB is reliable enough to derive them from.
+   These are for races -- ten cars on the grid, the player one of them, drawn
+   at random, so you might start anywhere in the pack.
+
+   IMPORTANT: each point is THE VERY TIP OF THE FRONT WING, not the centre of
+   the car. Anything placing a car here has to sit the nose on the point and
+   put the body behind it, along the grid heading. */
+const GRID_SLOTS=[
+  [-306.65,-728.27],
+  [-308.72,-717.81],
+  [-297.98,-714.84],
+  [-300.02,-704.04],
+  [-289.69,-701.30],
+  [-291.35,-690.31],
+  [-281.09,-687.56],
+  [-282.98,-677.02],
+  [-272.64,-674.13],
+  [-274.62,-663.39]
+];
 
 /* ------------------------------------------------------------------ tracks */
 /* Pinewood is authored from control points and driven in track space, so it
@@ -2957,7 +3019,7 @@ canvas.addEventListener('dblclick',e=>{
    the frame spawnAt is written in -- so they stay valid across reloads no
    matter where the loader anchors the world that session. */
 const GRID_MAX=10;
-let gridMode=false, gridPts=[], gridGroup=null;
+let gridMode=false, gridPts=[], gridGroup=null, editTab='grid';
 function gridLabel(n){
   const c=document.createElement('canvas'); c.width=c.height=64;
   const g=c.getContext('2d');
@@ -2980,6 +3042,14 @@ function gridRedraw(){
     const s=gridLabel(i+1); s.position.set(p.x,p.y+RIDE+3.8,p.z); gridGroup.add(s);
   });
 }
+function pickLineDot(clientX,clientY){
+  const r=canvas.getBoundingClientRect();
+  _markMouse.x=((clientX-r.left)/r.width)*2-1;
+  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
+  _markRay.setFromCamera(_markMouse,camera);
+  const hit=_markRay.intersectObjects(lineDots,false);
+  return hit.length?hit[0].object.userData.lineIndex:-1;
+}
 function gridToModel(p){
   const inv=new THREE.Matrix4().copy(trackRoot.matrixWorld).invert();
   const q=p.clone().applyMatrix4(inv);
@@ -3001,19 +3071,229 @@ function gridShow(on){
   gridMode=on;
   document.getElementById('gridpanel').classList.toggle('on',on);
   document.getElementById('gridtoggle').classList.toggle('hide',on);
-  if(on) gridPanel();
+  if(on){ editRestore(); editSetTab(editTab); }
+}
+function editSetTab(tab){
+  editTab=tab;
+  document.getElementById('tabgrid').classList.toggle('on',tab==='grid');
+  document.getElementById('tabline').classList.toggle('on',tab==='line');
+  document.getElementById('panegrid').classList.toggle('on',tab==='grid');
+  document.getElementById('paneline').classList.toggle('on',tab==='line');
+  if(tab==='grid') gridPanel(); else linePanel();
 }
 document.getElementById('gridtoggle').onclick=()=>gridShow(true);
 document.getElementById('gridclose').onclick=()=>gridShow(false);
-document.getElementById('gridundo').onclick=()=>{ gridPts.pop(); gridRedraw(); gridPanel(); };
-document.getElementById('gridclear').onclick=()=>{ gridPts=[]; gridRedraw(); gridPanel(); };
+document.getElementById('tabgrid').onclick=()=>editSetTab('grid');
+document.getElementById('tabline').onclick=()=>editSetTab('line');
+document.getElementById('gridundo').onclick=()=>{ gridPts.pop(); gridRedraw(); gridPanel(); editSave(); };
+document.getElementById('gridclear').onclick=()=>{ gridPts=[]; gridRedraw(); gridPanel(); editSave(); };
+function copyFlash(b,text){
+  if(navigator.clipboard) navigator.clipboard.writeText(text).catch(()=>{});
+  const was=b.textContent; b.textContent='Copied'; setTimeout(()=>{b.textContent=was;},900);
+}
 document.getElementById('gridcopy').onclick=e=>{
   const t=gridText();
   console.log('grid slots (model coordinates):\n'+t);
-  if(navigator.clipboard) navigator.clipboard.writeText(t).catch(()=>{});
-  const b=e.currentTarget, was=b.textContent;
-  b.textContent='Copied'; setTimeout(()=>{b.textContent=was;},900);
+  copyFlash(e.currentTarget,t);
 };
+
+/* --------------------------------------------------------------- racing line
+   The optimum line round the lap, laid down by hand the same way the grid is:
+   click the track, get a dot exactly where you clicked. Each dot carries one
+   pedal -- throttle or brake, never both -- as a percentage, which is what
+   the AI will drive to. Preview runs a faded copy of your own car along it so
+   you can watch the numbers before committing to them.
+
+   Stored in the model's frame like everything else here, and kept in
+   localStorage so a reload doesn't throw away an afternoon of clicking. */
+const LINE_COL={ none:0xff2222, thr:0x33ff66, brk:0xffbb00 };
+let linePts=[], lineSel=-1, lineGroup=null, lineDots=[];
+function lineAdd(p){ linePts.push({p:p, pedal:null, pct:0}); }
+function lineRedraw(){
+  if(lineGroup){ scene.remove(lineGroup);
+    lineGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
+  lineGroup=new THREE.Group(); scene.add(lineGroup); lineDots=[];
+  const lift=RIDE+0.10;
+  // the dots themselves: big enough to click, and drawn over the road rather
+  // than sunk into it, so a line laid across a crest is still readable
+  const geo=new THREE.SphereGeometry(1.05,14,10);
+  linePts.forEach((q,i)=>{
+    const col = q.pedal ? LINE_COL[q.pedal] : LINE_COL.none;
+    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:col,depthTest:false}));
+    m.position.set(q.p.x,q.p.y+lift,q.p.z);
+    m.renderOrder=999;
+    if(i===lineSel) m.scale.setScalar(1.55);
+    m.userData.lineIndex=i;
+    lineGroup.add(m); lineDots.push(m);
+  });
+  // a thin joining line, just so the shape of the lap reads at a distance
+  if(linePts.length>1){
+    const g=new THREE.BufferGeometry(), a=new Float32Array(linePts.length*3);
+    linePts.forEach((q,i)=>{ a[i*3]=q.p.x; a[i*3+1]=q.p.y+lift; a[i*3+2]=q.p.z; });
+    g.setAttribute('position',new THREE.BufferAttribute(a,3));
+    lineGroup.add(new THREE.Line(g,new THREE.LineBasicMaterial({
+      color:0xffffff,transparent:true,opacity:0.30,depthTest:false})));
+  }
+}
+function linePanel(){
+  document.getElementById('linecount').textContent=
+    linePts.length+(linePts.length===1?' point':' points');
+  const el=document.getElementById('linesel');
+  if(lineSel<0||!linePts[lineSel]){
+    el.innerHTML = previewOn
+      ? '<div>Preview <b id="pvspeed">0</b> km/h</div>'
+      : '<div style="opacity:.55">Click the track to drop a point.<br>Click a dot to set its pedal.</div>';
+    return;
+  }
+  const q=linePts[lineSel];
+  el.innerHTML =
+    '<div>Point <b>'+String(lineSel+1).padStart(2,'0')+'</b></div>'+
+    '<div id="pedalrow">'+
+      '<button data-p="thr"'+(q.pedal==='thr'?' class="on"':'')+'>Throttle</button>'+
+      '<button data-p="brk"'+(q.pedal==='brk'?' class="on"':'')+'>Brake</button>'+
+    '</div>'+
+    '<div id="pedalval">'+Math.round(q.pct)+'<small>%</small></div>'+
+    '<div id="pedalhint">drag the number up · down</div>'+
+    (previewOn?'<div style="margin-top:6px">Preview <b id="pvspeed">0</b> km/h</div>':'');
+  el.querySelectorAll('#pedalrow button').forEach(b=>{
+    b.onclick=()=>{
+      const want=b.dataset.p;
+      // one pedal at a time -- picking the other one replaces it, and picking
+      // the one already set clears it back to coasting
+      q.pedal = (q.pedal===want) ? null : want;
+      if(q.pedal && q.pct<=0) q.pct=100;
+      if(!q.pedal) q.pct=0;
+      lineRedraw(); linePanel(); editSave();
+    };
+  });
+  const val=el.querySelector('#pedalval');
+  val.addEventListener('pointerdown',e=>{
+    if(!q.pedal) return;                       // nothing to set a level for yet
+    e.preventDefault(); val.setPointerCapture(e.pointerId);
+    let lastY=e.clientY;
+    const move=ev=>{
+      q.pct=clamp(q.pct+(lastY-ev.clientY)*0.7,0,100); lastY=ev.clientY;
+      val.innerHTML=Math.round(q.pct)+'<small>%</small>';
+    };
+    const up=()=>{ val.removeEventListener('pointermove',move);
+      val.removeEventListener('pointerup',up); lineRedraw(); editSave(); };
+    val.addEventListener('pointermove',move);
+    val.addEventListener('pointerup',up);
+  });
+}
+function lineText(){
+  if(!trackRoot) return '';
+  return '['+linePts.map(q=>{
+    const m=gridToModel(q.p);
+    return '['+m[0]+','+m[1]+',"'+(q.pedal||'-')+'",'+Math.round(q.pct)+']';
+  }).join(',\n ')+']';
+}
+document.getElementById('lineundo').onclick=()=>{
+  linePts.pop(); if(lineSel>=linePts.length) lineSel=-1;
+  lineRedraw(); linePanel(); editSave();
+};
+document.getElementById('lineclear').onclick=()=>{
+  linePts=[]; lineSel=-1; previewStop(); lineRedraw(); linePanel(); editSave();
+};
+document.getElementById('linecopy').onclick=e=>{
+  const t=lineText();
+  console.log('racing line [x, z, pedal, percent] (model coordinates):\n'+t);
+  copyFlash(e.currentTarget,t);
+};
+
+/* ------------------------------------------------------------------ preview
+   Your own car, faded, driven round the line by nothing more than the pedal
+   numbers on the dots -- so what you are watching is exactly what those
+   numbers say, not a simulation of a driver. Edit while it runs: it reads the
+   values live, so a dot you change takes effect the next time it comes round. */
+let previewOn=false, pvGhost=null, pvS=0, pvV=12;
+const PV_ACC=9, PV_BRK=22, PV_COAST=0.7, PV_VMIN=4, PV_VMAX=95;
+function pvSegLen(i){
+  const a=linePts[i].p, b=linePts[(i+1)%linePts.length].p;
+  return Math.hypot(b.x-a.x,b.z-a.z);
+}
+function previewStart(){
+  if(linePts.length<2 || !carGroup) return;
+  if(!pvGhost){
+    pvGhost=carGroup.clone(true);
+    pvGhost.traverse(o=>{
+      if(!o.isMesh||!o.material) return;
+      const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.35;
+                      c.depthWrite=false; return c; };
+      o.material=Array.isArray(o.material)?o.material.map(fade):fade(o.material);
+      o.castShadow=false; o.receiveShadow=false;
+    });
+    scene.add(pvGhost);
+  }
+  pvGhost.visible=true; previewOn=true;
+  document.getElementById('linepreview').textContent='Stop';
+  linePanel();
+}
+function previewStop(){
+  previewOn=false;
+  if(pvGhost) pvGhost.visible=false;
+  const b=document.getElementById('linepreview'); if(b) b.textContent='Preview';
+  linePanel();
+}
+function previewReset(){ pvS=0; pvV=12; previewStop(); }
+document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
+document.getElementById('linereset').onclick=previewReset;
+function previewStep(dt){
+  if(!previewOn||linePts.length<2||!pvGhost) return;
+  const n=linePts.length;
+  // which dot are we running away from -- that is the pedal in force now
+  let i=0, s=pvS, total=0;
+  for(let k=0;k<n;k++) total+=pvSegLen(k);
+  pvS=((pvS%total)+total)%total; s=pvS;
+  while(i<n && s>=pvSegLen(i)){ s-=pvSegLen(i); i++; }
+  if(i>=n){ i=n-1; s=0; }
+  const q=linePts[i];
+  const a = q.pedal==='thr' ? PV_ACC*q.pct/100
+          : q.pedal==='brk' ? -PV_BRK*q.pct/100
+          : -PV_COAST;
+  pvV=clamp(pvV+a*dt,PV_VMIN,PV_VMAX);
+  pvS+=pvV*dt;
+  const A=linePts[i].p, B=linePts[(i+1)%n].p;
+  const L=Math.max(pvSegLen(i),1e-3), f=clamp(s/L,0,1);
+  const x=A.x+(B.x-A.x)*f, z=A.z+(B.z-A.z)*f;
+  const g=groundAt(x,z,pvGhost.position.y||1e9);
+  pvGhost.position.set(x,(g.hit?g.y:A.y)+RIDE,z);
+  pvGhost.rotation.y=Math.atan2(B.x-A.x,B.z-A.z);
+  const sp=document.getElementById('pvspeed');
+  if(sp) sp.textContent=Math.round(pvV*3.6);
+}
+
+/* ------------------------------------------------------- save and restore
+   Model-space, so it survives the loader re-anchoring the world. Heights are
+   re-derived from the ground on the way back in rather than stored. */
+const EDIT_KEY='f1sim.editor.v1';
+let editRestored=false;
+function editSave(){
+  if(!trackRoot) return;
+  try{
+    localStorage.setItem(EDIT_KEY,JSON.stringify({
+      grid: gridPts.map(gridToModel),
+      line: linePts.map(q=>({ m:gridToModel(q.p), pedal:q.pedal, pct:Math.round(q.pct) }))
+    }));
+  }catch(e){}
+}
+function editModelToWorld(m){
+  const v=new THREE.Vector3(m[0],0,m[1]).applyMatrix4(trackRoot.matrixWorld);
+  const g=groundAt(v.x,v.z,1e9);
+  v.y = g.hit ? g.y : 0;
+  return v;
+}
+function editRestore(){
+  if(editRestored||!trackRoot) return;
+  editRestored=true;
+  let d=null;
+  try{ d=JSON.parse(localStorage.getItem(EDIT_KEY)||'null'); }catch(e){}
+  if(!d) return;
+  if(Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
+  if(Array.isArray(d.line)) linePts=d.line.map(o=>({
+    p:editModelToWorld(o.m), pedal:o.pedal||null, pct:o.pct||0 }));
+  gridRedraw(); lineRedraw();
+}
 
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
@@ -3024,11 +3304,22 @@ canvas.addEventListener('pointerdown',e=>{
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
-  if(moved<8 && gridMode){
+  if(moved<8 && gridMode && editTab==='grid'){
     if(gridPts.length<GRID_MAX){
       const p=markScreenToGround(e.clientX,e.clientY);
-      if(p){ gridPts.push(p); gridRedraw(); gridPanel(); }
+      if(p){ gridPts.push(p); gridRedraw(); gridPanel(); editSave(); }
     }
+    return;
+  }
+  if(moved<8 && gridMode && editTab==='line'){
+    // a dot under the cursor is a selection; anywhere else lays a new one down
+    const hit=lineDots.length?pickLineDot(e.clientX,e.clientY):-1;
+    if(hit>=0){ lineSel=hit; }
+    else{
+      const p=markScreenToGround(e.clientX,e.clientY);
+      if(p){ lineAdd(p); lineSel=linePts.length-1; }
+    }
+    lineRedraw(); linePanel(); editSave();
     return;
   }
   if(moved<8 && markMode){
@@ -3878,6 +4169,8 @@ function frame(now){
       }
     }
   }
+
+  previewStep(dt);
 
   // sun rig follows the car so the shadow map stays tight
   tmp.copy(carGroup.position);

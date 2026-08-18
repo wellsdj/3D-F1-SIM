@@ -41,6 +41,47 @@ constant per track, filled in by literally parking the car and reading the
 number off. That's the pattern for anything geometry-derivation keeps
 getting wrong: stop deriving it, measure it by hand, hardcode it.
 
+## Grid slots and the racing line — hand-authored, in the editor
+
+Press `P` (or the **Editor** button, top left) for a two-tab panel. Both tabs
+work the same way: click the track, get a point exactly where you clicked,
+raycast into the real mesh so it lands at the true ground height. Everything
+comes out in the **model's own coordinate frame** — the frame `spawnAt` is
+written in — so the numbers survive a reload no matter where the loader
+anchors the world that session. Both are kept in `localStorage` too, so an
+afternoon of clicking isn't lost to a refresh.
+
+**Grid tab — the ten starting positions.** Already done and committed as
+`GRID_SLOTS` in `index.html`. **These are for races**: ten cars on the grid,
+the player one of them, drawn at random, so you can start anywhere in the
+pack — front, middle or last.
+
+> **Each grid coordinate is the very tip of the front wing**, not the centre
+> of the car. That is the point that was actually clicked. Whatever ends up
+> placing cars on the grid has to sit the *nose* on the point and put the rest
+> of the body behind it, along the grid heading — otherwise every car will
+> start half a length further up the road than intended.
+
+Grid slots carry no heading. All ten face the same way, so use the `spawnAt`
+heading for the track (212.3° at Spa) unless that turns out to be wrong.
+
+**Racing line tab — the optimum line, with pedals.** Click along the track to
+lay down big red dots: this is where the AI cars are meant to go. Click an
+existing dot to select it, then give it **one** pedal — Throttle or Brake,
+never both — and drag the number up or down to set the percentage. 100% is
+full throttle. A dot with no pedal set is a coast, and stays red; throttle
+turns it green, brake amber. **Copy** exports the whole line as
+`[x, z, pedal, percent]` rows.
+
+**Preview** runs a faded copy of your own car round the line, driven by
+nothing but those pedal numbers — so what you are watching is exactly what
+the numbers say, not a simulation of a driver. It reads the values live, so
+you can keep editing dots while it runs and each change takes effect next lap.
+**Reset** puts it back to the start of the line.
+
+Not built yet, deliberately: the AI itself. None of the above drives anything
+in a race yet — it is the authored data the AI will read.
+
 ## Barriers — where this is genuinely unfinished
 
 This is the part to be careful with.
