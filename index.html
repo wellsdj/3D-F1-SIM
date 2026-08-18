@@ -84,7 +84,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Walls <em id="bname">Off</em><br>Mark <em id="mname">Off</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
@@ -93,7 +93,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>B</kbd> show walls · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -433,134 +433,6 @@ function findGrid(mesh, anchor){
   const back = Math.min(best.f,best.b)*0.55;
   return { x:best.px-Math.sin(th)*back, z:best.pz-Math.cos(th)*back,
            hdg:th, straight:best.tot, pitWidth:wid*2, anchored:false };
-}
-
-/* ------------------------------------------------------------- barriers --
-   Every barrier in the model traces a line on the ground when you look down at
-   it. That line is what the car actually hits, so that is what gets recorded --
-   curved or straight, whatever shape the barrier happens to be.
-
-   Barriers are vertical, so the height field never sees them: it keeps only
-   surfaces you could stand on. Taking the near-vertical triangles and dropping
-   each one to the line it makes on the ground turns a quarter of a million
-   triangles into a flat set of segments, which is both what the collision needs
-   and far cheaper to search. A wall is the same obstacle at every height a car
-   can reach, so nothing useful is lost by flattening it.
-
-   The rule that a barrier is never in the middle of the track is enforced here
-   rather than assumed. Any segment sitting more than ON_TRACK metres inside the
-   racing surface is thrown away. Barriers belong at the edges, so a line across
-   the road means the extraction went wrong -- and this way that failure costs a
-   missing barrier instead of an invisible wall across the circuit. */
-const BARRIER_RE=/barrie|jersey|wall|grail|guard|armco|tyre|tire/i;
-const ON_TRACK=2.0;                 // metres inside the road before it is rejected
-const BR={cell:8, minx:0, minz:0, nx:0, nz:0, bins:null, seg:null};
-function buildBarrierField(root){
-  const segs=[]; const v=new THREE.Vector3();
-  let rejected=0;
-  root.updateWorldMatrix(true,true);
-  root.traverse(o=>{
-    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
-    const ms=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
-    if(!ms.some(m=>m.name&&BARRIER_RE.test(m.name))) return;
-    const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
-    const nT=(idx?idx.count:pos.count)/3;
-    const P=new Float32Array(pos.count*3);
-    for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
-      P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
-    for(let t=0;t<nT;t++){
-      const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2;
-      const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
-            cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
-      const ux=bx-ax,uy=by-ay,uz=bz-az,vx2=cx-ax,vy2=cy-ay,vz2=cz-az;
-      const nx=uy*vz2-uz*vy2, ny=uz*vx2-ux*vz2, nz=ux*vy2-uy*vx2;
-      const L=Math.hypot(nx,ny,nz); if(L<1e-9) continue;
-      if(Math.abs(ny)/L>0.60) continue;              // a roof or a floor, not a wall
-      // the line this triangle makes on the ground: its longest footprint edge
-      const pts=[[ax,az],[bx,bz],[cx,cz]];
-      let p0=pts[0],p1=pts[1],best=-1;
-      for(let i=0;i<3;i++)for(let k=i+1;k<3;k++){
-        const d=(pts[i][0]-pts[k][0])**2+(pts[i][1]-pts[k][1])**2;
-        if(d>best){best=d;p0=pts[i];p1=pts[k];}
-      }
-      if(best<0.04) continue;                        // no footprint to speak of
-      // never across the racing surface
-      const mx=(p0[0]+p1[0])*0.5, mz=(p0[1]+p1[1])*0.5;
-      if(roadDepth(mx,mz)>ON_TRACK){ rejected++; continue; }
-      segs.push(p0[0],p0[1],p1[0],p1[1]);
-    }
-  });
-  const S=new Float32Array(segs); const ns=S.length/4;
-  BR.seg=S;
-  if(!ns){ BR.bins=null; return {segs:0, rejected}; }
-  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
-  for(let i=0;i<ns;i++){ const a=S[i*4],b=S[i*4+1],c=S[i*4+2],d=S[i*4+3];
-    x0=Math.min(x0,a,c); x1=Math.max(x1,a,c); z0=Math.min(z0,b,d); z1=Math.max(z1,b,d); }
-  BR.minx=x0-4; BR.minz=z0-4;
-  BR.nx=Math.max(1,Math.ceil((x1-x0+8)/BR.cell));
-  BR.nz=Math.max(1,Math.ceil((z1-z0+8)/BR.cell));
-  const counts=new Uint32Array(BR.nx*BR.nz);
-  const span=i=>{ const a=S[i*4],b=S[i*4+1],c=S[i*4+2],d=S[i*4+3];
-    return [Math.max(0,((Math.min(a,c)-BR.minx)/BR.cell)|0), Math.min(BR.nx-1,((Math.max(a,c)-BR.minx)/BR.cell)|0),
-            Math.max(0,((Math.min(b,d)-BR.minz)/BR.cell)|0), Math.min(BR.nz-1,((Math.max(b,d)-BR.minz)/BR.cell)|0)]; };
-  for(let i=0;i<ns;i++){ const [a,b,c,d]=span(i);
-    for(let gx=a;gx<=b;gx++)for(let gz=c;gz<=d;gz++) counts[gz*BR.nx+gx]++; }
-  const start=new Uint32Array(BR.nx*BR.nz+1);
-  for(let i=0;i<counts.length;i++) start[i+1]=start[i]+counts[i];
-  const items=new Uint32Array(start[counts.length]); const fill=start.slice();
-  for(let i=0;i<ns;i++){ const [a,b,c,d]=span(i);
-    for(let gx=a;gx<=b;gx++)for(let gz=c;gz<=d;gz++) items[fill[gz*BR.nx+gx]++]=i; }
-  BR.bins={start,items};
-  return {segs:ns, rejected, cells:BR.nx*BR.nz, refs:items.length};
-}
-
-/* Draw every recorded line, so it can be checked by eye instead of by faith.
-   The last attempt failed silently and there was nothing to look at; this is
-   the thing that would have shown why. Toggled with B. */
-let brLines=null, brShow=false;
-function showBarrierLines(on){
-  if(brLines){ scene.remove(brLines); brLines.geometry.dispose(); brLines=null; }
-  if(!on||!BR.seg||!BR.seg.length) return;
-  const S=BR.seg, n=S.length/4;
-  const pts=new Float32Array(n*6);
-  for(let i=0;i<n;i++){
-    const y=(groundY-RIDE)+0.6;
-    pts[i*6]=S[i*4]; pts[i*6+1]=y;   pts[i*6+2]=S[i*4+1];
-    pts[i*6+3]=S[i*4+2]; pts[i*6+4]=y; pts[i*6+5]=S[i*4+3];
-  }
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.BufferAttribute(pts,3));
-  brLines=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0x22ff88}));
-  brLines.frustumCulled=false;
-  scene.add(brLines);
-}
-
-/* Nearest barrier line to a point, within r: how far in, and the way out. */
-const _bh={hit:false, depth:0, nx:0, nz:0};
-function barrierAt(x,z,r){
-  _bh.hit=false;
-  if(!BR.bins) return _bh;
-  const g0x=((x-r-BR.minx)/BR.cell)|0, g1x=((x+r-BR.minx)/BR.cell)|0;
-  const g0z=((z-r-BR.minz)/BR.cell)|0, g1z=((z+r-BR.minz)/BR.cell)|0;
-  const {start,items}=BR.bins, S=BR.seg;
-  let bestD=r*r, bx=0, bz=0, found=false;
-  for(let gx=Math.max(0,g0x);gx<=Math.min(BR.nx-1,g1x);gx++)
-  for(let gz=Math.max(0,g0z);gz<=Math.min(BR.nz-1,g1z);gz++){
-    for(let p=start[gz*BR.nx+gx]; p<start[gz*BR.nx+gx+1]; p++){
-      const i=items[p];
-      const ax=S[i*4],az=S[i*4+1],cx=S[i*4+2],cz=S[i*4+3];
-      const ex=cx-ax, ez=cz-az;
-      const ll=ex*ex+ez*ez; if(ll<1e-12) continue;
-      let tt=((x-ax)*ex+(z-az)*ez)/ll; tt=tt<0?0:tt>1?1:tt;
-      const dx=x-(ax+ex*tt), dz=z-(az+ez*tt), d2=dx*dx+dz*dz;
-      if(d2<bestD){ bestD=d2; bx=dx; bz=dz; found=true; }
-    }
-  }
-  if(!found) return _bh;
-  const d=Math.sqrt(bestD);
-  if(d<1e-6){ _bh.hit=true; _bh.depth=r; _bh.nx=1; _bh.nz=0; return _bh; }
-  _bh.hit=true; _bh.depth=r-d; _bh.nx=bx/d; _bh.nz=bz/d;
-  return _bh;
 }
 
 /* ------------------------------------------------ imported scenery repair --
@@ -2913,7 +2785,6 @@ addEventListener('keydown',e=>{
   if(k==='x') resetFree();                           // recentre the head
   if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
   if(k==='t'){ AIDS=!AIDS; updateStatus(); }
-  if(k==='b'){ brShow=!brShow; showBarrierLines(brShow); updateStatus(); }
   if(k==='m'){ markMode=!markMode;
     if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
     updateStatus(); }
@@ -2943,7 +2814,6 @@ function updateStatus(){
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   document.getElementById('lname').textContent = (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
-  const w=document.getElementById('bname'); if(w) w.textContent = brShow?'Shown':'Off';
   const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
 }
 /* Full detail, always. There is no longer a quality toggle and nothing
@@ -3456,7 +3326,6 @@ function drive(dt){
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;
       carState.wz  += Math.cos(carState.hdg)*v*dt;
-      hitBarriers();
     } else {
     const k=trackK(carState.s);
     const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
@@ -3561,41 +3430,6 @@ function drive(dt){
   }
 
   kmhEl.textContent = Math.round(carState.speed*3.6);
-}
-
-/* Contact with a barrier line. Checked at the nose and the tail rather than at
-   one point in the middle, or the car buries half its length before anything
-   notices and reversing into a wall never registers at all.
-
-   All of it lives in this function and runs after the move: it can correct
-   where the car ended up and how fast it is going, and nothing else. A contact
-   whose closing speed points away from the wall is ignored, so driving off a
-   barrier behaves exactly as it did before. */
-const CAR_R=1.05;
-function hitBarriers(){
-  if(!BR.bins) return;
-  const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
-  for(const off of [1.7,-1.7]){
-    const b=barrierAt(carState.wx+fx*off, carState.wz+fz*off, CAR_R);
-    if(!b.hit) continue;
-    carState.wx += b.nx*b.depth;          // out of it first
-    carState.wz += b.nz*b.depth;
-    const vx=Math.sin(carState.hdg)*carState.speed;
-    const vz=Math.cos(carState.hdg)*carState.speed;
-    const vn=vx*b.nx + vz*b.nz;
-    if(vn>=0) continue;                   // already leaving it
-    /* Split the velocity into the part driving into the wall and the part
-       running along it. Kill the first, keep the second. Square on there is
-       nothing in the second and the car stops; graze it and almost everything
-       is, so the car is turned to follow the wall and keeps its speed. */
-    const tx=vx-vn*b.nx, tz=vz-vn*b.nz;
-    const KEEP=0.86, BOUNCE=0.12;
-    const nvx=tx*KEEP - b.nx*vn*BOUNCE, nvz=tz*KEEP - b.nz*vn*BOUNCE;
-    const sp=Math.hypot(nvx,nvz);
-    carState.speed=sp;
-    if(sp>0.4) carState.hdg=Math.atan2(nvx,nvz);
-    if(-vn>3) hitBarrier(Math.min(-vn,14));
-  }
 }
 
 /* ------------------------------------------------------------- main loop */
@@ -4066,8 +3900,6 @@ function startTrack(id){
       const st0=buildHeightField(root);
       console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass');
       buildRoadMap(rd.mesh);
-      const br0=buildBarrierField(root);
-      console.log('barriers: '+br0.segs+' lines kept, '+br0.rejected+' rejected for being on the track');
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
@@ -4137,8 +3969,6 @@ function startTrack(id){
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '
                 +stats.refs+' refs, '+stats.loose+' of them gravel');
-    const brs=buildBarrierField(root);
-    console.log('barriers: '+brs.segs+' lines kept, '+brs.rejected+' rejected for being on the track');
 
     // drop the whole model so the road under the grid slot is exactly y=0
     const g0=groundAt(0,0,1e9);
