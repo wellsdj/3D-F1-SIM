@@ -3468,7 +3468,7 @@ document.getElementById('linecopy').onclick=e=>{
    line whatever you asked of it -- would tell you nothing about whether the
    numbers are any good. */
 let previewOn=false, pvGhost=null, pvIdx=0, pvS=0;
-const pv={ wx:0, wz:0, hdg:0, speed:0, steerAng:0, lockF:1 };
+const pv={ wx:0, wz:0, hdg:0, speed:0, steerIn:0, steerAng:0, lockF:1, groundY:0 };
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
   if(!pvGhost){
@@ -3486,7 +3486,8 @@ function previewStart(){
   // is what gets it going, same as a car sitting on the grid
   const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
   pv.wx=a.x; pv.wz=a.z; pv.hdg=Math.atan2(b.x-a.x,b.z-a.z);
-  pv.speed=0; pv.steerAng=0; pv.lockF=1;
+  pv.speed=0; pv.steerIn=0; pv.steerAng=0; pv.lockF=1;
+  pv.groundY=a.y+RIDE;          // the continuity reference, same meaning as the player's
   pvIdx=0; pvS=0;
   pvGhost.position.set(a.x,a.y+RIDE,a.z);
   pvGhost.rotation.y=pv.hdg;
@@ -3522,35 +3523,19 @@ function pvTrackProgress(){
   pvIdx=bi; pvS=lineCum[bi];
   return Math.sqrt(bd);                       // how far off the line it is
 }
-/* The ground under the ghost, sampled the way the player's is. This is what
-   was wrong before: a single point test called any triangle tagged grass
-   "on grass" at full strength, so the preview car dragged and bogged its way
-   round a lap the real car does at full chat. The player never reads it that
-   way -- it takes a fraction over a patch and ignores anything under 15%,
-   because the sandy edging beside the road is not a gravel trap. Same rule
-   here, over a ring of probes about the size of the car. */
-const PV_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0};
-const PV_PROBE=[[0,0],[1.4,0],[-1.4,0],[0,2.4],[0,-2.4],[1.0,1.8],[-1.0,1.8],
-                [1.0,-1.8],[-1.0,-1.8]];
-function pvSurface(refY){
-  const fx=Math.sin(pv.hdg), fz=Math.cos(pv.hdg);
-  let hits=0, lo=0, gr=0;
-  for(const [rx,rz] of PV_PROBE){
-    // probe offsets are in the car's own frame, so the patch turns with it
-    const x=pv.wx + fz*rx + fx*rz;
-    const z=pv.wz - fx*rx + fz*rz;
-    const g=groundAt(x,z,refY);
-    if(!g.hit) continue;
-    hits++; if(g.loose) lo++; else if(g.grass) gr++;
-  }
-  const raw  = hits>0 ? lo/hits : 0;
-  const rawG = hits>0 ? gr/hits : 0;
-  PV_SURF.looseFrac = clamp((raw -0.15)/0.25, 0, 1);
-  PV_SURF.loose     = PV_SURF.looseFrac > 0;
-  PV_SURF.grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
-  PV_SURF.grass     = PV_SURF.grassFrac > 0 && PV_SURF.looseFrac <= 0;
-  return PV_SURF;
-}
+/* The preview car is the player's car with a program at the controls instead
+   of a pair of hands. It works out what it would be pressing -- a throttle, a
+   brake, a stick position -- and then hands those to exactly the same code
+   drive() hands the keys to: applyPedals for the engine and brakes, steerRack
+   for the wheel, yawFor for the grip ceiling, probeCar for the ground.
+
+   Nothing about the car is reimplemented here. The last two attempts were
+   slow because they were reimplementations, and the copies drifted: the one
+   that mattered was reading the surface off a single point against the wrong
+   reference height, which handed back the terrain slab under the circuit
+   instead of the road and left the ghost grinding round on permanent grass
+   drag at 127 kph. There is no second copy left to drift. */
+const PV_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null};
 function previewStep(dt){
   dotMenuTrack();
   if(!previewOn||lineSmooth.length<2||!pvGhost) return;
@@ -3558,17 +3543,20 @@ function previewStep(dt){
   const off=pvTrackProgress();
   if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
 
+  /* The ground first, at the same reference the player uses: the height of
+     the ground it is standing on, carried frame to frame. */
+  const surf=probeCar(pv.wx, pv.wz, pv.hdg, pv.groundY-RIDE, PV_SURF);
+  if(surf.ok) pv.groundY=(surf.y[0]+surf.y[1]+surf.y[2]+surf.y[3])*0.25 + RIDE;
+  else { const g=groundAt(pv.wx,pv.wz,pv.groundY-RIDE); if(g.hit) pv.groundY=g.y+RIDE; }
+
+  /* What it is pressing. The markers give a throttle and a brake directly --
+     finer than a key, which is the whole point of them -- and the stick comes
+     from pure pursuit: aim at a point up the line, further ahead the faster
+     it is going, and ask for the arc that reaches it. Expressed as a fraction
+     of the lock actually available, so it is the same -1..1 a key produces. */
   const q=pedalAt(pvS);
   const kph=pv.speed*3.6;
-  const surf=pvSurface(pvGhost.position.y);
 
-  // the engine and the brakes, shared with the player -- not a copy of them
-  applyPedals(pv, q.thr/100, q.brk/100, surf, dt);
-
-  /* Steering: pure pursuit at a point up the line, the distance ahead growing
-     with speed so it doesn't saw at the wheel on a straight. The angle it asks
-     for goes through the same speed-scaled lock and the same rack the player's
-     does, so it can never ask for more lock than the car has. */
   const look=clamp(7+pv.speed*0.62,9,55);
   const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
   const T=lineSmooth[ti];
@@ -3577,12 +3565,13 @@ function previewStep(dt){
   const L=Math.max(Math.hypot(dx,dz),1e-3);
   const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
   const kappa=2*lat/(L*L);                     // the arc that reaches the target
-  pv.lockF += (lockAt(kph)-pv.lockF)*(1-Math.pow(0.02,dt));
-  const want=clamp(-STEER_RATIO*Math.atan(WHEELBASE*kappa),
-                   -STEER_LOCK*pv.lockF, STEER_LOCK*pv.lockF);
-  pv.steerAng += (want-pv.steerAng)*(1-Math.pow(0.0009,2.2*dt));
+  const wantAng=-STEER_RATIO*Math.atan(WHEELBASE*kappa);
+  const avail=Math.max(STEER_LOCK*pv.lockF,1e-3);
+  const stick=clamp(wantAng/avail,-1,1);
 
-  // and the grip ceiling, shared: ask for more than it has and it runs wide
+  // ---- and now the car's own code, the same calls drive() makes ----
+  applyPedals(pv, q.thr/100, q.brk/100, surf, dt);
+  steerRack(pv, stick, kph, dt, false);
   const yawRate=yawFor(pv.speed, pv.steerAng, surf);
   surfaceDrag(pv, surf, dt);
 
@@ -3590,9 +3579,7 @@ function previewStep(dt){
   pv.wx  += Math.sin(pv.hdg)*pv.speed*dt;
   pv.wz  += Math.cos(pv.hdg)*pv.speed*dt;
 
-  const gh=groundAt(pv.wx,pv.wz,pvGhost.position.y);
-  if(gh.hit) pvGhost.position.set(pv.wx,gh.y+RIDE,pv.wz);
-  else       pvGhost.position.set(pv.wx,pvGhost.position.y,pv.wz);
+  pvGhost.position.set(pv.wx, pv.groundY, pv.wz);
   pvGhost.rotation.y=pv.hdg;
 
   const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(pv.speed*3.6);
@@ -3732,7 +3719,7 @@ function setLights(n){
 function armStart(){
   startPhase='armed'; startT=0; holdFor=0;
   carState.speed=0; carState.s=START_S; carState.n=0; carState.psi=0;
-  steerIn=0; steerAng=0; clearDebris();
+  PLAYER.steerIn=0; PLAYER.steerAng=0; clearDebris();
   setLights(0);
   lightsEl.classList.add('show');
   goEl.classList.remove('show');
@@ -3789,9 +3776,10 @@ let onLoose=false, looseFrac=0, looseSpray=0, slipAng=0;
 let onGrass=false, grassFrac=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
-let steerIn=0, steerAng=0;        // player input -1..1, and the wheel angle
+/* The player's steering state, in an object rather than three loose globals,
+   so the preview car can be handed to exactly the same rack code. */
+const PLAYER={ steerIn:0, steerAng:0, lockF:1 };  // input -1..1, wheel angle, eased lock
 let AIDS=true;                    // steering aids, toggled with T
-let lockF=1;                      // eased speed-dependent lock multiplier
 let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
 /* Raised from 2.36 for 50% more turn below 100 kph. The turn multiplier could
    not do this: under about 100 kph the grip ceiling is not what binds, the
@@ -3921,7 +3909,7 @@ const kmhEl=document.getElementById('kmh');
    the shunt is zeroed with it. */
 function resetToTrack(){
   carState.n=0; carState.psi=0; carState.speed=0;
-  steerIn=0; steerAng=0; lockF=1;
+  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.lockF=1;
   pitch=0; roll=0; headLean=0; spdPrev=0;
   clearDebris();
 }
@@ -3976,11 +3964,101 @@ function surfaceDrag(st, surf, dt){
   if(surf.loose)      st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*surf.looseFrac*dt);
   else if(surf.grass) st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*0.25*surf.grassFrac*dt);
 }
-const PLAYER_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0};
-function playerSurf(){
-  PLAYER_SURF.loose=onLoose; PLAYER_SURF.looseFrac=looseFrac;
-  PLAYER_SURF.grass=onGrass; PLAYER_SURF.grassFrac=grassFrac;
-  return PLAYER_SURF;
+/* Filled by probeCar each frame from the wheels themselves; the loose/grass
+   globals are copies of it kept for the particle and sound code. */
+const PLAYER_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null};
+function playerSurf(){ return PLAYER_SURF; }
+
+/* The steering rack, shared. Takes a stick position -1..1 -- which is what a
+   key press amounts to, and what the preview car computes for itself -- and
+   turns it into a wheel angle, through the same two stages of easing and the
+   same speed-scaled lock for either car.
+
+   `aids` shapes the *input*, not the car: it curves and slews a stick that is
+   really a key, and self-centres it. The preview car steers with a real
+   number so it does not want any of that, but every limit that belongs to the
+   car -- lock, rack speed, grip -- applies to it identically. */
+function steerRack(C, want, kph, dt, aids){
+  /* Two stages of easing on the input: it ramps toward the stick, then the
+     wheel angle chases it.
+
+     The ramp used to reach full lock in about a sixth of a second, which was
+     harmless while steering was cosmetic. Now that it actually turns the car
+     it is not: a key is all-or-nothing, so that made the shortest tap a huge
+     input and full lock arrived long before you meant it. Applying over about
+     four tenths of a second makes a tap a small angle and lets you hold a
+     partial one, while it still snaps back quicker than it goes on. */
+  const k = 1-Math.exp(-dt/(want?STEER_ON:STEER_OFF));
+  C.steerIn += (want-C.steerIn)*k;
+  C.lockF += (lockAt(kph)-C.lockF)*(1-Math.pow(0.02,dt));
+
+  const fast=clamp(kph/300,0,1);
+  let inp=C.steerIn;
+  if(aids){
+    const g=Math.abs(inp);
+    inp = Math.sign(inp) * (g*g*0.72 + g*0.28);   // curved, still reaches 1
+    inp *= 1 - 0.34*fast;                          // and softer the faster you go
+  }
+  const target=clamp(inp*STEER_LOCK*C.lockF, -STEER_LOCK, STEER_LOCK);
+  const rack = aids ? 0.0009 + 0.10*fast : 0.0009;
+  C.steerAng += (target-C.steerAng)*(1-Math.pow(rack,2.2*dt));
+  if(aids && Math.abs(C.steerIn)<0.04) C.steerAng *= Math.pow(0.05,2.2*dt);
+  return C.steerAng;
+}
+
+/* The ground under a car, probed the way the player's has always been: at the
+   four wheels, each the mean of a patch rather than a point, and the loose and
+   grass fractions read off those very probes.
+
+   Two things here are load-bearing, and the preview car got both wrong when it
+   had its own copy. The reference height must be the *ground* the car is
+   standing on, not its body -- groundAt picks the surface nearest the
+   reference, and this model has a terrain slab running underneath the whole
+   circuit, so an offset of even the ride height can hand back the slab instead
+   of the road. And the fractions need a floor: the sandy edging beside the
+   track catches a probe or two everywhere, so anything under 15% is not a
+   surface the car is on. Read at full strength off a single point, as the
+   preview was doing, the road itself came back as grass and the car dragged
+   round the lap at a third of its pace. */
+const _PROBE_Y=[0,0,0,0];
+function probeCar(wx,wz,hdg,refY,out){
+  const fx=Math.sin(hdg), fz=Math.cos(hdg);
+  let looseHits=0, grassHits=0, groundHits=0;
+  const probe1=(lx,lz)=>{
+    const g=groundAt(wx + lx*fz + lz*fx, wz - lx*fx + lz*fz, refY);
+    if(g.hit){ groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++; }
+    return g.hit?g.y:null;
+  };
+  /* Each wheel reads the mean of a patch, not a point. The road is 1683
+     triangles over 7 km, so a single probe steps at every facet edge. */
+  const probe=(lx,lz)=>{
+    let sum=0,n=0;
+    for(const d of [-0.5,-0.25,0,0.25,0.5]){
+      const v=probe1(lx,lz+d); if(v!==null){sum+=v;n++;}
+      const u=probe1(lx+d,lz); if(u!==null){sum+=u;n++;}
+    }
+    return n?sum/n:null;
+  };
+  out.ok=false;
+  if(CARPTS.length===4){
+    let n=0;
+    for(let i=0;i<4;i++){ _PROBE_Y[i]=probe(CARPTS[i].x,CARPTS[i].z);
+                          if(_PROBE_Y[i]!==null) n++; }
+    out.ok = n===4;
+    out.y=_PROBE_Y;
+  }
+  /* Proportional, not a threshold. Requiring half the probes to be on gravel
+     meant a car straddling the edge of a trap felt nothing at all, and since
+     the probes cover a patch around each wheel that edge is metres wide.
+     Floor at 0.15 and saturating by 0.40: brushing the edging is nothing,
+     being in a trap reads as being in it. */
+  const raw  = groundHits>0 ? looseHits/groundHits : 0;
+  const rawG = groundHits>0 ? grassHits/groundHits : 0;
+  out.looseFrac = clamp((raw -0.15)/0.25, 0, 1);
+  out.loose     = out.looseFrac > 0;
+  out.grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
+  out.grass     = out.grassFrac > 0 && out.looseFrac <= 0;  // gravel wins where they meet
+  return out;
 }
 
 function drive(dt){
@@ -4001,11 +4079,7 @@ function drive(dt){
      four tenths of a second makes a tap a small angle and lets you hold a
      partial one, while it still snaps back quicker than it goes on. */
   const want = (lft?-1:0) + (rgt?1:0);
-  const k = 1-Math.exp(-dt/(want?STEER_ON:STEER_OFF));
-  steerIn += (want-steerIn)*k;
-
   const kph=carState.speed*3.6;
-  lockF += (lockAt(kph)-lockF)*(1-Math.pow(0.02,dt));
 
   /* Pinned to the grid until the lights go out. The throttle is deliberately
      still read below for the engine note, so holding W on the line revs the
@@ -4016,53 +4090,11 @@ function drive(dt){
 
   /* Steering is entirely yours now -- there is no longer any curvature term
      holding the car to the crown of the road. The speed-scaled lock does real
-     work here rather than being decoration: it is what stops the rack being
-     unusably twitchy at 300 kph. */
-  /* Driving aids. Raising grip is what made the car nervous: lockGrip hands you
-     more lock the more grip there is, so the same nudge produced far more yaw
-     at speed. The grip itself was not the problem -- the car should stick --
-     so the aids work on the input rather than on the tyres, and the car keeps
-     every bit of its 6.3 g.
-
-     Three of them, and they matter most in that order:
-
-     1. Progressive rack. Input is curved rather than linear, so a small nudge
-        is a genuinely small angle and the last of the lock still reaches full
-        travel. This is what makes it possible to hold a line at all -- on a
-        keyboard the stick is either hard over or centred, and a linear rack
-        turns that into all or nothing.
-     2. A slew limit that tightens with speed. You cannot throw the wheel at
-        300 kph, so neither can the input: the rack takes about four times as
-        long to reach a new angle up there as it does at walking pace.
-     3. Self-centring. Let go and the wheel unwinds itself, so the car runs
-        straight instead of holding whatever angle it was left at. */
-  const kphNow=carState.speed*3.6;
-  const fast=clamp(kphNow/300,0,1);
-  let inp=steerIn;
-  if(AIDS){
-    const g=Math.abs(inp);
-    inp = Math.sign(inp) * (g*g*0.72 + g*0.28);   // curved, still reaches 1
-    inp *= 1 - 0.34*fast;                          // and softer the faster you go
-  }
-  const target=clamp(inp*STEER_LOCK*lockF, -STEER_LOCK, STEER_LOCK);
-  /* The 2.2*dt divides the latency by 2.2. These are exponential
-     approaches, so the time constant is -1/ln(base) seconds and raising the
-     base to the fifth power -- which is what multiplying dt by five does --
-     divides that time by exactly five.
-
-     Five was too much and read as jitter. 2.2 is the geometric midpoint of one
-     and five, so the rack takes 0.198 s to reach a new angle at top speed
-     rather than the 0.436 that dragged or the 0.087 that twitched. The unwind
-     goes to 0.152 s and the low-speed rack to 0.065 s.
-
-     The slew limit is kept, just made five times quicker: it still takes about
-     three times as long to move the wheel at 300 kph as at walking pace, which
-     is the part that stops the car being twitchy. Only the absolute delay
-     goes. */
-  const rack = AIDS ? 0.0009 + 0.10*fast : 0.0009;
-  steerAng += (target-steerAng)*(1-Math.pow(rack,2.2*dt));
-  if(AIDS && Math.abs(steerIn)<0.04) steerAng *= Math.pow(0.05,2.2*dt);
-  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, steerAng);
+     work rather than being decoration: it is what stops the rack being
+     unusably twitchy at 300 kph. Driving aids work on the input rather than
+     on the tyres, so the car keeps every bit of its 6.3 g -- see steerRack. */
+  steerRack(PLAYER, want, kph, dt, AIDS);
+  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, PLAYER.steerAng);
 
   let yawRate=0;
   if(!gridded){
@@ -4074,7 +4106,7 @@ function drive(dt){
     /* Grass is slippery rather than draggy: what it takes away is grip. The
        yaw ceiling is what represents grip here, so cutting it means the car
        simply will not turn as hard on grass -- it washes out and runs on. */
-    yawRate=yawFor(v, steerAng, playerSurf());
+    yawRate=yawFor(v, PLAYER.steerAng, playerSurf());
 
     if(FREEROAM){
       /* Gravel. The surface under the car is already known -- the height field
@@ -4172,7 +4204,7 @@ function drive(dt){
      Deliberately off steerAng and not off lateral load: cornering g rises with
      speed, so a g-based lean would tilt the head most at 300 kph, which is the
      opposite of what a driver does and of how this should feel. */
-  const leanT=clamp(-steerAng*0.078, -0.155, 0.155);   // up to ~8.9 deg
+  const leanT=clamp(-PLAYER.steerAng*0.078, -0.155, 0.155);   // up to ~8.9 deg
   headLean += (leanT-headLean)*(1-Math.pow(0.02,dt));
 
   // Wheels roll at v/r -- faster car, faster spin, no slip.
@@ -4185,7 +4217,7 @@ function drive(dt){
   spin += (carState.speed/wheelR)*dt;
   if(spin>6.283185307) spin-=6.283185307;
   _qRoll.setFromAxisAngle(_AXIS_X, spin);
-  _qSteer.setFromAxisAngle(_AXIS_Y, -steerAng/STEER_RATIO);
+  _qSteer.setFromAxisAngle(_AXIS_Y, -PLAYER.steerAng/STEER_RATIO);
   for(let i=0;i<wheels.length;i++){
     const w=wheels[i];
     if(w.userData.steers) w.quaternion.copy(_qSteer).multiply(_qRoll);
@@ -4266,70 +4298,24 @@ function frame(now){
        through them, and it is carried there by a critically damped spring.
        Critical damping is the whole point -- it is the fastest approach that
        cannot overshoot, so there is no bounce to tune out. */
-    const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
     /* Looseness is read off the very probes that place the car, rather than
        from a separate lookup at the centre. That separate lookup was the bug:
        it chose its surface by continuity against a different reference, so it
        could answer for a different layer than the wheels were standing on and
-       report tarmac while the car sat in a gravel trap. */
-    let looseHits=0, grassHits=0, groundHits=0;
-    const probe1=(lx,lz)=>{
-      const g=groundAt(carState.wx + lx*fz + lz*fx,
-                       carState.wz - lx*fx + lz*fz, groundY-RIDE);
-      if(g.hit){ groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++; }
-      return g.hit?g.y:null;
-    };
-    /* Each wheel reads the mean of a patch, not a point. The road is 1683
-       triangles over 7 km, so a single probe steps at every facet edge. */
-    const probe=(lx,lz)=>{
-      let sum=0,n=0;
-      for(const d of [-0.5,-0.25,0,0.25,0.5]){
-        const v=probe1(lx,lz+d); if(v!==null){sum+=v;n++;}
-        const u=probe1(lx+d,lz); if(u!==null){sum+=u;n++;}
-      }
-      return n?sum/n:null;
-    };
+       report tarmac while the car sat in a gravel trap. Same function the
+       preview car uses, for exactly that reason. */
+    const S=probeCar(carState.wx, carState.wz, carState.hdg, groundY-RIDE, PLAYER_SURF);
+    looseFrac=S.looseFrac; onLoose=S.loose;
+    grassFrac=S.grassFrac; onGrass=S.grass;
     let tp=carPitch, tr=carRoll, tgt=null;
-    if(CARPTS.length===4){
-      const y0=probe(CARPTS[0].x,CARPTS[0].z), y1=probe(CARPTS[1].x,CARPTS[1].z),
-            y2=probe(CARPTS[2].x,CARPTS[2].z), y3=probe(CARPTS[3].x,CARPTS[3].z);
-      if(y0!==null&&y1!==null&&y2!==null&&y3!==null){
-        tp=Math.atan2(((y0+y1)-(y2+y3))*0.5, CAR_WB);   // front axle vs rear
-        tr=Math.atan2(((y0+y2)-(y1+y3))*0.5, CAR_TR);   // left vs right
-        tgt=(y0+y1+y2+y3)*0.25 + RIDE;                  // body sits on the plane
-      }
+    if(S.ok){
+      const y0=S.y[0], y1=S.y[1], y2=S.y[2], y3=S.y[3];
+      tp=Math.atan2(((y0+y1)-(y2+y3))*0.5, CAR_WB);   // front axle vs rear
+      tr=Math.atan2(((y0+y2)-(y1+y3))*0.5, CAR_TR);   // left vs right
+      tgt=(y0+y1+y2+y3)*0.25 + RIDE;                  // body sits on the plane
     }
     if(tgt===null){ const g=groundAt(carState.wx,carState.wz,groundY-RIDE);
                     if(g.hit) tgt=g.y+RIDE; }
-    /* Proportional, not a threshold. Requiring half the probes to be on gravel
-       meant a car straddling the edge of a trap felt nothing at all, and since
-       the probes cover a patch around each wheel that edge is metres wide. The
-       fraction that is loose now scales the effect, so one wheel in the gravel
-       drags a little and a car buried in it drags fully -- and there is no
-       boundary at which the behaviour snaps. */
-    /* A real fraction of the car has to be in it. The threshold was 0.02 --
-       one probe in fifty -- so clipping the sandy strip that runs along the
-       edge of the road counted as being in a trap. Below a quarter it is
-       ignored entirely, and the effect ramps from there, so the edging is out
-       while a wheel genuinely off the road still counts. */
-    /* Two jobs, and the old mapping only did one. Keeping the roadside strip
-       out needs a floor, which 0.25 gave. But dividing the rest by 0.75 meant a
-       car sitting in the middle of a trap read 0.09, because even there only
-       about a third of the probes land on sand -- the traps are narrow against
-       the spread of the wheel patches. Drag, engine bog and particle rate all
-       scale off this one number, so all three were running at a tenth of their
-       intended strength, which is why gravel barely slowed the car, let it
-       cruise at 20 kph, and dribbled sand.
-
-       Floor stays at 0.15, but it saturates by 0.40 instead of 1.0: brushing
-       the edging is still nothing, and being in a trap now reads as being in
-       it. */
-    const raw = groundHits>0 ? looseHits/groundHits : 0;
-    looseFrac = clamp((raw-0.15)/0.25, 0, 1);
-    onLoose = looseFrac > 0;
-    const rawG = groundHits>0 ? grassHits/groundHits : 0;
-    grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
-    onGrass = grassFrac > 0 && looseFrac <= 0;   // gravel wins where they meet
     carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
     carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
 
@@ -4377,7 +4363,7 @@ function frame(now){
     // and the tail swings on both, further on grass because it is slicker
     const slipSrc = onLoose ? looseFrac*1.0 : onGrass ? grassFrac*1.01 : 0;
     const slipT = slipSrc>0
-      ? clamp((-steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
+      ? clamp((-PLAYER.steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
               * clamp(carState.speed/14,0,1) * slipSrc, -0.61, 0.61)
       : 0;
     slipAng += (slipT-slipAng)*(1-Math.pow(0.05,dt));

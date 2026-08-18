@@ -90,25 +90,44 @@ open; the panel's Undo removes the last one placed.
 The line is only drawn while this tab is open. It is authoring scaffolding,
 not part of the race.
 
-**Preview** runs a faded copy of your own car along the line, and *copy* is
-doing real work there: it runs the *same code* `drive()` does, not a
-reimplementation of it. The engine, the brakes, the coast drag, the grip
-ceiling on yaw and the surface penalties live in `applyPedals` / `yawFor` /
-`surfaceDrag`, and both cars call them. **If you change how the car goes,
-stops or turns, change it there and both stay in step.**
+**Preview is the player's car with a program at the controls**, not a second
+car that imitates it. It works out what it would be pressing — a throttle, a
+brake, a stick position −1..1 — and hands those to the same functions
+`drive()` hands the keys to:
 
-That refactor exists because the two *had* drifted: the preview reimplemented
-the same formulas against a single-point ground test rather than the player's
-probe fraction, so it read the sandy edging beside the road as a gravel trap,
-took full grass drag and engine bog for most of a lap, and crawled round
-wondering why. The player has never read the surface that way — it takes a
-fraction over a patch of probes and ignores anything under 15%. The ghost now
-samples a ring of nine probes the size of the car and applies the same rule.
+| shared | what it is |
+|---|---|
+| `applyPedals` | engine curve, brakes, coast drag |
+| `steerRack`   | the two-stage input easing, speed-scaled lock, rack slew |
+| `yawFor`      | the `A_GRIP` ceiling — the car's understeer |
+| `surfaceDrag` | gravel and grass retardation |
+| `probeCar`    | the ground: four wheel patches, loose/grass fractions |
 
-The one thing the ghost does *not* share is the driving aids (`AIDS`), which
-curve and slew keyboard input. They compensate for a key being all-or-nothing;
-the AI steers with a real number, so it uses the raw rack. Nothing about the
-car's capability differs — same lock, same grip, same engine. The camera moves to a chase rig behind it for as
+**Every one of those has exactly two callers, and nothing about the car is
+implemented anywhere else.** If you change how the car goes, stops or turns,
+change it there and both cars move together. That structure was bought the
+hard way: twice the preview was written as its own copy of the same formulas
+and twice the copies drifted.
+
+The bug that forced it is worth knowing, because it is a trap this model sets.
+`groundAt` picks the surface nearest a **reference height**, and there is a
+terrain slab running underneath the whole circuit. The preview passed its
+*body* height where the player passes the height of the *ground under its
+wheels*, and read a single point instead of the player's probe fraction. So it
+was handed the grass slab under the road, took permanent grass drag and engine
+bog, and ground round the lap at 127 kph. Pass the wrong reference here and
+you get a plausible number for the wrong layer — nothing errors.
+
+The one thing the ghost does not share is the driving aids (`AIDS`), which
+curve and slew keyboard input to compensate for a key being all-or-nothing.
+The AI steers with a real number, so it uses the raw rack. Nothing about the
+car's capability differs — same lock, same grip, same engine.
+
+Checked numerically, driving a synthetic line (600 m straight into a 120 m
+radius loop): full throttle reaches MAXSPEED, and it holds the line to 0.8 m
+mean / 2.6 m worst. Note that this car has enormous grip — `A_GRIP` 50 m/s²
+times a `turnBoost` of up to 5 — so it takes a genuinely tight corner before
+too much throttle actually runs it wide. The camera moves to a chase rig behind it for as
 long as it runs, and hands the view back when it stops.
 
 It is **not** slid along the line. It steers at the line by pure pursuit and
