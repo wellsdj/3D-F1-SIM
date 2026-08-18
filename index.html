@@ -36,6 +36,30 @@
   #status{right:0;top:0;padding:16px 20px;text-align:right;font-size:10.5px;
           letter-spacing:.14em;text-transform:uppercase;opacity:.6;line-height:1.9}
   #status em{font-style:normal;color:var(--amber);opacity:.9}
+  /* grid-slot picker: a small panel you drive with the mouse, so the ten
+     starting positions can be clicked off the real track rather than guessed */
+  #gridpanel{position:fixed;left:18px;top:76px;z-index:8;
+             font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--paper);
+             background:rgba(0,0,0,.62);border:1px solid var(--line);border-radius:4px;
+             padding:10px 12px;min-width:210px;display:none}
+  #gridpanel.on{display:block}
+  #gridpanel h4{margin:0 0 8px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+                font-weight:600;opacity:.75}
+  #gridpanel h4 span{color:var(--amber);opacity:1}
+  #gridlist{margin:0 0 8px;max-height:38vh;overflow:auto;font-size:10.5px;line-height:1.75;opacity:.85}
+  #gridlist div{font-variant-numeric:tabular-nums}
+  #gridlist i{font-style:normal;color:var(--amber);display:inline-block;width:22px}
+  #gridpanel .row{display:flex;gap:6px}
+  #gridpanel button{font:inherit;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+                    color:var(--paper);background:rgba(255,255,255,.06);cursor:pointer;
+                    border:1px solid var(--line);border-radius:3px;padding:5px 9px;flex:1}
+  #gridpanel button:hover{background:rgba(255,255,255,.14)}
+  #gridtoggle{position:fixed;left:18px;top:76px;z-index:8;font-family:var(--mono);
+              font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
+              background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:3px;
+              padding:6px 10px;cursor:pointer}
+  #gridtoggle:hover{background:rgba(255,255,255,.12)}
+  #gridtoggle.hide{display:none}
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
@@ -85,6 +109,17 @@
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
 <div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em></div>
+<button id="gridtoggle">Grid slots</button>
+<div id="gridpanel">
+  <h4>Grid slots <span id="gridcount">0 / 10</span></h4>
+  <div id="gridlist"></div>
+  <div class="row">
+    <button id="gridcopy">Copy</button>
+    <button id="gridundo">Undo</button>
+    <button id="gridclear">Clear</button>
+  </div>
+  <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
+</div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
@@ -93,7 +128,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>P</kbd> grid slots · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -2789,6 +2824,7 @@ addEventListener('keydown',e=>{
     if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
     updateStatus(); }
   if(k==='n'){ markExport(); }
+  if(k==='p'){ gridShow(!gridMode); }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -2914,6 +2950,71 @@ canvas.addEventListener('dblclick',e=>{
   markRedraw();
 });
 
+/* ------------------------------------------------------------- grid slots
+   Ten starting positions, clicked off the real track rather than derived.
+   Same raycast the barrier marker uses, so each one lands at the true ground
+   point under the cursor. Coordinates come out in the model's own frame --
+   the frame spawnAt is written in -- so they stay valid across reloads no
+   matter where the loader anchors the world that session. */
+const GRID_MAX=10;
+let gridMode=false, gridPts=[], gridGroup=null;
+function gridLabel(n){
+  const c=document.createElement('canvas'); c.width=c.height=64;
+  const g=c.getContext('2d');
+  g.font='bold 40px monospace'; g.fillStyle='#0ff'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(String(n),32,34);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
+  s.scale.set(2.2,2.2,1);
+  return s;
+}
+function gridRedraw(){
+  if(gridGroup){ scene.remove(gridGroup);
+    gridGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
+  gridGroup=new THREE.Group(); scene.add(gridGroup);
+  const mat=new THREE.LineBasicMaterial({color:0x00ffff,depthTest:false});
+  gridPts.forEach((p,i)=>{
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array([
+      p.x,p.y+RIDE,p.z, p.x,p.y+RIDE+3.0,p.z]),3));
+    gridGroup.add(new THREE.Line(g,mat));
+    const s=gridLabel(i+1); s.position.set(p.x,p.y+RIDE+3.8,p.z); gridGroup.add(s);
+  });
+}
+function gridToModel(p){
+  const inv=new THREE.Matrix4().copy(trackRoot.matrixWorld).invert();
+  const q=p.clone().applyMatrix4(inv);
+  return [+q.x.toFixed(2), +q.z.toFixed(2)];
+}
+function gridText(){
+  if(!trackRoot) return '';
+  return '['+gridPts.map(p=>JSON.stringify(gridToModel(p))).join(',\n ')+']';
+}
+function gridPanel(){
+  const list=document.getElementById('gridlist');
+  document.getElementById('gridcount').textContent=gridPts.length+' / '+GRID_MAX;
+  list.innerHTML = gridPts.length
+    ? gridPts.map((p,i)=>{ const m=gridToModel(p);
+        return '<div><i>'+String(i+1).padStart(2,'0')+'</i>'+m[0].toFixed(2)+', '+m[1].toFixed(2)+'</div>'; }).join('')
+    : '<div style="opacity:.55">Click the track to place slot 1</div>';
+}
+function gridShow(on){
+  gridMode=on;
+  document.getElementById('gridpanel').classList.toggle('on',on);
+  document.getElementById('gridtoggle').classList.toggle('hide',on);
+  if(on) gridPanel();
+}
+document.getElementById('gridtoggle').onclick=()=>gridShow(true);
+document.getElementById('gridclose').onclick=()=>gridShow(false);
+document.getElementById('gridundo').onclick=()=>{ gridPts.pop(); gridRedraw(); gridPanel(); };
+document.getElementById('gridclear').onclick=()=>{ gridPts=[]; gridRedraw(); gridPanel(); };
+document.getElementById('gridcopy').onclick=e=>{
+  const t=gridText();
+  console.log('grid slots (model coordinates):\n'+t);
+  if(navigator.clipboard) navigator.clipboard.writeText(t).catch(()=>{});
+  const b=e.currentTarget, was=b.textContent;
+  b.textContent='Copied'; setTimeout(()=>{b.textContent=was;},900);
+};
+
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
@@ -2923,6 +3024,13 @@ canvas.addEventListener('pointerdown',e=>{
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
+  if(moved<8 && gridMode){
+    if(gridPts.length<GRID_MAX){
+      const p=markScreenToGround(e.clientX,e.clientY);
+      if(p){ gridPts.push(p); gridRedraw(); gridPanel(); }
+    }
+    return;
+  }
   if(moved<8 && markMode){
     const p=markScreenToGround(e.clientX,e.clientY);
     if(p){ markPts.push(p); markRedraw(); }
