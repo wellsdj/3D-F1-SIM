@@ -3251,8 +3251,16 @@ function lineBuildCurve(){
   lineLen=lineCum[lineCum.length-1]||0;
 }
 /* Where along the curve a distance falls, and what the pedals are doing
-   there. The marker in force is the last one you passed; before the first
-   marker the lap wraps round to the last one, since the line is a closed lap. */
+   there. The marker in force is the last one you passed.
+
+   Before the first marker it is the *first* one, not the last one round the
+   lap. Wrapping was wrong for the only thing that reads this: a preview
+   starts at the beginning of the line, stopped, so the wrap handed it
+   whatever the final marker of the lap says -- at Spa the Bus Stop, a brake
+   or a part-throttle coast -- and the car crawled off the line under that
+   until it reached the first real marker. A car that has actually driven
+   round to the end of the lap reads the last marker directly anyway, so the
+   wrap was never buying anything. */
 function lineAt(s){
   const out={x:0,y:0,z:0,hdg:0};
   if(lineSmooth.length<2) return out;
@@ -3269,7 +3277,7 @@ function pedalAt(s){
   if(!pedalPts.length) return {thr:0,brk:0};
   let best=null;
   for(const q of pedalPts){ if(q.s<=s) best=q; else break; }
-  return best || pedalPts[pedalPts.length-1];
+  return best || pedalPts[0];
 }
 function pedalSort(){
   const keep=pedalSel>=0?pedalPts[pedalSel]:null;
@@ -3424,8 +3432,15 @@ function linePanel(){
   document.getElementById('linecount').textContent=
     pedalPts.length+(pedalPts.length===1?' point':' points');
   const el=document.getElementById('linesel');
+  /* The two things that can make the preview slow are the pedal numbers you
+     wrote and the surface it is standing on -- the engine, the brakes and the
+     drag are one piece of code shared with your own car, so they cannot
+     differ. Both are on the panel, so a car that will not pull away says why:
+     a low throttle figure, or a surface that is not road. */
   el.innerHTML = previewOn
     ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'+
+      '<div style="opacity:.7">thr <b id="pvthr">0</b>% · brk <b id="pvbrk">0</b>%'+
+      ' · <b id="pvsurf">road</b></div>'+
       '<div style="opacity:.7"><b id="pvoff">0</b> m off the line</div>'
     : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
       'Click a point to set throttle and brake.</div>';
@@ -3454,60 +3469,65 @@ document.getElementById('linecopy').onclick=e=>{
 };
 
 /* ------------------------------------------------------------------ preview
-   A faded copy of your own car, and the word "copy" is doing real work: it is
-   driven by the same physics the player is. Same engine curve, same braking
-   rate, same steering lock, same A_GRIP ceiling on how hard it can turn, same
-   gravel and grass under it. It is not slid along the line -- it *drives* the
-   line, steering at it the way a driver would and going only as fast as the
-   pedal numbers on the markers tell it to.
+   A second car, in the literal sense: makeCar() gives it the same state a
+   player's car has, stepCar() and placeCar() move it, and the only thing that
+   differs is where its three inputs come from. It reads the pedal markers for
+   throttle and brake, and steers at the line by pure pursuit, expressed as
+   the same -1..1 a key gives. Nothing about how it accelerates, brakes,
+   turns, grips or sits on the road is written down twice, so it cannot be
+   "not the same stats" -- there is only one car in this file.
 
-   That is the whole point. Ask for 100% throttle through Eau Rouge and the
-   grip ceiling refuses to give you the corner: the car holds full lock, runs
-   out of front end and goes straight on into the run-off, exactly as it would
-   if you had done it yourself. A preview that cheated -- that stuck to the
-   line whatever you asked of it -- would tell you nothing about whether the
-   numbers are any good. */
-let previewOn=false, pvGhost=null, pvIdx=0, pvS=0;
-const pv={ wx:0, wz:0, hdg:0, speed:0, steerIn:0, steerAng:0, lockF:1, groundY:0 };
+   It is your own car's model, faded, so you can see it is yours. Swap the
+   clone for a different model here and nothing else changes. */
+let previewOn=false, AICAR=null, aiGroup=null, pvIdx=0, pvS=0;
+function aiBuild(){
+  if(aiGroup) return;
+  aiGroup=carGroup.clone(true);
+  aiGroup.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.42;
+                    c.depthWrite=false; return c; };
+    o.material=Array.isArray(o.material)?o.material.map(fade):fade(o.material);
+    o.castShadow=false; o.receiveShadow=false;
+  });
+  scene.add(aiGroup);
+  // aids are a keyboard crutch -- curved input, slew, self-centring. A program
+  // steers with a real number and wants none of it. Every limit that belongs
+  // to the car itself still applies, because they live in the shared code.
+  AICAR=makeCar(aiGroup,false);
+}
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
-  if(!pvGhost){
-    pvGhost=carGroup.clone(true);
-    pvGhost.traverse(o=>{
-      if(!o.isMesh||!o.material) return;
-      const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.38;
-                      c.depthWrite=false; return c; };
-      o.material=Array.isArray(o.material)?o.material.map(fade):fade(o.material);
-      o.castShadow=false; o.receiveShadow=false;
-    });
-    scene.add(pvGhost);
-  }
-  // on the line, pointing down it, stopped -- whatever the first marker says
-  // is what gets it going, same as a car sitting on the grid
+  aiBuild();
   const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
-  pv.wx=a.x; pv.wz=a.z; pv.hdg=Math.atan2(b.x-a.x,b.z-a.z);
-  pv.speed=0; pv.steerIn=0; pv.steerAng=0; pv.lockF=1;
-  pv.groundY=a.y+RIDE;          // the continuity reference, same meaning as the player's
+  AICAR.st.speed=0; AICAR.st.wx=a.x; AICAR.st.wz=a.z;
+  AICAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
+  AICAR.steerIn=0; AICAR.steerAng=0; AICAR.lockF=1;
+  AICAR.groundY=a.y+RIDE; AICAR.carVY=0; AICAR.slipAng=0;
+  AICAR.carPitch=0; AICAR.carRoll=0;
+  /* Read the ground it is actually standing on before the first step, rather
+     than launching on whatever the last run left in .surf. A run that ended
+     in a gravel trap otherwise starts the next one with gravel drag and
+     engine bog still applied, which reads as a car that will not pull away. */
+  probeCar(AICAR.st.wx, AICAR.st.wz, AICAR.st.hdg, AICAR.groundY-RIDE, AICAR.surf);
   pvIdx=0; pvS=0;
-  pvGhost.position.set(a.x,a.y+RIDE,a.z);
-  pvGhost.rotation.y=pv.hdg;
-  pvGhost.visible=true; previewOn=true;
+  aiGroup.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
   dm('dmpreview').textContent='Stop';
   linePanel();
 }
 function previewStop(){
   previewOn=false;
-  if(pvGhost) pvGhost.visible=false;
+  if(aiGroup) aiGroup.visible=false;
   const b=document.getElementById('linepreview'); if(b) b.textContent='Preview';
   const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
   linePanel();
 }
-function previewReset(){ previewStop(); pvIdx=0; pvS=0; pv.speed=0; }
+function previewReset(){ previewStop(); pvIdx=0; pvS=0; if(AICAR) AICAR.st.speed=0; }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
 
-/* Where the car is up to. Searched forward from where it was, over a window
+/* How far round it has got. Searched forward from where it was, over a window
    rather than the whole lap, so a car that has run wide keeps a sensible idea
    of its progress instead of snapping to some other part of the circuit that
    happens to pass nearby -- which at Spa would be the return leg of every
@@ -3516,73 +3536,56 @@ function pvTrackProgress(){
   const N=lineSmooth.length, win=Math.ceil(90/LINE_STEP);
   let bi=pvIdx, bd=Infinity;
   for(let i=pvIdx;i<Math.min(N,pvIdx+win);i++){
-    const dx=lineSmooth[i].x-pv.wx, dz=lineSmooth[i].z-pv.wz;
+    const dx=lineSmooth[i].x-AICAR.st.wx, dz=lineSmooth[i].z-AICAR.st.wz;
     const d=dx*dx+dz*dz;
     if(d<bd){ bd=d; bi=i; }
   }
   pvIdx=bi; pvS=lineCum[bi];
   return Math.sqrt(bd);                       // how far off the line it is
 }
-/* The preview car is the player's car with a program at the controls instead
-   of a pair of hands. It works out what it would be pressing -- a throttle, a
-   brake, a stick position -- and then hands those to exactly the same code
-   drive() hands the keys to: applyPedals for the engine and brakes, steerRack
-   for the wheel, yawFor for the grip ceiling, probeCar for the ground.
-
-   Nothing about the car is reimplemented here. The last two attempts were
-   slow because they were reimplementations, and the copies drifted: the one
-   that mattered was reading the surface off a single point against the wrong
-   reference height, which handed back the terrain slab under the circuit
-   instead of the road and left the ghost grinding round on permanent grass
-   drag at 127 kph. There is no second copy left to drift. */
-const PV_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null};
-function previewStep(dt){
-  dotMenuTrack();
-  if(!previewOn||lineSmooth.length<2||!pvGhost) return;
-
-  const off=pvTrackProgress();
-  if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
-
-  /* The ground first, at the same reference the player uses: the height of
-     the ground it is standing on, carried frame to frame. */
-  const surf=probeCar(pv.wx, pv.wz, pv.hdg, pv.groundY-RIDE, PV_SURF);
-  if(surf.ok) pv.groundY=(surf.y[0]+surf.y[1]+surf.y[2]+surf.y[3])*0.25 + RIDE;
-  else { const g=groundAt(pv.wx,pv.wz,pv.groundY-RIDE); if(g.hit) pv.groundY=g.y+RIDE; }
-
-  /* What it is pressing. The markers give a throttle and a brake directly --
-     finer than a key, which is the whole point of them -- and the stick comes
-     from pure pursuit: aim at a point up the line, further ahead the faster
-     it is going, and ask for the arc that reaches it. Expressed as a fraction
-     of the lock actually available, so it is the same -1..1 a key produces. */
+/* The driver. Three numbers, exactly what a pair of hands would produce:
+   throttle and brake straight off the marker in force, and a stick position
+   from pure pursuit -- aim at a point up the line, further ahead the faster
+   it is going, and ask for the arc that reaches it, as a fraction of the lock
+   actually available at this speed. */
+function aiInputs(C){
   const q=pedalAt(pvS);
-  const kph=pv.speed*3.6;
-
-  const look=clamp(7+pv.speed*0.62,9,55);
+  const look=clamp(7+C.st.speed*0.62,9,55);
   const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
   const T=lineSmooth[ti];
-  const fx=Math.sin(pv.hdg), fz=Math.cos(pv.hdg);
-  const dx=T.x-pv.wx, dz=T.z-pv.wz;
+  const fx=Math.sin(C.st.hdg), fz=Math.cos(C.st.hdg);
+  const dx=T.x-C.st.wx, dz=T.z-C.st.wz;
   const L=Math.max(Math.hypot(dx,dz),1e-3);
   const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
   const kappa=2*lat/(L*L);                     // the arc that reaches the target
   const wantAng=-STEER_RATIO*Math.atan(WHEELBASE*kappa);
-  const avail=Math.max(STEER_LOCK*pv.lockF,1e-3);
-  const stick=clamp(wantAng/avail,-1,1);
+  const avail=Math.max(STEER_LOCK*C.lockF,1e-3);
+  return { thr:q.thr/100, brk:q.brk/100, steer:clamp(wantAng/avail,-1,1) };
+}
+function previewStep(dt,t){
+  dotMenuTrack();
+  if(!previewOn||lineSmooth.length<2||!AICAR) return;
+  const off=pvTrackProgress();
+  if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
 
-  // ---- and now the car's own code, the same calls drive() makes ----
-  applyPedals(pv, q.thr/100, q.brk/100, surf, dt);
-  steerRack(pv, stick, kph, dt, false);
-  const yawRate=yawFor(pv.speed, pv.steerAng, surf);
-  surfaceDrag(pv, surf, dt);
+  const inp=aiInputs(AICAR);
+  stepCar(AICAR, inp, dt);
+  placeCar(AICAR, dt, t);
 
-  pv.hdg += yawRate*dt;
-  pv.wx  += Math.sin(pv.hdg)*pv.speed*dt;
-  pv.wz  += Math.cos(pv.hdg)*pv.speed*dt;
-
-  pvGhost.position.set(pv.wx, pv.groundY, pv.wz);
-  pvGhost.rotation.y=pv.hdg;
-
-  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(pv.speed*3.6);
+  const sp=document.getElementById('pvspeed');
+  if(sp) sp.textContent=Math.round(AICAR.st.speed*3.6);
+  const th=document.getElementById('pvthr');
+  if(th) th.textContent=Math.round(inp.thr*100);
+  const bk=document.getElementById('pvbrk');
+  if(bk) bk.textContent=Math.round(inp.brk*100);
+  const sf=document.getElementById('pvsurf');
+  if(sf){
+    const S=AICAR.surf;
+    sf.textContent = S.loose ? 'GRAVEL '+Math.round(S.looseFrac*100)+'%'
+                   : S.grass ? 'GRASS '+Math.round(S.grassFrac*100)+'%'
+                   : 'road';
+    sf.style.color = (S.loose||S.grass) ? '#ff5544' : '';
+  }
   const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
   const ow=document.getElementById('pvoff');
   if(ow){ ow.textContent=off.toFixed(0);
@@ -3771,14 +3774,26 @@ function updateStart(dt){
 /* s/n drive the generated circuit in track space; wx/wz/hdg drive free roam
    in world space. Only one pair is live at a time, chosen by FREEROAM. */
 const carState={ s:START_S, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 };
-let carPitch=0, carRoll=0, groundY=0, carVY=0;
-let onLoose=false, looseFrac=0, looseSpray=0, slipAng=0;
+/* Everything that belongs to *a* car rather than to *the* car lives in one
+   object, so there can be more than one of them. The player is just the car
+   with a keyboard attached; the preview car -- and, later, the other nine on
+   the grid -- are the same object with something else deciding the inputs.
+   carState is held by reference, so the rest of the file still reads it. */
+function makeCar(group, aids){
+  return { st: group===carGroup ? carState
+                                : { s:0, n:0, psi:0, speed:0, wx:0, wz:0, hdg:0 },
+           group,
+           steerIn:0, steerAng:0, lockF:1,
+           groundY:0, carVY:0, carPitch:0, carRoll:0, slipAng:0,
+           surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
+           aids: !!aids };
+}
+let onLoose=false, looseFrac=0, looseSpray=0;
 let onGrass=false, grassFrac=0;
 const _rq=new THREE.Quaternion(), _re=new THREE.Euler(), _lv=new THREE.Vector3();
 let spin=0;                       // accumulated wheel angle, radians
-/* The player's steering state, in an object rather than three loose globals,
-   so the preview car can be handed to exactly the same rack code. */
-const PLAYER={ steerIn:0, steerAng:0, lockF:1 };  // input -1..1, wheel angle, eased lock
+/* The player's car. Same object every other car on the circuit will be. */
+const PLAYER=makeCar(carGroup,true);
 let AIDS=true;                    // steering aids, toggled with T
 let pitch=0, roll=0, headLean=0, spdPrev=0;   // body attitude + driver head lean
 /* Raised from 2.36 for 50% more turn below 100 kph. The turn multiplier could
@@ -3828,8 +3843,8 @@ function lockTable(kph){
    A_GRIP -- full lock then means "the tightest arc the car can hold", at every
    speed, and never more. Below ~130 kph the table is already inside that and
    wins unchanged, so the low-speed feel is untouched. */
-/* How much harder than the tyres alone the car is allowed to turn: twice up to
-   100 kph, three times past it, six times past 150. Both limits on turning come
+/* How much harder than the tyres alone the car is allowed to turn: four times
+   up to 100 kph, 2.5 times past it, 3.5 times past 150. Both limits on turning come
    off the same number -- the lock the rack may reach, and the ceiling on yaw
    rate -- so the multiplier is applied to that number rather than to either of
    them, and they cannot disagree.
@@ -3846,11 +3861,18 @@ function turnBoost(kph){
      100-200 kph: 2 became 2.5 and 4 became 5, and the value above 205 is left
      where it was so nothing outside the band moved.
 
+     Everything above 150 kph then had 30% of its turning taken back out, by
+     multiplying those values by 0.7: 5 became 3.5 for the 155-195 band and 4
+     became 2.8 for everything past 205. Nothing at or below 145 kph moved, so
+     low and mid speed feel exactly as before; the 145-155 ramp is the join.
+     Radius goes as one over this, so the fast car now needs about 1.43 times
+     the room to turn that it did.
+
      Each pair is [kph, multiplier] and the value ramps between them, so a step
      is written as two points 10 kph apart and never lands on a single speed --
      the wheel angle must not multiply between one frame and the next while you
      are mid-corner. */
-  const P=[[0,4],[95,4],[105,2.5],[145,2.5],[155,5],[195,5],[205,4],[9999,4]];
+  const P=[[0,4],[95,4],[105,2.5],[145,2.5],[155,3.5],[195,3.5],[205,2.8],[9999,2.8]];
   for(let i=1;i<P.length;i++){
     if(kph<=P[i][0]){
       const a2=P[i-1][0], va=P[i-1][1], b2=P[i][0], vb=P[i][1];
@@ -3964,10 +3986,6 @@ function surfaceDrag(st, surf, dt){
   if(surf.loose)      st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*surf.looseFrac*dt);
   else if(surf.grass) st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*0.25*surf.grassFrac*dt);
 }
-/* Filled by probeCar each frame from the wheels themselves; the loose/grass
-   globals are copies of it kept for the particle and sound code. */
-const PLAYER_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null};
-function playerSurf(){ return PLAYER_SURF; }
 
 /* The steering rack, shared. Takes a stick position -1..1 -- which is what a
    key press amounts to, and what the preview car computes for itself -- and
@@ -4061,6 +4079,67 @@ function probeCar(wx,wz,hdg,refY,out){
   return out;
 }
 
+/* One free-roam step of one car. This is the whole car: pedals, rack, grip
+   ceiling, surface, and the integration that moves it. The player calls it
+   with the keys, the preview car calls it with what it has worked out it
+   would be pressing, and the nine other cars on the grid will call it with
+   whatever their own driver decides. There is no other implementation of a
+   car anywhere in this file, so "the AI has the same stats as me" is not
+   something to keep checking -- it is the same code running on a different
+   set of inputs.
+
+   inp: thr 0..1, brk 0..1, steer -1..1 -- a key held down is 1, and the
+   preview's markers and pure pursuit produce the same three numbers. */
+function stepCar(C, inp, dt){
+  const st=C.st;
+  applyPedals(st, inp.thr, inp.brk, C.surf, dt);
+  steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
+  // speed is read before the surface takes its cut, so a car entering gravel
+  // covers the ground it had at the start of the frame, as it always has
+  const v=st.speed;
+  const yawRate=yawFor(v, C.steerAng, C.surf);
+  surfaceDrag(st, C.surf, dt);
+  st.hdg += yawRate*dt;
+  st.wx  += Math.sin(st.hdg)*v*dt;
+  st.wz  += Math.cos(st.hdg)*v*dt;
+  return yawRate;
+}
+
+/* And where it ends up sitting: the ground under its four wheels, the body on
+   the plane through them, its attitude, its slip angle. Also shared -- a car
+   that was placed differently would ride differently, and looking right is
+   part of being the same car. */
+function placeCar(C, dt, t){
+  const S=probeCar(C.st.wx, C.st.wz, C.st.hdg, C.groundY-RIDE, C.surf);
+  let tp=C.carPitch, tr=C.carRoll, tgt=null;
+  if(S.ok){
+    const y0=S.y[0], y1=S.y[1], y2=S.y[2], y3=S.y[3];
+    tp=Math.atan2(((y0+y1)-(y2+y3))*0.5, CAR_WB);   // front axle vs rear
+    tr=Math.atan2(((y0+y2)-(y1+y3))*0.5, CAR_TR);   // left vs right
+    tgt=(y0+y1+y2+y3)*0.25 + RIDE;                  // body sits on the plane
+  }
+  if(tgt===null){ const g=groundAt(C.st.wx,C.st.wz,C.groundY-RIDE);
+                  if(g.hit) tgt=g.y+RIDE; }
+  C.carPitch += (tp-C.carPitch)*(1-Math.pow(1e-7,dt));
+  C.carRoll  += (tr-C.carRoll )*(1-Math.pow(1e-7,dt));
+  /* The body is put on the plane through its wheels, every frame. No lag at
+     any speed, no overshoot, no float -- the smoothing that makes this look
+     right is entirely spatial, since each wheel already reads the mean of a
+     half-metre patch. */
+  if(tgt!==null){ C.groundY=tgt; C.carVY=0; }
+  // the tail steps out on gravel and grass: attitude only, the path is unchanged
+  const slipSrc = C.surf.loose ? C.surf.looseFrac*1.0
+                : C.surf.grass ? C.surf.grassFrac*1.01 : 0;
+  const slipT = slipSrc>0
+    ? clamp((-C.steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
+            * clamp(C.st.speed/14,0,1) * slipSrc, -0.61, 0.61)
+    : 0;
+  C.slipAng += (slipT-C.slipAng)*(1-Math.pow(0.05,dt));
+  C.group.position.set(C.st.wx, C.groundY, C.st.wz);
+  C.group.rotation.order='YXZ';
+  C.group.rotation.set(-C.carPitch, C.st.hdg + C.slipAng, C.carRoll);
+}
+
 function drive(dt){
   // up/down arrows now trim the seat height, so they are no longer throttle
   // and brake -- W and S are the drive controls
@@ -4085,91 +4164,59 @@ function drive(dt){
      still read below for the engine note, so holding W on the line revs the
      car and you launch the instant the panel clears. */
   const gridded = startPhase!=='go';
-  if(gridded) carState.speed=0;
-  else applyPedals(carState, thr?1:0, brk?1:0, playerSurf(), dt);
-
-  /* Steering is entirely yours now -- there is no longer any curvature term
-     holding the car to the crown of the road. The speed-scaled lock does real
-     work rather than being decoration: it is what stops the rack being
-     unusably twitchy at 300 kph. Driving aids work on the input rather than
-     on the tyres, so the car keeps every bit of its 6.3 g -- see steerRack. */
-  steerRack(PLAYER, want, kph, dt, AIDS);
-  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, PLAYER.steerAng);
-
   let yawRate=0;
-  if(!gridded){
-    const v=carState.speed;
-    /* Kinematic bicycle: no slip angle, the car goes where it points. Simple
-       and stable on a keyboard. The geometric yaw rate alone would allow
-       ~17 g at top speed, so it is capped at what the tyres could actually
-       hold -- which is also what gives the car its understeer at speed. */
-    /* Grass is slippery rather than draggy: what it takes away is grip. The
-       yaw ceiling is what represents grip here, so cutting it means the car
-       simply will not turn as hard on grass -- it washes out and runs on. */
-    yawRate=yawFor(v, PLAYER.steerAng, playerSurf());
 
-    if(FREEROAM){
-      /* Gravel. The surface under the car is already known -- the height field
-         tags every triangle from a sand or gravel material -- so this costs
-         nothing extra to ask.
-
-         Three effects, and the second is the one that matters. Drag scrubs
-         speed off hard. The rear steps out: extra yaw beyond what the wheels
-         were asked for, signed with the steering so it rotates the way a car
-         does when the back lets go, and growing with speed and lock so a
-         straight-line excursion stays survivable while turning in on gravel
-         does not. And a little noise on top, because a gravel trap is not
-         smooth and the car should not track perfectly straight across one. */
-      if(onLoose){
-        const f=looseFrac;
-        // bites much harder than before: gravel is meant to stop you
-        /* Almost all of this belongs on the speed-dependent term, not the
-           constant one. An 18.2 m/s2 floor is nearly two g of braking applied
-           just as hard at walking pace as at 300 kph, and against a throttle
-           the bog had already cut to 12% it pinned the car at a standstill --
-           gravel you cannot crawl out of at all. 2.5 leaves it draggy at rest
-           while 1.6v still scrubs 60 m/s2 off a car arriving at 300. */
-        surfaceDrag(carState, playerSurf(), dt);
-        looseSpray += carState.speed*f*dt;
-      }
-      else if(onGrass){
-        // a quarter of gravel's retardation, same shape
-        surfaceDrag(carState, playerSurf(), dt);
-      }
-      carState.hdg += yawRate*dt;
-      carState.wx  += Math.sin(carState.hdg)*v*dt;
-      carState.wz  += Math.cos(carState.hdg)*v*dt;
-    } else {
-    const k=trackK(carState.s);
-    const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
-    const sdot=v*Math.cos(carState.psi)/denom;
-    carState.psi += (yawRate - k*sdot)*dt;
-    // capping psi keeps cos(psi) positive, so s can never run backwards and
-    // the lap logic stays monotonic even in a big slide
-    carState.psi=clamp(carState.psi,-1.15,1.15);
-    carState.n += v*Math.sin(carState.psi)*dt;
-    carState.s += sdot*dt;
-    if(carState.s>=LAP) carState.s-=LAP;
-    if(carState.s<0)    carState.s+=LAP;
-
-    // off the asphalt: grass and gravel scrub speed off
-    const off=Math.abs(carState.n)-ROAD_HALF;
-    if(off>0) carState.speed=Math.max(0,carState.speed-Math.min(off,3.5)*2.4*dt);
-
-    /* Barriers. n is measured from the centreline, so the wall test is one
-       comparison -- the whole point of keeping the car in track space. */
-    if(Math.abs(carState.n)>=WALL_N){
-      const side=carState.n>0?1:-1;
-      carState.n=side*WALL_N;
-      const vIn=carState.speed*Math.sin(carState.psi)*side;   // +ve = into it
-      if(vIn>0){
-        if(vIn>1.2) hitBarrier(vIn);
-        carState.psi=-carState.psi*0.28;                      // glance off
-        carState.speed=Math.max(1.5, carState.speed*(1-clamp(vIn*0.05,0.02,0.5)));
-      }
+  if(FREEROAM){
+    if(gridded){
+      carState.speed=0;
+      steerRack(PLAYER, want, 0, dt, AIDS);   // the wheel still turns on the grid
+    }else{
+      // the same call the preview car makes, with keys instead of a program
+      yawRate=stepCar(PLAYER, {thr:thr?1:0, brk:brk?1:0, steer:want}, dt);
+      if(onLoose) looseSpray += carState.speed*looseFrac*dt;
     }
+  }else{
+    /* Pinewood, driven in track space rather than world space: it has a
+       centreline, so it has a lap, a racing line and barriers at a fixed
+       offset. The car itself is identical -- same pedals, same rack, same
+       grip ceiling -- only the bookkeeping around it differs. */
+    if(gridded) carState.speed=0;
+    else applyPedals(carState, thr?1:0, brk?1:0, PLAYER.surf, dt);
+    steerRack(PLAYER, want, kph, dt, AIDS);
+    if(!gridded){
+      const v=carState.speed;
+      yawRate=yawFor(v, PLAYER.steerAng, PLAYER.surf);
+      const k=trackK(carState.s);
+      const denom=Math.max(0.25, 1-carState.n*k);     // Frenet stretch, guarded
+      const sdot=v*Math.cos(carState.psi)/denom;
+      carState.psi += (yawRate - k*sdot)*dt;
+      // capping psi keeps cos(psi) positive, so s can never run backwards and
+      // the lap logic stays monotonic even in a big slide
+      carState.psi=clamp(carState.psi,-1.15,1.15);
+      carState.n += v*Math.sin(carState.psi)*dt;
+      carState.s += sdot*dt;
+      if(carState.s>=LAP) carState.s-=LAP;
+      if(carState.s<0)    carState.s+=LAP;
+
+      // off the asphalt: grass and gravel scrub speed off
+      const off=Math.abs(carState.n)-ROAD_HALF;
+      if(off>0) carState.speed=Math.max(0,carState.speed-Math.min(off,3.5)*2.4*dt);
+
+      /* Barriers. n is measured from the centreline, so the wall test is one
+         comparison -- the whole point of keeping the car in track space. */
+      if(Math.abs(carState.n)>=WALL_N){
+        const side=carState.n>0?1:-1;
+        carState.n=side*WALL_N;
+        const vIn=carState.speed*Math.sin(carState.psi)*side;   // +ve = into it
+        if(vIn>0){
+          if(vIn>1.2) hitBarrier(vIn);
+          carState.psi=-carState.psi*0.28;                      // glance off
+          carState.speed=Math.max(1.5, carState.speed*(1-clamp(vIn*0.05,0.02,0.5)));
+        }
+      }
     }
   }
+  if(steer) steer.setRotationFromAxisAngle(STEER_AXIS, PLAYER.steerAng);
 
   /* Body attitude. Pitch is dive/squat off actual longitudinal acceleration
      rather than the key state, so it eases off by itself near top speed. Roll
@@ -4270,7 +4317,7 @@ function frame(now){
 
   updateStart(dt);
   drive(dt);
-  previewStep(dt);          // before the camera, so the chase rig is not a frame behind
+  previewStep(dt,t);        // before the camera, so the chase rig is not a frame behind
   windU.value=t;
 
   // place the car at (s, n) with its own heading. Matrices must be current
@@ -4298,77 +4345,11 @@ function frame(now){
        through them, and it is carried there by a critically damped spring.
        Critical damping is the whole point -- it is the fastest approach that
        cannot overshoot, so there is no bounce to tune out. */
-    /* Looseness is read off the very probes that place the car, rather than
-       from a separate lookup at the centre. That separate lookup was the bug:
-       it chose its surface by continuity against a different reference, so it
-       could answer for a different layer than the wheels were standing on and
-       report tarmac while the car sat in a gravel trap. Same function the
-       preview car uses, for exactly that reason. */
-    const S=probeCar(carState.wx, carState.wz, carState.hdg, groundY-RIDE, PLAYER_SURF);
-    looseFrac=S.looseFrac; onLoose=S.loose;
-    grassFrac=S.grassFrac; onGrass=S.grass;
-    let tp=carPitch, tr=carRoll, tgt=null;
-    if(S.ok){
-      const y0=S.y[0], y1=S.y[1], y2=S.y[2], y3=S.y[3];
-      tp=Math.atan2(((y0+y1)-(y2+y3))*0.5, CAR_WB);   // front axle vs rear
-      tr=Math.atan2(((y0+y2)-(y1+y3))*0.5, CAR_TR);   // left vs right
-      tgt=(y0+y1+y2+y3)*0.25 + RIDE;                  // body sits on the plane
-    }
-    if(tgt===null){ const g=groundAt(carState.wx,carState.wz,groundY-RIDE);
-                    if(g.hit) tgt=g.y+RIDE; }
-    carPitch += (tp-carPitch)*(1-Math.pow(1e-7,dt));
-    carRoll  += (tr-carRoll )*(1-Math.pow(1e-7,dt));
-
-    if(tgt!==null){
-      /* Downforce. The car is held on the road rather than balanced above it
-         on a spring, and that removes the whole class of problem the spring
-         kept producing.
-
-         A spring is second order, so it can oscillate -- that was the bouncing
-         -- and it lags a moving target, so it floated at speed and sat down
-         again when you stopped. Feeding the ground's rate forward to cancel
-         that lag made it worse still, because the rate has to be got by
-         differencing the sampled height between frames, and a 1 cm step at a
-         mesh facet reads as 0.6 m/s over one frame. Multiplied by the damping
-         gain that is an acceleration spike, so the cure was itself a bounce
-         generator.
-
-         There is nothing to tune here and nothing that can ring: the body is
-         put on the plane through its wheels, every frame. No lag at any speed,
-         no overshoot, no float. The smoothing that makes this look right is
-         entirely spatial -- each wheel already reads the mean of a half-metre
-         patch, which is what takes out the facet steps, and doing it in space
-         rather than in time costs nothing in response. */
-      groundY = tgt;
-      carVY = 0;
-    }
-    carGroup.position.set(carState.wx, groundY, carState.wz);
-    /* carPitch is positive climbing, which is how the cameras read it. It has
-       to be negated going into rotation.x: a positive rotation about +X takes
-       +Z toward -Y, and the nose is at +z, so feeding it straight in pitched
-       the car the wrong way -- nose down every climb, nose up every descent.
-       Roll needs no flip: car-local +x is the left-hand side, and a positive
-       rotation about +Z lifts +x, which is what a higher left wheel wants. */
-    /* Slip angle. Adding yaw to the heading -- which is what this did before --
-       does not make the rear step out, it just turns the car harder, because
-       the car travels exactly where it points. Oversteer is the body pointing
-       wide of the direction of travel, so it belongs on the drawn rotation and
-       nowhere else: the path through the gravel is unchanged and only the
-       attitude goes sideways. */
-    /* Gain set so this is actually visible: at 0.055 it produced 0.3 degrees,
-       which is nothing. The steering term is what points the tail wide through
-       a turn, and a slow wander is added on top so the car looks unsettled even
-       running straight through a trap. Capped at 35 degrees -- past that it
-       stops looking like a slide and starts looking like a bug. */
-    // and the tail swings on both, further on grass because it is slicker
-    const slipSrc = onLoose ? looseFrac*1.0 : onGrass ? grassFrac*1.01 : 0;
-    const slipT = slipSrc>0
-      ? clamp((-PLAYER.steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
-              * clamp(carState.speed/14,0,1) * slipSrc, -0.61, 0.61)
-      : 0;
-    slipAng += (slipT-slipAng)*(1-Math.pow(0.05,dt));
-    carGroup.rotation.order='YXZ';
-    carGroup.rotation.set(-carPitch, carState.hdg+slipAng, carRoll);
+    /* One call, the same one the preview car gets: the ground under the four
+       wheels, the body set on the plane through them, attitude and slip. */
+    placeCar(PLAYER, dt, t);
+    looseFrac=PLAYER.surf.looseFrac; onLoose=PLAYER.surf.loose;
+    grassFrac=PLAYER.surf.grassFrac; onGrass=PLAYER.surf.grass;
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
@@ -4413,15 +4394,14 @@ function frame(now){
   /* Watching the preview means watching the preview car, not your own parked
      one -- so the chase rig moves over to the ghost for as long as it runs,
      and hands the view straight back when it stops. */
-  if(previewOn && pvGhost && pvGhost.visible){
-    const h=pvGhost.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
-    const base=pvGhost.position.y-RIDE;
-    camera.position.set(pvGhost.position.x-hx*9.5, base+3.15,
-                        pvGhost.position.z-hz*9.5);
+  if(previewOn && AICAR && aiGroup.visible){
+    const h=AICAR.st.hdg, hx=Math.sin(h), hz=Math.cos(h);
+    const base=AICAR.groundY-RIDE;
+    camera.position.set(AICAR.st.wx-hx*9.5, base+3.15, AICAR.st.wz-hz*9.5);
     clearGround(camera.position,1.2);
     camera.up.set(0,1,0);
-    camera.lookAt(pvGhost.position.x+hx*8, base+1.15, pvGhost.position.z+hz*8);
-    camera.fov = 64 + clamp(pv.speed/MAXSPEED,0,1)*8;
+    camera.lookAt(AICAR.st.wx+hx*8, base+1.15, AICAR.st.wz+hz*8);
+    camera.fov = 64 + clamp(AICAR.st.speed/MAXSPEED,0,1)*8;
   }
   else if(orbit){
     const cx=carGroup.position.x, cz=carGroup.position.z;
@@ -4450,7 +4430,7 @@ function frame(now){
       clearGround(camera.position,1.2);
       camera.up.set(0,1,0);
       camera.lookAt(carGroup.position.x+hx*8,
-                    camBase+1.15+Math.sin(carPitch)*8*CAM_SLOPE,
+                    camBase+1.15+Math.sin(PLAYER.carPitch)*8*CAM_SLOPE,
                     carGroup.position.z+hz*8);
     }else if(freeLook){
       /* Head moved and aimed in the car's own space, so it rides the shell.
@@ -4479,7 +4459,7 @@ function frame(now){
          and could not see the road falling away underneath you. It now runs
          out along the slope the car is standing on, over-driven a little so a
          descent opens up properly rather than just clipping the nose. */
-      const aimP=clamp(carPitch*CAM_SLOPE, -0.62, 0.52);
+      const aimP=clamp(PLAYER.carPitch*CAM_SLOPE, -0.62, 0.52);
       _aim.set(P.x+hx*LA*Math.cos(aimP), P.y+0.06+Math.sin(aimP)*LA,
                P.z+hz*LA*Math.cos(aimP));
       camera.up.set(0,1,0);
@@ -4684,8 +4664,8 @@ function startTrack(id){
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
-      groundY=RIDE; carVY=0;
-      carGroup.position.set(0, groundY, 0);
+      PLAYER.groundY=RIDE; PLAYER.carVY=0;
+      carGroup.position.set(0, PLAYER.groundY, 0);
       console.log('spawn: explicit, at model '+sx+', '+sz+' facing '+sdeg+' deg');
       scene.fog.density=0.00035;
       buildWorld();
@@ -4755,8 +4735,8 @@ function startTrack(id){
     const g0=groundAt(0,0,1e9);
     if(g0.hit){ root.position.y-=g0.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
     carState.wx=0; carState.wz=0; carState.hdg=heading; carState.speed=0;
-    groundY = RIDE; carVY=0;
-    carGroup.position.set(0, groundY, 0);
+    PLAYER.groundY = RIDE; PLAYER.carVY=0;
+    carGroup.position.set(0, PLAYER.groundY, 0);
 
     scene.fog.density=0.00035;         // a real valley circuit, long sightlines
     buildWorld();
