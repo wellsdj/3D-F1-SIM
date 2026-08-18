@@ -84,7 +84,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Walls <em id="bname">Off</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Walls <em id="bname">Off</em><br>Mark <em id="mname">Off</em></div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
@@ -93,7 +93,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>B</kbd> show walls · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>B</kbd> show walls · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -2914,6 +2914,10 @@ addEventListener('keydown',e=>{
   if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
   if(k==='t'){ AIDS=!AIDS; updateStatus(); }
   if(k==='b'){ brShow=!brShow; showBarrierLines(brShow); updateStatus(); }
+  if(k==='m'){ markMode=!markMode;
+    if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
+    updateStatus(); }
+  if(k==='n'){ markExport(); }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -2940,6 +2944,7 @@ function updateStatus(){
   document.getElementById('lname').textContent = (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const w=document.getElementById('bname'); if(w) w.textContent = brShow?'Shown':'Off';
+  const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
 }
 /* Full detail, always. There is no longer a quality toggle and nothing
    downgrades it behind your back -- the old adaptive check could drop the
@@ -2983,6 +2988,62 @@ const F_FWD_MIN=-0.05, F_FWD_MAX=0.38;                // m, +ve = toward the nos
 const FWD_RATE=0.07;                                  // m per second, held
 function resetFree(){ fYaw=0; fPitch=0; fUp=0; fFwd=0; fwdDir=1; }
 
+let trackRoot=null;
+
+/* ------------------------------------------------------------- barrier marking
+   A way to show me exactly where a barrier is by hand, since going by the model
+   alone has twice put walls in the wrong place. Click points along a barrier --
+   each one is a real raycast into the track mesh, so it lands at the true
+   ground height under the cursor, not a guess. Double-click ends that line and
+   the next click starts a new one. Press N to print every line so far, in the
+   model's own coordinates -- stable across reloads -- ready to paste back. */
+let markMode=false, markPts=[], markLines=[], markGroup=null;
+const _markRay=new THREE.Raycaster(), _markMouse=new THREE.Vector2();
+function markScreenToGround(clientX,clientY){
+  if(!trackRoot) return null;
+  const r=canvas.getBoundingClientRect();
+  _markMouse.x=((clientX-r.left)/r.width)*2-1;
+  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
+  _markRay.setFromCamera(_markMouse,camera);
+  const hit=_markRay.intersectObject(trackRoot,true);
+  return hit.length?hit[0].point.clone():null;
+}
+function markRedraw(){
+  if(markGroup){ scene.remove(markGroup);
+    markGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
+  markGroup=new THREE.Group(); scene.add(markGroup);
+  // drawn at the same height off the ground the car itself rides at, so the
+  // line reads clearly instead of being buried in the road
+  const lift=RIDE+0.06;
+  const draw=(pts,color)=>{
+    if(pts.length<2) return;
+    const g=new THREE.BufferGeometry();
+    const a=new Float32Array(pts.length*3);
+    pts.forEach((p,i)=>{ a[i*3]=p.x; a[i*3+1]=p.y+lift; a[i*3+2]=p.z; });
+    g.setAttribute('position',new THREE.BufferAttribute(a,3));
+    markGroup.add(new THREE.Line(g,new THREE.LineBasicMaterial({color})));
+  };
+  markLines.forEach(l=>draw(l,0xff3355));
+  draw(markPts,0xffee33);   // the line still being drawn, in a different colour
+}
+function markExport(){
+  if(!trackRoot) return '';
+  const inv=new THREE.Matrix4().copy(trackRoot.matrixWorld).invert();
+  const toModel=p=>{ const q=p.clone().applyMatrix4(inv); return [+q.x.toFixed(2), +q.z.toFixed(2)]; };
+  const all=markLines.concat(markPts.length>1?[markPts]:[]);
+  const text=all.map(l=>JSON.stringify(l.map(toModel))).join('\n');
+  console.log('barrier lines (model coordinates):\n'+text);
+  if(navigator.clipboard) navigator.clipboard.writeText(text).catch(()=>{});
+  return text;
+}
+canvas.addEventListener('dblclick',e=>{
+  if(!markMode) return;
+  e.preventDefault();
+  if(markPts.length>1) markLines.push(markPts);
+  markPts=[];
+  markRedraw();
+});
+
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
@@ -2992,6 +3053,11 @@ canvas.addEventListener('pointerdown',e=>{
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
+  if(moved<8 && markMode){
+    const p=markScreenToGround(e.clientX,e.clientY);
+    if(p){ markPts.push(p); markRedraw(); }
+    return;
+  }
   if(moved<8 && !freeLook){          // a tap, not a drag — cycle the view
     if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
     updateStatus();
@@ -3996,6 +4062,7 @@ function startTrack(id){
         if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
           .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
       scene.add(root);
+      trackRoot=root;
       const st0=buildHeightField(root);
       console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass');
       buildRoadMap(rd.mesh);
@@ -4065,6 +4132,7 @@ function startTrack(id){
       if(o.material){ (Array.isArray(o.material)?o.material:[o.material])
         .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
     scene.add(root);
+    trackRoot=root;
 
     const stats=buildHeightField(root);
     console.log('height field: '+stats.tris+' triangles over '+stats.cells+' cells, '
