@@ -3180,6 +3180,7 @@ function gridShow(on){
   document.getElementById('gridpanel').classList.toggle('on',on);
   document.getElementById('gridtoggle').classList.toggle('hide',on);
   if(on){ editRestore(); editSetTab(editTab); }
+  else { previewStop(); lineSetVisible(); }   // close the editor, get your own car back
 }
 function editSetTab(tab){
   editTab=tab;
@@ -3424,7 +3425,8 @@ function linePanel(){
     pedalPts.length+(pedalPts.length===1?' point':' points');
   const el=document.getElementById('linesel');
   el.innerHTML = previewOn
-    ? '<div>Preview <b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'
+    ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'+
+      '<div style="opacity:.7"><b id="pvoff">0</b> m off the line</div>'
     : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
       'Click a point to set throttle and brake.</div>';
 }
@@ -3452,26 +3454,42 @@ document.getElementById('linecopy').onclick=e=>{
 };
 
 /* ------------------------------------------------------------------ preview
-   Your own car, faded, driven round the line by nothing but the pedal numbers
-   on the markers -- so what you are watching is exactly what those numbers
-   say, not a simulation of a driver. It reads them live, so a value changed
-   mid-run takes effect as soon as the car reaches that stretch. Runs from the
-   start of the line to the end of it and stops. */
-let previewOn=false, pvGhost=null, pvS=0, pvV=12;
-const PV_ACC=9, PV_BRK=22, PV_COAST=0.7, PV_VMIN=3, PV_VMAX=95;
+   A faded copy of your own car, and the word "copy" is doing real work: it is
+   driven by the same physics the player is. Same engine curve, same braking
+   rate, same steering lock, same A_GRIP ceiling on how hard it can turn, same
+   gravel and grass under it. It is not slid along the line -- it *drives* the
+   line, steering at it the way a driver would and going only as fast as the
+   pedal numbers on the markers tell it to.
+
+   That is the whole point. Ask for 100% throttle through Eau Rouge and the
+   grip ceiling refuses to give you the corner: the car holds full lock, runs
+   out of front end and goes straight on into the run-off, exactly as it would
+   if you had done it yourself. A preview that cheated -- that stuck to the
+   line whatever you asked of it -- would tell you nothing about whether the
+   numbers are any good. */
+let previewOn=false, pvGhost=null, pvIdx=0, pvS=0;
+const pv={ wx:0, wz:0, hdg:0, speed:0, steerAng:0, lockF:1 };
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
   if(!pvGhost){
     pvGhost=carGroup.clone(true);
     pvGhost.traverse(o=>{
       if(!o.isMesh||!o.material) return;
-      const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.35;
+      const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.38;
                       c.depthWrite=false; return c; };
       o.material=Array.isArray(o.material)?o.material.map(fade):fade(o.material);
       o.castShadow=false; o.receiveShadow=false;
     });
     scene.add(pvGhost);
   }
+  // on the line, pointing down it, stopped -- whatever the first marker says
+  // is what gets it going, same as a car sitting on the grid
+  const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
+  pv.wx=a.x; pv.wz=a.z; pv.hdg=Math.atan2(b.x-a.x,b.z-a.z);
+  pv.speed=0; pv.steerAng=0; pv.lockF=1;
+  pvIdx=0; pvS=0;
+  pvGhost.position.set(a.x,a.y+RIDE,a.z);
+  pvGhost.rotation.y=pv.hdg;
   pvGhost.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
   dm('dmpreview').textContent='Stop';
@@ -3484,23 +3502,94 @@ function previewStop(){
   const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
   linePanel();
 }
-function previewReset(){ pvS=0; pvV=12; previewStop(); }
+function previewReset(){ previewStop(); pvIdx=0; pvS=0; pv.speed=0; }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
+
+/* Where the car is up to. Searched forward from where it was, over a window
+   rather than the whole lap, so a car that has run wide keeps a sensible idea
+   of its progress instead of snapping to some other part of the circuit that
+   happens to pass nearby -- which at Spa would be the return leg of every
+   hairpin. */
+function pvTrackProgress(){
+  const N=lineSmooth.length, win=Math.ceil(90/LINE_STEP);
+  let bi=pvIdx, bd=Infinity;
+  for(let i=pvIdx;i<Math.min(N,pvIdx+win);i++){
+    const dx=lineSmooth[i].x-pv.wx, dz=lineSmooth[i].z-pv.wz;
+    const d=dx*dx+dz*dz;
+    if(d<bd){ bd=d; bi=i; }
+  }
+  pvIdx=bi; pvS=lineCum[bi];
+  return Math.sqrt(bd);                       // how far off the line it is
+}
 function previewStep(dt){
   dotMenuTrack();
   if(!previewOn||lineSmooth.length<2||!pvGhost) return;
+
+  const off=pvTrackProgress();
+  if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
+
   const q=pedalAt(pvS);
-  const a = PV_ACC*q.thr/100 - PV_BRK*q.brk/100 - ((q.thr<=0&&q.brk<=0)?PV_COAST:0);
-  pvV=clamp(pvV+a*dt,PV_VMIN,PV_VMAX);
-  pvS+=pvV*dt;
-  if(pvS>=lineLen){ previewReset(); return; }   // to the end of the line, and stop
-  const at=lineAt(pvS);
-  const g=groundAt(at.x,at.z,pvGhost.position.y||1e9);
-  pvGhost.position.set(at.x,(g.hit?g.y:at.y)+RIDE,at.z);
-  pvGhost.rotation.y=at.hdg;
-  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(pvV*3.6);
+  const kph=pv.speed*3.6;
+  const g=groundAt(pv.wx,pv.wz,pvGhost.position.y);
+  const loose=!!g.loose, grass=!!g.grass;
+
+  /* Pedals. The same three branches as drive(), scaled by the percentage on
+     the marker instead of by a key being down or not. */
+  if(q.thr>0){
+    const v=pv.speed/MAXSPEED;
+    const bog = loose ? 1-0.121 : grass ? 1-0.06 : 1;
+    pv.speed += 26.0*(1.0-v*v)*bog*dt*(q.thr/100);
+  }
+  if(q.brk>0) pv.speed -= 46*dt*(q.brk/100);
+  if(q.thr<=0 && q.brk<=0) pv.speed -= (0.8 + pv.speed*0.028)*dt;
+  pv.speed=clamp(pv.speed,0,MAXSPEED);
+
+  /* Steering: pure pursuit at a point up the line, the distance ahead growing
+     with speed so it doesn't saw at the wheel on a straight. The steering
+     angle it asks for then goes through exactly the same rack the player's
+     does -- speed-scaled lock, same slew -- so it cannot ask for more lock
+     than the car has. */
+  const look=clamp(7+pv.speed*0.62,9,55);
+  let ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
+  const T=lineSmooth[ti];
+  const fx=Math.sin(pv.hdg), fz=Math.cos(pv.hdg);
+  const dx=T.x-pv.wx, dz=T.z-pv.wz;
+  const L=Math.max(Math.hypot(dx,dz),1e-3);
+  const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
+  const kappa=2*lat/(L*L);                     // arc that reaches the target
+  pv.lockF += (lockAt(kph)-pv.lockF)*(1-Math.pow(0.02,dt));
+  const want=clamp(-STEER_RATIO*Math.atan(WHEELBASE*kappa),
+                   -STEER_LOCK*pv.lockF, STEER_LOCK*pv.lockF);
+  pv.steerAng += (want-pv.steerAng)*(1-Math.pow(0.0009,2.2*dt));
+
+  /* Yaw, capped by grip. This cap is the honest bit: ask the car to turn
+     harder than A_GRIP allows at this speed and it simply will not, so a
+     corner taken at the wrong throttle runs wide and stays wide. */
+  const v=pv.speed;
+  const dTyre=-pv.steerAng/STEER_RATIO;
+  let yawRate=v*Math.tan(dTyre)/WHEELBASE;
+  const slick = grass ? 1-0.465 : 1;
+  const yawMax = v>0.5 ? A_GRIP*turnBoost(kph)*slick/v : 8;
+  yawRate=clamp(yawRate,-yawMax,yawMax);
+
+  // and the surface takes its cut, same rates as the player gets
+  if(loose)      pv.speed=Math.max(0,pv.speed-(2.5+pv.speed*1.6)*dt);
+  else if(grass) pv.speed=Math.max(0,pv.speed-(2.5+pv.speed*1.6)*0.25*dt);
+
+  pv.hdg += yawRate*dt;
+  pv.wx  += Math.sin(pv.hdg)*v*dt;
+  pv.wz  += Math.cos(pv.hdg)*v*dt;
+
+  const gh=groundAt(pv.wx,pv.wz,pvGhost.position.y);
+  pvGhost.position.set(pv.wx,(gh.hit?gh.y:g.y)+RIDE,pv.wz);
+  pvGhost.rotation.y=pv.hdg;
+
+  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(kph);
   const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
+  const ow=document.getElementById('pvoff');
+  if(ow){ ow.textContent=off.toFixed(0);
+          ow.style.color = off>6 ? '#ff5544' : ''; }
 }
 
 /* ------------------------------------------------------- save and restore
@@ -4107,6 +4196,7 @@ function frame(now){
 
   updateStart(dt);
   drive(dt);
+  previewStep(dt);          // before the camera, so the chase rig is not a frame behind
   windU.value=t;
 
   // place the car at (s, n) with its own heading. Matrices must be current
@@ -4292,7 +4382,20 @@ function frame(now){
     return v;
   };
 
-  if(orbit){
+  /* Watching the preview means watching the preview car, not your own parked
+     one -- so the chase rig moves over to the ghost for as long as it runs,
+     and hands the view straight back when it stops. */
+  if(previewOn && pvGhost && pvGhost.visible){
+    const h=pvGhost.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
+    const base=pvGhost.position.y-RIDE;
+    camera.position.set(pvGhost.position.x-hx*9.5, base+3.15,
+                        pvGhost.position.z-hz*9.5);
+    clearGround(camera.position,1.2);
+    camera.up.set(0,1,0);
+    camera.lookAt(pvGhost.position.x+hx*8, base+1.15, pvGhost.position.z+hz*8);
+    camera.fov = 64 + clamp(pv.speed/MAXSPEED,0,1)*8;
+  }
+  else if(orbit){
     const cx=carGroup.position.x, cz=carGroup.position.z;
     camera.position.set(
       cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
@@ -4420,8 +4523,6 @@ function frame(now){
       }
     }
   }
-
-  previewStep(dt);
 
   // sun rig follows the car so the shadow map stays tight
   tmp.copy(carGroup.position);

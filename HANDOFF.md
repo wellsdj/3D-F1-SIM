@@ -90,15 +90,25 @@ open; the panel's Undo removes the last one placed.
 The line is only drawn while this tab is open. It is authoring scaffolding,
 not part of the race.
 
-**Preview** runs a faded copy of your own car along the line, driven by
-nothing but those pedal numbers — so what you are watching is exactly what
-the numbers say, not a simulation of a driver. It reads them live, so a value
-changed mid-run takes effect as soon as the car reaches that stretch. It runs
-from the start of the line to the end and stops. **Reset** puts it back.
+**Preview** runs a faded copy of your own car along the line, and *copy* is
+doing real work there: it runs the same physics `drive()` does. Same engine
+curve (`26.0*(1-v²)`), same 46 m/s² braking, same speed-scaled steering lock
+and rack, the same `A_GRIP` ceiling on yaw rate, the same gravel and grass
+penalties underneath it. The camera moves to a chase rig behind it for as
+long as it runs, and hands the view back when it stops.
 
-The preview's rates (`PV_ACC` 9 m/s², `PV_BRK` 22 m/s²) are placeholders, not
-the car's real physics — it shows the shape of the pace, not lap times. Swap
-them for the real values when the AI is built.
+It is **not** slid along the line. It steers at the line by pure pursuit and
+goes only as fast as the pedal markers tell it to — so if the numbers are
+wrong, it fails the way the real car would. Ask for 100% throttle through Eau
+Rouge and the grip ceiling refuses to give you the corner: full lock, no
+front end, straight on into the run-off. That is the point of it. A preview
+that stuck to the line whatever you asked of it would tell you nothing about
+whether the numbers are any good. The panel shows speed, distance, and how
+far off the line it has drifted (red past 6 m).
+
+It reads the markers live, so a value changed mid-run takes effect as soon as
+the car reaches that stretch. Runs from the start of the line to the end, then
+stops. **Reset** puts it back.
 
 Not built yet, deliberately: the AI itself. None of the above drives anything
 in a race yet — it is the authored data the AI will read.
