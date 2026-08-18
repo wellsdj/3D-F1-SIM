@@ -74,6 +74,37 @@
             letter-spacing:-.02em;cursor:ns-resize;user-select:none;padding:2px 0}
   #pedalval small{font-size:10px;letter-spacing:.14em;opacity:.6;margin-left:4px}
   #pedalhint{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.45}
+  /* the dot menu tracks its point across the screen, so it is positioned from
+     the frame loop and only ever laid out here */
+  #dotmenu{position:fixed;left:0;top:0;z-index:9;display:none;width:172px;
+           transform:translate(-50%,-100%);margin-top:-14px;
+           font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--paper);
+           background:rgba(0,0,0,.78);border:1px solid var(--line);border-radius:4px;
+           padding:9px 10px;box-shadow:0 6px 22px rgba(0,0,0,.5)}
+  #dotmenu.on{display:block}
+  #dotmenu h4{margin:0 0 7px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+              font-weight:600;opacity:.6}
+  #dotmenu h4 span{color:var(--amber);opacity:1}
+  #dotmenu .row{display:flex;gap:5px;margin-top:5px}
+  #dotmenu button{font:inherit;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+                  color:var(--paper);background:rgba(255,255,255,.07);cursor:pointer;
+                  border:1px solid var(--line);border-radius:3px;padding:5px 4px;flex:1}
+  #dotmenu button:hover{background:rgba(255,255,255,.16)}
+  #dotmenu button.on{background:var(--amber);color:#111;border-color:var(--amber)}
+  #dotmenu .pedal{display:flex;align-items:center;justify-content:space-between;gap:8px;
+                  padding:3px 0}
+  #dotmenu .pedal label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;opacity:.6}
+  #dotmenu .val{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;
+                letter-spacing:-.02em;cursor:ns-resize;user-select:none;touch-action:none;
+                padding:1px 4px;border-radius:3px}
+  #dotmenu .val:hover{background:rgba(255,255,255,.10)}
+  #dotmenu .val.thr{color:#33ff66}
+  #dotmenu .val.brk{color:#ffbb00}
+  #dotmenu .val small{font-size:10px;letter-spacing:.12em;opacity:.55;margin-left:2px}
+  #dmhint{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.4;
+          text-align:center;margin-top:2px}
+  #dmstate{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);
+           opacity:.8;text-align:center;min-height:12px}
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
@@ -157,6 +188,26 @@
   </div>
 
   <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
+</div>
+
+<!-- the menu that opens on the dot you click, floating over it in the 3D view -->
+<div id="dotmenu">
+  <h4>Point <span id="dmnum">01</span></h4>
+  <div class="pedal">
+    <label>Throttle</label>
+    <div class="val thr" id="dmthrval">0<small>%</small></div>
+  </div>
+  <div class="pedal">
+    <label>Brake</label>
+    <div class="val brk" id="dmbrkval">0<small>%</small></div>
+  </div>
+  <div id="dmhint">drag a number up · down</div>
+  <div id="dmstate"></div>
+  <div class="row">
+    <button id="dmpreview">Preview</button>
+    <button id="dmundo">Undo</button>
+  </div>
+  <div class="row" style="margin-top:5px"><button id="dmclose">Close</button></div>
 </div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
@@ -262,6 +313,71 @@ const GRID_SLOTS=[
   [-282.98,-677.02],
   [-272.64,-674.13],
   [-274.62,-663.39]
+];
+
+/* ------------------------------------------------------------- racing line */
+/* THE PATH: the shape of the optimum lap round Spa, 207 points clicked by
+   hand in the running game -- a full lap, 6.94 km, closing to within 11 m of
+   where it started. Same model-space frame as GRID_SLOTS and spawnAt.
+
+   Shape only. It says where the cars go, never how fast: the pedals live on
+   separate markers dropped onto this path in the editor (P), each holding a
+   throttle and a brake percentage that stand until the next marker says
+   otherwise. Drawn as a smoothed curve through these points rather than
+   straight between them, so the corners are round like a real racing line. */
+const SPA_LINE=[
+  [-249.18,-628.55], [-260.43,-641.33], [-302.1,-706.5], [-362.6,-803.22],
+  [-393.63,-851.83], [-435.09,-916.81], [-442.12,-928.41], [-444.97,-937.13],
+  [-444.94,-943.74], [-442.86,-949.15], [-440,-953.62], [-435.95,-957.85],
+  [-429.38,-960.83], [-423.07,-962.06], [-414.54,-963.04], [-407.13,-962.24],
+  [-401.31,-962.26], [-396.27,-960.97], [-370.87,-947.43], [-327.42,-922.64],
+  [-250.96,-880.12], [-212.28,-856.66], [-177.91,-830.42], [-138.01,-795.6],
+  [-103.61,-760.67], [-65.79,-717.16], [-38.3,-685.99], [-8.34,-652.4],
+  [25.44,-616.05], [40.25,-602.58], [59.69,-586.47], [79.07,-571.48],
+  [89.13,-563.94], [102.8,-554.23], [116.55,-544.19], [133.79,-529.97],
+  [150.61,-512.69], [161.89,-497.54], [168.97,-481.93], [180.41,-451.74],
+  [190.79,-415.43], [195.68,-401.57], [203.61,-381.04], [213.05,-360.6],
+  [223.06,-341.3], [244.58,-309.6], [264.41,-285.07], [303.03,-232.14],
+  [358.37,-147.51], [390.83,-83.24], [421.63,-1.15], [484.59,192.01],
+  [524.13,310.63], [563.66,428.89], [593,517.63], [607.3,563.07],
+  [620.01,605.61], [623.03,636.25], [618.36,655.99], [609.27,665.22],
+  [598.58,675.83], [587.02,686.16], [578.58,698.58], [571.26,716.8],
+  [567.17,735.38], [572.38,759.07], [585.13,792.54], [592.83,821.07],
+  [592.84,843.65], [589.61,858.53], [579.35,877.92], [564.55,894.12],
+  [542.95,911.76], [513.68,934.24], [431.25,996.84], [370.21,1043.06],
+  [345.47,1060.3], [328.52,1067.72], [315.48,1070.49], [303.22,1070.42],
+  [294.76,1067.8], [287.71,1064.06], [277.82,1055.86], [270.71,1046.5],
+  [264.43,1031.86], [262.12,1023.22], [262.17,1007.39], [266.9,995.66],
+  [277.24,981.91], [290.06,970.86], [306.13,957.21], [325.97,946.83],
+  [353.74,936.41], [380.42,915.01], [390.74,901.05], [396.97,885.52],
+  [401.5,865.36], [401.1,842.37], [395.76,825.26], [380.32,789.98],
+  [362.49,744], [353.06,712.66], [344.48,687.95], [338.98,663.06],
+  [330.68,627.04], [314.49,556.43], [309,529.51], [301.31,491.06],
+  [292.13,452.44], [283.21,426.45], [268.51,398.49], [244.38,370.34],
+  [216.91,356.02], [181.25,347.43], [135.2,346.79], [105.41,351.81],
+  [63.47,368.76], [40.67,384.62], [22.4,401.79], [6.06,420],
+  [-5.79,438.64], [-17.17,465.11], [-45.01,555.61], [-54.58,590.11],
+  [-73.3,648.62], [-88.29,694.74], [-99.53,725.27], [-113.51,748.06],
+  [-130.74,765], [-152.96,779.73], [-176,785.56], [-205.83,782.69],
+  [-227.46,773.18], [-253.43,761.09], [-281.7,759.84], [-310.49,767.49],
+  [-328.61,779.13], [-345.6,796.34], [-356.9,814.53], [-387.07,868.42],
+  [-407.02,906.51], [-419.86,933.7], [-436.82,956.67], [-448.96,967.63],
+  [-464.45,976.27], [-476.61,978.77], [-493.45,977.97], [-508.95,972.64],
+  [-526.48,963.47], [-547.73,949.26], [-563.26,939.48], [-589.06,922.33],
+  [-599.38,914.21], [-609.94,904.84], [-624.01,887.37], [-635.53,866.91],
+  [-640.92,850], [-645.02,820.39], [-643.97,798.83], [-639.04,777.67],
+  [-626.89,745.34], [-595.95,686.47], [-544.25,612.58], [-509.6,576.66],
+  [-473.63,540.67], [-442.96,515.08], [-396.2,486.81], [-324.98,444.37],
+  [-268.62,413.7], [-220.05,378.22], [-177.01,332.42], [-144.88,285.51],
+  [-119.75,234.72], [-104.82,196.92], [-94.94,170.88], [-84.43,141.4],
+  [-77.03,106.82], [-75.86,77.84], [-77.82,50.88], [-84.32,17.47],
+  [-91.51,-7.82], [-106.54,-42.63], [-150.16,-136.5], [-159.96,-161.42],
+  [-174.53,-213.09], [-187.78,-254.49], [-201.38,-331.73], [-209.13,-384.95],
+  [-212.25,-416.06], [-212.62,-427.4], [-212.48,-435.81], [-209.21,-442.24],
+  [-202.63,-448.64], [-193.16,-453.51], [-185.48,-452.96], [-178.9,-452.65],
+  [-170.03,-454.5], [-160.59,-458.57], [-155.45,-464.38], [-152.38,-471.18],
+  [-152.41,-481.45], [-156.25,-494.62], [-166.04,-507.54], [-182.74,-531.61],
+  [-210.71,-573.43], [-227.59,-596.38], [-243.29,-619.72]
 ];
 
 /* ------------------------------------------------------------------ tracks */
@@ -3042,14 +3158,6 @@ function gridRedraw(){
     const s=gridLabel(i+1); s.position.set(p.x,p.y+RIDE+3.8,p.z); gridGroup.add(s);
   });
 }
-function pickLineDot(clientX,clientY){
-  const r=canvas.getBoundingClientRect();
-  _markMouse.x=((clientX-r.left)/r.width)*2-1;
-  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
-  _markRay.setFromCamera(_markMouse,camera);
-  const hit=_markRay.intersectObjects(lineDots,false);
-  return hit.length?hit[0].object.userData.lineIndex:-1;
-}
 function gridToModel(p){
   const inv=new THREE.Matrix4().copy(trackRoot.matrixWorld).invert();
   const q=p.clone().applyMatrix4(inv);
@@ -3080,6 +3188,7 @@ function editSetTab(tab){
   document.getElementById('panegrid').classList.toggle('on',tab==='grid');
   document.getElementById('paneline').classList.toggle('on',tab==='line');
   if(tab==='grid') gridPanel(); else linePanel();
+  lineSetVisible();          // the line is only drawn while its tab is open
 }
 document.getElementById('gridtoggle').onclick=()=>gridShow(true);
 document.getElementById('gridclose').onclick=()=>gridShow(false);
@@ -3098,122 +3207,260 @@ document.getElementById('gridcopy').onclick=e=>{
 };
 
 /* --------------------------------------------------------------- racing line
-   The optimum line round the lap, laid down by hand the same way the grid is:
-   click the track, get a dot exactly where you clicked. Each dot carries one
-   pedal -- throttle or brake, never both -- as a percentage, which is what
-   the AI will drive to. Preview runs a faded copy of your own car along it so
-   you can watch the numbers before committing to them.
+   Two separate things, and keeping them separate is the whole design:
 
-   Stored in the model's frame like everything else here, and kept in
-   localStorage so a reload doesn't throw away an afternoon of clicking. */
-const LINE_COL={ none:0xff2222, thr:0x33ff66, brk:0xffbb00 };
-let linePts=[], lineSel=-1, lineGroup=null, lineDots=[];
-function lineAdd(p){ linePts.push({p:p, pedal:null, pct:0}); }
+   THE PATH is the shape of the lap -- SPA_LINE, 207 points clicked by hand in
+   the running game, drawn as a smoothed curve through them rather than
+   straight segment to segment, so the corners are round like a real line and
+   not a chain of kinks. The path carries no pedal information at all.
+
+   PEDAL POINTS are sparse markers dropped *on* that path. Each one says how
+   much throttle and how much brake from here on, and it holds until the next
+   marker says otherwise. Zero and zero is a coast. You can only put one on
+   the line -- a click that misses the line does nothing, because a pedal
+   instruction that isn't on the path the car drives would mean nothing.
+
+   The line is only drawn while the Racing line tab is open. It is authoring
+   scaffolding, not part of the race. */
+const PEDAL_COL={ coast:0xdddddd, thr:0x33ff66, brk:0xffbb00 };
+const RIBBON_COL={ coast:[0.85,0.85,0.88], thr:[0.20,1.00,0.40], brk:[1.00,0.73,0.00] };
+let linePath=[];                 // Vector3 control points -- the shape
+let pedalPts=[];                 // {s, thr, brk}, sorted by s along the curve
+let pedalSel=-1;
+let lineGroup=null, lineDots=[], lineRibbon=null;
+
+/* Centripetal Catmull-Rom, specifically: the uniform form overshoots and
+   loops back on itself wherever two control points land close together, and
+   clicks bunch up in the slow corners, which is exactly where a loop would
+   be worst. Centripetal cannot self-intersect between control points. */
+let lineSmooth=[], lineCum=[], lineLen=0;
+const LINE_STEP=2.5;             // metres between samples along the curve
+function lineBuildCurve(){
+  lineSmooth=[]; lineCum=[]; lineLen=0;
+  if(linePath.length<2) return;
+  const curve=new THREE.CatmullRomCurve3(linePath.map(v=>v.clone()),false,'centripetal',0.5);
+  const n=Math.max(2,Math.min(4000,Math.round(curve.getLength()/LINE_STEP)));
+  lineSmooth=curve.getSpacedPoints(n);
+  // sit every sample on the actual ground -- interpolating height between
+  // control points sinks the curve into the road over a crest
+  lineSmooth.forEach(v=>{ const g=groundAt(v.x,v.z,v.y); if(g.hit) v.y=g.y; });
+  lineCum.push(0);
+  for(let i=1;i<lineSmooth.length;i++)
+    lineCum.push(lineCum[i-1]+lineSmooth[i].distanceTo(lineSmooth[i-1]));
+  lineLen=lineCum[lineCum.length-1]||0;
+}
+/* Where along the curve a distance falls, and what the pedals are doing
+   there. The marker in force is the last one you passed; before the first
+   marker the lap wraps round to the last one, since the line is a closed lap. */
+function lineAt(s){
+  const out={x:0,y:0,z:0,hdg:0};
+  if(lineSmooth.length<2) return out;
+  s=clamp(s,0,lineLen);
+  let lo=0, hi=lineCum.length-1;
+  while(lo<hi-1){ const mid=(lo+hi)>>1; if(lineCum[mid]<=s) lo=mid; else hi=mid; }
+  const a=lineSmooth[lo], b=lineSmooth[Math.min(lo+1,lineSmooth.length-1)];
+  const seg=Math.max(lineCum[lo+1]-lineCum[lo],1e-4), f=clamp((s-lineCum[lo])/seg,0,1);
+  out.x=a.x+(b.x-a.x)*f; out.y=a.y+(b.y-a.y)*f; out.z=a.z+(b.z-a.z)*f;
+  out.hdg=Math.atan2(b.x-a.x,b.z-a.z);
+  return out;
+}
+function pedalAt(s){
+  if(!pedalPts.length) return {thr:0,brk:0};
+  let best=null;
+  for(const q of pedalPts){ if(q.s<=s) best=q; else break; }
+  return best || pedalPts[pedalPts.length-1];
+}
+function pedalSort(){
+  const keep=pedalSel>=0?pedalPts[pedalSel]:null;
+  pedalPts.sort((a,b)=>a.s-b.s);
+  pedalSel=keep?pedalPts.indexOf(keep):-1;
+}
+function pedalKind(q){ return q.brk>0 ? 'brk' : (q.thr>0 ? 'thr' : 'coast'); }
+
 function lineRedraw(){
   if(lineGroup){ scene.remove(lineGroup);
     lineGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
-  lineGroup=new THREE.Group(); scene.add(lineGroup); lineDots=[];
-  const lift=RIDE+0.10;
-  // the dots themselves: big enough to click, and drawn over the road rather
-  // than sunk into it, so a line laid across a crest is still readable
-  const geo=new THREE.SphereGeometry(1.05,14,10);
-  linePts.forEach((q,i)=>{
-    const col = q.pedal ? LINE_COL[q.pedal] : LINE_COL.none;
-    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:col,depthTest:false}));
-    m.position.set(q.p.x,q.p.y+lift,q.p.z);
+  lineGroup=new THREE.Group(); scene.add(lineGroup);
+  lineDots=[]; lineRibbon=null;
+  lineGroup.visible = gridMode && editTab==='line';
+  if(!lineSmooth.length) lineBuildCurve();
+  /* A ribbon rather than a line: GPU line width is one pixel on nearly every
+     browser, so a plain line vanishes at any distance. Two triangles per
+     sample, laid flat on the road, coloured by the pedal in force there --
+     which is also what makes it clickable, since it is a real mesh. */
+  if(lineSmooth.length>1){
+    const N=lineSmooth.length, half=1.3;
+    const pos=new Float32Array(N*2*3), col=new Float32Array(N*2*3), idx=[];
+    for(let i=0;i<N;i++){
+      const a=lineSmooth[Math.max(0,i-1)], b=lineSmooth[Math.min(N-1,i+1)];
+      let dx=b.x-a.x, dz=b.z-a.z; const L=Math.hypot(dx,dz)||1; dx/=L; dz/=L;
+      const px=-dz*half, pz=dx*half, v=lineSmooth[i];
+      pos[i*6]=v.x+px; pos[i*6+1]=v.y+0.10; pos[i*6+2]=v.z+pz;
+      pos[i*6+3]=v.x-px; pos[i*6+4]=v.y+0.10; pos[i*6+5]=v.z-pz;
+      const q=pedalAt(lineCum[i]), kind=pedalKind(q), c=RIBBON_COL[kind];
+      // stronger colour the harder the pedal, so a 20% lift reads differently
+      // from flat out without needing a number on screen
+      const amt = kind==='brk' ? q.brk : (kind==='thr' ? q.thr : 100);
+      const k = kind==='coast' ? 1 : (0.45+0.55*amt/100);
+      for(let s=0;s<2;s++){ col[i*6+s*3]=c[0]*k; col[i*6+s*3+1]=c[1]*k; col[i*6+s*3+2]=c[2]*k; }
+      if(i<N-1){ const o=i*2; idx.push(o,o+1,o+2, o+1,o+3,o+2); }
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+    g.setAttribute('color',new THREE.BufferAttribute(col,3));
+    g.setIndex(idx);
+    lineRibbon=new THREE.Mesh(g,new THREE.MeshBasicMaterial({
+      vertexColors:true,transparent:true,opacity:0.70,side:THREE.DoubleSide,
+      depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4}));
+    lineRibbon.renderOrder=998;
+    lineGroup.add(lineRibbon);
+  }
+  // the markers: a post standing on the line, tall enough to spot from the
+  // car and fat enough to click without hunting for it
+  const geo=new THREE.CylinderGeometry(0.85,0.85,4.2,12);
+  pedalPts.forEach((q,i)=>{
+    const at=lineAt(q.s);
+    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
+      color:PEDAL_COL[pedalKind(q)],depthTest:false}));
+    m.position.set(at.x,at.y+2.2,at.z);
     m.renderOrder=999;
-    if(i===lineSel) m.scale.setScalar(1.55);
-    m.userData.lineIndex=i;
+    if(i===pedalSel) m.scale.set(1.5,1.15,1.5);
+    m.userData.pedalIndex=i;
     lineGroup.add(m); lineDots.push(m);
   });
-  // a thin joining line, just so the shape of the lap reads at a distance
-  if(linePts.length>1){
-    const g=new THREE.BufferGeometry(), a=new Float32Array(linePts.length*3);
-    linePts.forEach((q,i)=>{ a[i*3]=q.p.x; a[i*3+1]=q.p.y+lift; a[i*3+2]=q.p.z; });
-    g.setAttribute('position',new THREE.BufferAttribute(a,3));
-    lineGroup.add(new THREE.Line(g,new THREE.LineBasicMaterial({
-      color:0xffffff,transparent:true,opacity:0.30,depthTest:false})));
-  }
 }
-function linePanel(){
-  document.getElementById('linecount').textContent=
-    linePts.length+(linePts.length===1?' point':' points');
-  const el=document.getElementById('linesel');
-  if(lineSel<0||!linePts[lineSel]){
-    el.innerHTML = previewOn
-      ? '<div>Preview <b id="pvspeed">0</b> km/h</div>'
-      : '<div style="opacity:.55">Click the track to drop a point.<br>Click a dot to set its pedal.</div>';
-    return;
+function lineSetVisible(){
+  if(lineGroup) lineGroup.visible = gridMode && editTab==='line';
+  if(!(gridMode && editTab==='line')) dotMenuClose();
+}
+/* A click lands on the line or it does nothing. The ribbon is the test: hit
+   it, and the nearest sample to the hit gives the distance along the lap. */
+function lineHitS(clientX,clientY){
+  if(!lineRibbon||!lineSmooth.length) return -1;
+  const r=canvas.getBoundingClientRect();
+  _markMouse.x=((clientX-r.left)/r.width)*2-1;
+  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
+  _markRay.setFromCamera(_markMouse,camera);
+  const hit=_markRay.intersectObject(lineRibbon,false);
+  if(!hit.length) return -1;
+  const p=hit[0].point;
+  let bi=0, bd=Infinity;
+  for(let i=0;i<lineSmooth.length;i++){
+    const d=lineSmooth[i].distanceToSquared(p);
+    if(d<bd){ bd=d; bi=i; }
   }
-  const q=linePts[lineSel];
-  el.innerHTML =
-    '<div>Point <b>'+String(lineSel+1).padStart(2,'0')+'</b></div>'+
-    '<div id="pedalrow">'+
-      '<button data-p="thr"'+(q.pedal==='thr'?' class="on"':'')+'>Throttle</button>'+
-      '<button data-p="brk"'+(q.pedal==='brk'?' class="on"':'')+'>Brake</button>'+
-    '</div>'+
-    '<div id="pedalval">'+Math.round(q.pct)+'<small>%</small></div>'+
-    '<div id="pedalhint">drag the number up · down</div>'+
-    (previewOn?'<div style="margin-top:6px">Preview <b id="pvspeed">0</b> km/h</div>':'');
-  el.querySelectorAll('#pedalrow button').forEach(b=>{
-    b.onclick=()=>{
-      const want=b.dataset.p;
-      // one pedal at a time -- picking the other one replaces it, and picking
-      // the one already set clears it back to coasting
-      q.pedal = (q.pedal===want) ? null : want;
-      if(q.pedal && q.pct<=0) q.pct=100;
-      if(!q.pedal) q.pct=0;
-      lineRedraw(); linePanel(); editSave();
-    };
-  });
-  const val=el.querySelector('#pedalval');
-  val.addEventListener('pointerdown',e=>{
-    if(!q.pedal) return;                       // nothing to set a level for yet
-    e.preventDefault(); val.setPointerCapture(e.pointerId);
+  return lineCum[bi];
+}
+function pickPedalPost(clientX,clientY){
+  if(!lineDots.length) return -1;
+  const r=canvas.getBoundingClientRect();
+  _markMouse.x=((clientX-r.left)/r.width)*2-1;
+  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
+  _markRay.setFromCamera(_markMouse,camera);
+  const hit=_markRay.intersectObjects(lineDots,false);
+  return hit.length?hit[0].object.userData.pedalIndex:-1;
+}
+
+/* -------------------------------------------------------------- dot menu
+   Opens on the marker you clicked and follows it across the screen, so the
+   numbers you are setting stay next to the piece of track they apply to. */
+const dm=id=>document.getElementById(id);
+function dotMenuClose(){ pedalSel=-1; dm('dotmenu').classList.remove('on'); lineRedraw(); linePanel(); }
+function dotMenuOpen(i){ pedalSel=i; dotMenuFill(); dm('dotmenu').classList.add('on'); }
+function dotMenuFill(){
+  const q=pedalPts[pedalSel]; if(!q) return;
+  dm('dmnum').textContent=String(pedalSel+1).padStart(2,'0')+' · '+Math.round(q.s)+' m';
+  dm('dmthrval').innerHTML=Math.round(q.thr)+'<small>%</small>';
+  dm('dmbrkval').innerHTML=Math.round(q.brk)+'<small>%</small>';
+  dm('dmstate').textContent = (q.thr<=0&&q.brk<=0) ? 'coasting' : '';
+}
+function dotMenuTrack(){
+  const el=dm('dotmenu');
+  if(!el.classList.contains('on')) return;
+  const q=pedalPts[pedalSel];
+  if(!q){ el.classList.remove('on'); return; }
+  const at=lineAt(q.s);
+  const v=new THREE.Vector3(at.x,at.y+4.6,at.z).project(camera);
+  const r=canvas.getBoundingClientRect();
+  // behind the camera, or off the edge: park it rather than let it fly about
+  if(v.z>1){ el.style.opacity='0.25'; return; }
+  el.style.opacity='1';
+  el.style.left=(r.left+(v.x*0.5+0.5)*r.width)+'px';
+  el.style.top =(r.top +(-v.y*0.5+0.5)*r.height)+'px';
+}
+/* Drag a number up to raise it. Both pedals are their own value: zero and
+   zero is a coast, and nothing stops you asking for both at once -- that is
+   left in deliberately rather than forbidden, since it is a legitimate
+   thing to want on a corner entry. */
+function dragNumber(el,get,set){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId);
     let lastY=e.clientY;
     const move=ev=>{
-      q.pct=clamp(q.pct+(lastY-ev.clientY)*0.7,0,100); lastY=ev.clientY;
-      val.innerHTML=Math.round(q.pct)+'<small>%</small>';
+      set(clamp(get()+(lastY-ev.clientY)*0.7,0,100)); lastY=ev.clientY;
+      dotMenuFill(); lineRedraw();
     };
-    const up=()=>{ val.removeEventListener('pointermove',move);
-      val.removeEventListener('pointerup',up); lineRedraw(); editSave(); };
-    val.addEventListener('pointermove',move);
-    val.addEventListener('pointerup',up);
+    const up=()=>{ el.removeEventListener('pointermove',move);
+      el.removeEventListener('pointerup',up); editSave(); };
+    el.addEventListener('pointermove',move);
+    el.addEventListener('pointerup',up);
   });
+}
+dragNumber(dm('dmthrval'),()=>pedalPts[pedalSel]?pedalPts[pedalSel].thr:0,
+                          v=>{ if(pedalPts[pedalSel]) pedalPts[pedalSel].thr=v; });
+dragNumber(dm('dmbrkval'),()=>pedalPts[pedalSel]?pedalPts[pedalSel].brk:0,
+                          v=>{ if(pedalPts[pedalSel]) pedalPts[pedalSel].brk=v; });
+dm('dmpreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
+dm('dmundo').onclick=()=>{
+  if(pedalSel<0) return;
+  pedalPts.splice(pedalSel,1); pedalSel=-1;
+  dm('dotmenu').classList.remove('on');
+  lineRedraw(); linePanel(); editSave();
+};
+dm('dmclose').onclick=dotMenuClose;
+
+function linePanel(){
+  document.getElementById('linecount').textContent=
+    pedalPts.length+(pedalPts.length===1?' point':' points');
+  const el=document.getElementById('linesel');
+  el.innerHTML = previewOn
+    ? '<div>Preview <b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'
+    : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
+      'Click a point to set throttle and brake.</div>';
 }
 function lineText(){
   if(!trackRoot) return '';
-  return '['+linePts.map(q=>{
-    const m=gridToModel(q.p);
-    return '['+m[0]+','+m[1]+',"'+(q.pedal||'-')+'",'+Math.round(q.pct)+']';
+  return '['+pedalPts.map(q=>{
+    const at=lineAt(q.s);
+    const m=gridToModel(new THREE.Vector3(at.x,at.y,at.z));
+    return '['+Math.round(q.s)+','+Math.round(q.thr)+','+Math.round(q.brk)+
+           ']  /* '+m[0]+', '+m[1]+' */';
   }).join(',\n ')+']';
 }
 document.getElementById('lineundo').onclick=()=>{
-  linePts.pop(); if(lineSel>=linePts.length) lineSel=-1;
+  pedalPts.pop(); pedalSel=-1; dm('dotmenu').classList.remove('on');
   lineRedraw(); linePanel(); editSave();
 };
 document.getElementById('lineclear').onclick=()=>{
-  linePts=[]; lineSel=-1; previewStop(); lineRedraw(); linePanel(); editSave();
+  pedalPts=[]; pedalSel=-1; dm('dotmenu').classList.remove('on');
+  previewStop(); lineRedraw(); linePanel(); editSave();
 };
 document.getElementById('linecopy').onclick=e=>{
   const t=lineText();
-  console.log('racing line [x, z, pedal, percent] (model coordinates):\n'+t);
+  console.log('pedal points [metres along the lap, throttle %, brake %]:\n'+t);
   copyFlash(e.currentTarget,t);
 };
 
 /* ------------------------------------------------------------------ preview
-   Your own car, faded, driven round the line by nothing more than the pedal
-   numbers on the dots -- so what you are watching is exactly what those
-   numbers say, not a simulation of a driver. Edit while it runs: it reads the
-   values live, so a dot you change takes effect the next time it comes round. */
+   Your own car, faded, driven round the line by nothing but the pedal numbers
+   on the markers -- so what you are watching is exactly what those numbers
+   say, not a simulation of a driver. It reads them live, so a value changed
+   mid-run takes effect as soon as the car reaches that stretch. Runs from the
+   start of the line to the end of it and stops. */
 let previewOn=false, pvGhost=null, pvS=0, pvV=12;
-const PV_ACC=9, PV_BRK=22, PV_COAST=0.7, PV_VMIN=4, PV_VMAX=95;
-function pvSegLen(i){
-  const a=linePts[i].p, b=linePts[(i+1)%linePts.length].p;
-  return Math.hypot(b.x-a.x,b.z-a.z);
-}
+const PV_ACC=9, PV_BRK=22, PV_COAST=0.7, PV_VMIN=3, PV_VMAX=95;
 function previewStart(){
-  if(linePts.length<2 || !carGroup) return;
+  if(lineSmooth.length<2||!carGroup) return;
   if(!pvGhost){
     pvGhost=carGroup.clone(true);
     pvGhost.traverse(o=>{
@@ -3227,53 +3474,47 @@ function previewStart(){
   }
   pvGhost.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
+  dm('dmpreview').textContent='Stop';
   linePanel();
 }
 function previewStop(){
   previewOn=false;
   if(pvGhost) pvGhost.visible=false;
   const b=document.getElementById('linepreview'); if(b) b.textContent='Preview';
+  const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
   linePanel();
 }
 function previewReset(){ pvS=0; pvV=12; previewStop(); }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
 function previewStep(dt){
-  if(!previewOn||linePts.length<2||!pvGhost) return;
-  const n=linePts.length;
-  // which dot are we running away from -- that is the pedal in force now
-  let i=0, s=pvS, total=0;
-  for(let k=0;k<n;k++) total+=pvSegLen(k);
-  pvS=((pvS%total)+total)%total; s=pvS;
-  while(i<n && s>=pvSegLen(i)){ s-=pvSegLen(i); i++; }
-  if(i>=n){ i=n-1; s=0; }
-  const q=linePts[i];
-  const a = q.pedal==='thr' ? PV_ACC*q.pct/100
-          : q.pedal==='brk' ? -PV_BRK*q.pct/100
-          : -PV_COAST;
+  dotMenuTrack();
+  if(!previewOn||lineSmooth.length<2||!pvGhost) return;
+  const q=pedalAt(pvS);
+  const a = PV_ACC*q.thr/100 - PV_BRK*q.brk/100 - ((q.thr<=0&&q.brk<=0)?PV_COAST:0);
   pvV=clamp(pvV+a*dt,PV_VMIN,PV_VMAX);
   pvS+=pvV*dt;
-  const A=linePts[i].p, B=linePts[(i+1)%n].p;
-  const L=Math.max(pvSegLen(i),1e-3), f=clamp(s/L,0,1);
-  const x=A.x+(B.x-A.x)*f, z=A.z+(B.z-A.z)*f;
-  const g=groundAt(x,z,pvGhost.position.y||1e9);
-  pvGhost.position.set(x,(g.hit?g.y:A.y)+RIDE,z);
-  pvGhost.rotation.y=Math.atan2(B.x-A.x,B.z-A.z);
-  const sp=document.getElementById('pvspeed');
-  if(sp) sp.textContent=Math.round(pvV*3.6);
+  if(pvS>=lineLen){ previewReset(); return; }   // to the end of the line, and stop
+  const at=lineAt(pvS);
+  const g=groundAt(at.x,at.z,pvGhost.position.y||1e9);
+  pvGhost.position.set(at.x,(g.hit?g.y:at.y)+RIDE,at.z);
+  pvGhost.rotation.y=at.hdg;
+  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(pvV*3.6);
+  const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
 }
 
 /* ------------------------------------------------------- save and restore
-   Model-space, so it survives the loader re-anchoring the world. Heights are
-   re-derived from the ground on the way back in rather than stored. */
-const EDIT_KEY='f1sim.editor.v1';
+   The path is a constant in this file, so only the pedal points and the grid
+   need saving. Kept in localStorage so a reload doesn't cost an afternoon of
+   clicking; Copy is what brings them back into the file for good. */
+const EDIT_KEY='f1sim.editor.v2';
 let editRestored=false;
 function editSave(){
   if(!trackRoot) return;
   try{
     localStorage.setItem(EDIT_KEY,JSON.stringify({
       grid: gridPts.map(gridToModel),
-      line: linePts.map(q=>({ m:gridToModel(q.p), pedal:q.pedal, pct:Math.round(q.pct) }))
+      pedals: pedalPts.map(q=>[Math.round(q.s),Math.round(q.thr),Math.round(q.brk)])
     }));
   }catch(e){}
 }
@@ -3286,12 +3527,17 @@ function editModelToWorld(m){
 function editRestore(){
   if(editRestored||!trackRoot) return;
   editRestored=true;
+  // the path first: it is the thing everything else is measured along
+  linePath=SPA_LINE.map(editModelToWorld);
+  lineBuildCurve();
   let d=null;
   try{ d=JSON.parse(localStorage.getItem(EDIT_KEY)||'null'); }catch(e){}
-  if(!d) return;
-  if(Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
-  if(Array.isArray(d.line)) linePts=d.line.map(o=>({
-    p:editModelToWorld(o.m), pedal:o.pedal||null, pct:o.pct||0 }));
+  if(d){
+    if(Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
+    if(Array.isArray(d.pedals)) pedalPts=d.pedals.map(a=>({s:a[0],thr:a[1],brk:a[2]}));
+  }
+  if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
+  pedalSort();
   gridRedraw(); lineRedraw();
 }
 
@@ -3312,14 +3558,19 @@ canvas.addEventListener('pointerup',e=>{
     return;
   }
   if(moved<8 && gridMode && editTab==='line'){
-    // a dot under the cursor is a selection; anywhere else lays a new one down
-    const hit=lineDots.length?pickLineDot(e.clientX,e.clientY):-1;
-    if(hit>=0){ lineSel=hit; }
-    else{
-      const p=markScreenToGround(e.clientX,e.clientY);
-      if(p){ lineAdd(p); lineSel=linePts.length-1; }
+    /* An existing marker under the cursor opens its menu. Otherwise the click
+       has to land on the line itself to do anything -- a pedal instruction
+       off the path the car drives would mean nothing, so a miss is ignored
+       rather than guessed at. */
+    const post=pickPedalPost(e.clientX,e.clientY);
+    if(post>=0){ dotMenuOpen(post); lineRedraw(); linePanel(); return; }
+    const s=lineHitS(e.clientX,e.clientY);
+    if(s>=0){
+      pedalPts.push({s:s,thr:0,brk:0});
+      pedalSort();
+      dotMenuOpen(pedalPts.findIndex(q=>q.s===s));
+      lineRedraw(); linePanel(); editSave();
     }
-    lineRedraw(); linePanel(); editSave();
     return;
   }
   if(moved<8 && markMode){

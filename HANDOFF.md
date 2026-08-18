@@ -65,19 +65,40 @@ pack — front, middle or last.
 Grid slots carry no heading. All ten face the same way, so use the `spawnAt`
 heading for the track (212.3° at Spa) unless that turns out to be wrong.
 
-**Racing line tab — the optimum line, with pedals.** Click along the track to
-lay down big red dots: this is where the AI cars are meant to go. Click an
-existing dot to select it, then give it **one** pedal — Throttle or Brake,
-never both — and drag the number up or down to set the percentage. 100% is
-full throttle. A dot with no pedal set is a coast, and stays red; throttle
-turns it green, brake amber. **Copy** exports the whole line as
-`[x, z, pedal, percent]` rows.
+**Racing line tab.** Two separate things here, and keeping them separate is
+the whole design:
 
-**Preview** runs a faded copy of your own car round the line, driven by
+*The path* is the shape of the lap — `SPA_LINE` in `index.html`, 207 points
+clicked by hand, a full lap of 6.94 km closing to within 11 m of its start.
+It is drawn as a **centripetal Catmull-Rom curve** through those points, not
+straight segment-to-segment, so the corners are round like a real racing line
+instead of a chain of kinks. Centripetal specifically: the uniform form
+overshoots and loops back where control points bunch up, which is exactly
+what happens in the slow corners. The path says *where* the cars go and never
+*how fast*.
+
+*Pedal points* are sparse markers dropped **onto** that path. Each holds a
+throttle percentage and a brake percentage, and those stand until the next
+marker says otherwise. Zero and zero is a coast. Click the line to drop one;
+click a marker to open its menu, which floats over the marker in the 3D view
+and follows it as the camera moves. Drag either number up or down to set it.
+**A click that misses the line does nothing** — a pedal instruction that
+isn't on the path the car drives would mean nothing, so a miss is ignored
+rather than guessed at. The menu's Undo deletes the marker whose menu is
+open; the panel's Undo removes the last one placed.
+
+The line is only drawn while this tab is open. It is authoring scaffolding,
+not part of the race.
+
+**Preview** runs a faded copy of your own car along the line, driven by
 nothing but those pedal numbers — so what you are watching is exactly what
-the numbers say, not a simulation of a driver. It reads the values live, so
-you can keep editing dots while it runs and each change takes effect next lap.
-**Reset** puts it back to the start of the line.
+the numbers say, not a simulation of a driver. It reads them live, so a value
+changed mid-run takes effect as soon as the car reaches that stretch. It runs
+from the start of the line to the end and stops. **Reset** puts it back.
+
+The preview's rates (`PV_ACC` 9 m/s², `PV_BRK` 22 m/s²) are placeholders, not
+the car's real physics — it shows the shape of the pace, not lap times. Swap
+them for the real values when the AI is built.
 
 Not built yet, deliberately: the AI itself. None of the above drives anything
 in a race yet — it is the authored data the AI will read.
