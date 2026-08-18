@@ -3522,6 +3522,35 @@ function pvTrackProgress(){
   pvIdx=bi; pvS=lineCum[bi];
   return Math.sqrt(bd);                       // how far off the line it is
 }
+/* The ground under the ghost, sampled the way the player's is. This is what
+   was wrong before: a single point test called any triangle tagged grass
+   "on grass" at full strength, so the preview car dragged and bogged its way
+   round a lap the real car does at full chat. The player never reads it that
+   way -- it takes a fraction over a patch and ignores anything under 15%,
+   because the sandy edging beside the road is not a gravel trap. Same rule
+   here, over a ring of probes about the size of the car. */
+const PV_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0};
+const PV_PROBE=[[0,0],[1.4,0],[-1.4,0],[0,2.4],[0,-2.4],[1.0,1.8],[-1.0,1.8],
+                [1.0,-1.8],[-1.0,-1.8]];
+function pvSurface(refY){
+  const fx=Math.sin(pv.hdg), fz=Math.cos(pv.hdg);
+  let hits=0, lo=0, gr=0;
+  for(const [rx,rz] of PV_PROBE){
+    // probe offsets are in the car's own frame, so the patch turns with it
+    const x=pv.wx + fz*rx + fx*rz;
+    const z=pv.wz - fx*rx + fz*rz;
+    const g=groundAt(x,z,refY);
+    if(!g.hit) continue;
+    hits++; if(g.loose) lo++; else if(g.grass) gr++;
+  }
+  const raw  = hits>0 ? lo/hits : 0;
+  const rawG = hits>0 ? gr/hits : 0;
+  PV_SURF.looseFrac = clamp((raw -0.15)/0.25, 0, 1);
+  PV_SURF.loose     = PV_SURF.looseFrac > 0;
+  PV_SURF.grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
+  PV_SURF.grass     = PV_SURF.grassFrac > 0 && PV_SURF.looseFrac <= 0;
+  return PV_SURF;
+}
 function previewStep(dt){
   dotMenuTrack();
   if(!previewOn||lineSmooth.length<2||!pvGhost) return;
@@ -3531,61 +3560,42 @@ function previewStep(dt){
 
   const q=pedalAt(pvS);
   const kph=pv.speed*3.6;
-  const g=groundAt(pv.wx,pv.wz,pvGhost.position.y);
-  const loose=!!g.loose, grass=!!g.grass;
+  const surf=pvSurface(pvGhost.position.y);
 
-  /* Pedals. The same three branches as drive(), scaled by the percentage on
-     the marker instead of by a key being down or not. */
-  if(q.thr>0){
-    const v=pv.speed/MAXSPEED;
-    const bog = loose ? 1-0.121 : grass ? 1-0.06 : 1;
-    pv.speed += 26.0*(1.0-v*v)*bog*dt*(q.thr/100);
-  }
-  if(q.brk>0) pv.speed -= 46*dt*(q.brk/100);
-  if(q.thr<=0 && q.brk<=0) pv.speed -= (0.8 + pv.speed*0.028)*dt;
-  pv.speed=clamp(pv.speed,0,MAXSPEED);
+  // the engine and the brakes, shared with the player -- not a copy of them
+  applyPedals(pv, q.thr/100, q.brk/100, surf, dt);
 
   /* Steering: pure pursuit at a point up the line, the distance ahead growing
-     with speed so it doesn't saw at the wheel on a straight. The steering
-     angle it asks for then goes through exactly the same rack the player's
-     does -- speed-scaled lock, same slew -- so it cannot ask for more lock
-     than the car has. */
+     with speed so it doesn't saw at the wheel on a straight. The angle it asks
+     for goes through the same speed-scaled lock and the same rack the player's
+     does, so it can never ask for more lock than the car has. */
   const look=clamp(7+pv.speed*0.62,9,55);
-  let ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
+  const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
   const T=lineSmooth[ti];
   const fx=Math.sin(pv.hdg), fz=Math.cos(pv.hdg);
   const dx=T.x-pv.wx, dz=T.z-pv.wz;
   const L=Math.max(Math.hypot(dx,dz),1e-3);
   const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
-  const kappa=2*lat/(L*L);                     // arc that reaches the target
+  const kappa=2*lat/(L*L);                     // the arc that reaches the target
   pv.lockF += (lockAt(kph)-pv.lockF)*(1-Math.pow(0.02,dt));
   const want=clamp(-STEER_RATIO*Math.atan(WHEELBASE*kappa),
                    -STEER_LOCK*pv.lockF, STEER_LOCK*pv.lockF);
   pv.steerAng += (want-pv.steerAng)*(1-Math.pow(0.0009,2.2*dt));
 
-  /* Yaw, capped by grip. This cap is the honest bit: ask the car to turn
-     harder than A_GRIP allows at this speed and it simply will not, so a
-     corner taken at the wrong throttle runs wide and stays wide. */
-  const v=pv.speed;
-  const dTyre=-pv.steerAng/STEER_RATIO;
-  let yawRate=v*Math.tan(dTyre)/WHEELBASE;
-  const slick = grass ? 1-0.465 : 1;
-  const yawMax = v>0.5 ? A_GRIP*turnBoost(kph)*slick/v : 8;
-  yawRate=clamp(yawRate,-yawMax,yawMax);
-
-  // and the surface takes its cut, same rates as the player gets
-  if(loose)      pv.speed=Math.max(0,pv.speed-(2.5+pv.speed*1.6)*dt);
-  else if(grass) pv.speed=Math.max(0,pv.speed-(2.5+pv.speed*1.6)*0.25*dt);
+  // and the grip ceiling, shared: ask for more than it has and it runs wide
+  const yawRate=yawFor(pv.speed, pv.steerAng, surf);
+  surfaceDrag(pv, surf, dt);
 
   pv.hdg += yawRate*dt;
-  pv.wx  += Math.sin(pv.hdg)*v*dt;
-  pv.wz  += Math.cos(pv.hdg)*v*dt;
+  pv.wx  += Math.sin(pv.hdg)*pv.speed*dt;
+  pv.wz  += Math.cos(pv.hdg)*pv.speed*dt;
 
   const gh=groundAt(pv.wx,pv.wz,pvGhost.position.y);
-  pvGhost.position.set(pv.wx,(gh.hit?gh.y:g.y)+RIDE,pv.wz);
+  if(gh.hit) pvGhost.position.set(pv.wx,gh.y+RIDE,pv.wz);
+  else       pvGhost.position.set(pv.wx,pvGhost.position.y,pv.wz);
   pvGhost.rotation.y=pv.hdg;
 
-  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(kph);
+  const sp=document.getElementById('pvspeed'); if(sp) sp.textContent=Math.round(pv.speed*3.6);
   const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
   const ow=document.getElementById('pvoff');
   if(ow){ ow.textContent=off.toFixed(0);
@@ -3916,6 +3926,63 @@ function resetToTrack(){
   clearDebris();
 }
 
+/* ------------------------------------------------------- shared physics core
+   One copy of the engine, the brakes and the grip ceiling, called by both the
+   player's drive() and the preview car. It used to be two copies, and they
+   drifted immediately: the preview reimplemented the same formulas against a
+   single-point surface test instead of the player's probe fraction, so it
+   picked up gravel drag and engine bog that the real car never sees and
+   crawled around wondering why. Anything that changes how the car goes,
+   stops or turns belongs in here, so there is nowhere for the two to disagree.
+
+   The state object is whatever is being driven -- carState for the player, pv
+   for the ghost. Pedals are 0..1 so a key ("down" = 1) and a marker (a
+   percentage) can both drive it. */
+function applyPedals(st, thr, brk, surf, dt){
+  if(thr>0){
+    // drag rises with v^2, so: hard launch, progressive knee, flat top end.
+    // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
+    const v=st.speed/MAXSPEED;
+    /* Gravel robs the engine as well as dragging on the car. Without this the
+       throttle simply balances the drag and you sit there driving at a steady
+       20 kph through a trap, which is what was happening: the car should bog
+       down and stay bogged, not find an equilibrium and cruise. */
+    /* Solved rather than dialled: the coefficient is whatever makes throttle
+       and gravel drag balance at the speed a trap should hold you to. 0.88 left
+       12% of the engine and pinned the car at a standstill, 0.55 balanced at
+       20 kph, and 0.121 balances at 45. Change the target speed and this is the
+       one number that follows from it. */
+    const bog = surf.loose ? 1 - 0.121*surf.looseFrac
+              : surf.grass ? 1 - 0.06*surf.grassFrac : 1;
+    st.speed += 26.0*(1.0 - v*v)*bog*dt*thr;
+  }
+  else if(brk>0) st.speed -= 46*dt*brk;
+  else st.speed -= (0.8 + st.speed*0.028)*dt;
+  st.speed=clamp(st.speed,0,MAXSPEED);
+}
+/* The yaw the car actually gets for a given steering angle. The geometric
+   rate alone would allow ~17 g at top speed, so it is capped at what the
+   tyres could hold -- which is also what gives the car its understeer, and
+   what makes a preview run wide when the throttle asked for the impossible. */
+function yawFor(speed, steerAng, surf){
+  const dTyre=-steerAng/STEER_RATIO;                 // +ve = left
+  let yawRate=speed*Math.tan(dTyre)/WHEELBASE;
+  const slick = surf.grass ? 1 - 0.465*surf.grassFrac : 1;
+  const yawMax = speed>0.5 ? A_GRIP*turnBoost(speed*3.6)*slick/speed : 8;
+  return clamp(yawRate,-yawMax,yawMax);
+}
+/* What the surface takes off you for being on it. */
+function surfaceDrag(st, surf, dt){
+  if(surf.loose)      st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*surf.looseFrac*dt);
+  else if(surf.grass) st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*0.25*surf.grassFrac*dt);
+}
+const PLAYER_SURF={loose:false,looseFrac:0,grass:false,grassFrac:0};
+function playerSurf(){
+  PLAYER_SURF.loose=onLoose; PLAYER_SURF.looseFrac=looseFrac;
+  PLAYER_SURF.grass=onGrass; PLAYER_SURF.grassFrac=grassFrac;
+  return PLAYER_SURF;
+}
+
 function drive(dt){
   // up/down arrows now trim the seat height, so they are no longer throttle
   // and brake -- W and S are the drive controls
@@ -3944,29 +4011,8 @@ function drive(dt){
      still read below for the engine note, so holding W on the line revs the
      car and you launch the instant the panel clears. */
   const gridded = startPhase!=='go';
-  if(gridded){
-    carState.speed=0;
-  }
-  else if(thr){
-    // drag rises with v^2, so: hard launch, progressive knee, flat top end.
-    // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
-    const v=carState.speed/MAXSPEED;
-    /* Gravel robs the engine as well as dragging on the car. Without this the
-       throttle simply balances the drag and you sit there driving at a steady
-       20 kph through a trap, which is what was happening: the car should bog
-       down and stay bogged, not find an equilibrium and cruise. */
-    /* Solved rather than dialled: the coefficient is whatever makes throttle
-       and gravel drag balance at the speed a trap should hold you to. 0.88 left
-       12% of the engine and pinned the car at a standstill, 0.55 balanced at
-       20 kph, and 0.121 balances at 45. Change the target speed and this is the
-       one number that follows from it. */
-    const bog = onLoose ? 1 - 0.121*looseFrac
-              : onGrass ? 1 - 0.06*grassFrac : 1;
-    carState.speed += 26.0*(1.0 - v*v)*bog*dt;
-  }
-  else if(brk) carState.speed -= 46*dt;
-  else carState.speed -= (0.8 + carState.speed*0.028)*dt;
-  carState.speed=clamp(carState.speed,0,MAXSPEED);
+  if(gridded) carState.speed=0;
+  else applyPedals(carState, thr?1:0, brk?1:0, playerSurf(), dt);
 
   /* Steering is entirely yours now -- there is no longer any curvature term
      holding the car to the crown of the road. The speed-scaled lock does real
@@ -4025,14 +4071,10 @@ function drive(dt){
        and stable on a keyboard. The geometric yaw rate alone would allow
        ~17 g at top speed, so it is capped at what the tyres could actually
        hold -- which is also what gives the car its understeer at speed. */
-    const dTyre=-steerAng/STEER_RATIO;              // +ve = left
-    yawRate=v*Math.tan(dTyre)/WHEELBASE;
     /* Grass is slippery rather than draggy: what it takes away is grip. The
        yaw ceiling is what represents grip here, so cutting it means the car
        simply will not turn as hard on grass -- it washes out and runs on. */
-    const slick = onGrass ? 1 - 0.465*grassFrac : 1;   // a quarter less slippery
-    const yawMax = v>0.5 ? A_GRIP*turnBoost(v*3.6)*slick/v : 8;
-    yawRate=clamp(yawRate,-yawMax,yawMax);
+    yawRate=yawFor(v, steerAng, playerSurf());
 
     if(FREEROAM){
       /* Gravel. The surface under the car is already known -- the height field
@@ -4055,12 +4097,12 @@ function drive(dt){
            the bog had already cut to 12% it pinned the car at a standstill --
            gravel you cannot crawl out of at all. 2.5 leaves it draggy at rest
            while 1.6v still scrubs 60 m/s2 off a car arriving at 300. */
-        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*f*dt);
+        surfaceDrag(carState, playerSurf(), dt);
         looseSpray += carState.speed*f*dt;
       }
       else if(onGrass){
         // a quarter of gravel's retardation, same shape
-        carState.speed = Math.max(0, carState.speed - (2.5 + carState.speed*1.6)*0.25*grassFrac*dt);
+        surfaceDrag(carState, playerSurf(), dt);
       }
       carState.hdg += yawRate*dt;
       carState.wx  += Math.sin(carState.hdg)*v*dt;

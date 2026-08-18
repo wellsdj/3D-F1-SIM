@@ -91,10 +91,24 @@ The line is only drawn while this tab is open. It is authoring scaffolding,
 not part of the race.
 
 **Preview** runs a faded copy of your own car along the line, and *copy* is
-doing real work there: it runs the same physics `drive()` does. Same engine
-curve (`26.0*(1-v²)`), same 46 m/s² braking, same speed-scaled steering lock
-and rack, the same `A_GRIP` ceiling on yaw rate, the same gravel and grass
-penalties underneath it. The camera moves to a chase rig behind it for as
+doing real work there: it runs the *same code* `drive()` does, not a
+reimplementation of it. The engine, the brakes, the coast drag, the grip
+ceiling on yaw and the surface penalties live in `applyPedals` / `yawFor` /
+`surfaceDrag`, and both cars call them. **If you change how the car goes,
+stops or turns, change it there and both stay in step.**
+
+That refactor exists because the two *had* drifted: the preview reimplemented
+the same formulas against a single-point ground test rather than the player's
+probe fraction, so it read the sandy edging beside the road as a gravel trap,
+took full grass drag and engine bog for most of a lap, and crawled round
+wondering why. The player has never read the surface that way — it takes a
+fraction over a patch of probes and ignores anything under 15%. The ghost now
+samples a ring of nine probes the size of the car and applies the same rule.
+
+The one thing the ghost does *not* share is the driving aids (`AIDS`), which
+curve and slew keyboard input. They compensate for a key being all-or-nothing;
+the AI steers with a real number, so it uses the raw rack. Nothing about the
+car's capability differs — same lock, same grip, same engine. The camera moves to a chase rig behind it for as
 long as it runs, and hands the view back when it stops.
 
 It is **not** slid along the line. It steers at the line by pure pursuit and
