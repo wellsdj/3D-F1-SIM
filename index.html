@@ -4368,7 +4368,7 @@ function frame(now){
       : 0;
     slipAng += (slipT-slipAng)*(1-Math.pow(0.05,dt));
     carGroup.rotation.order='YXZ';
-    carGroup.rotation.set(-carPitch, h+slipAng, carRoll);
+    carGroup.rotation.set(-carPitch, carState.hdg+slipAng, carRoll);
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
