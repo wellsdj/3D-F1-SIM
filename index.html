@@ -3585,7 +3585,7 @@ function linePanel(){
       ' · pedal <b id="pvpedal">lift</b></div>'+
       '<div style="opacity:.7">accel <b id="pvacc">0 / 0</b> m/s² · '+
       '<b id="pvsurf">road</b></div>'+
-      '<div style="opacity:.7"><b id="pvoff">0</b> m off the line</div>'
+      '<div style="opacity:.7">lap <b id="pvlapt">0:00.0</b> · last <b id="pvlast">--</b></div>'
     : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
       'Click a point to set throttle and brake.</div>';
 }
@@ -3639,8 +3639,8 @@ document.getElementById('linecopy').onclick=e=>{
    (1 - v^2) knee, same top end. */
 let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
     pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
-    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0,
-    pvQ={thr:0,brk:0};
+    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0, pvDist=0,
+    pvLapT=0, pvLastLap=0, pvQ={thr:0,brk:0};
 /* Flat out, on by default: the throttle stays on the floor for the whole line
    and the markers are not consulted at all. It is the plain question -- what
    does this car do on this line, driven the way you drive it -- and it is the
@@ -3682,8 +3682,8 @@ function pvBuild(){
   pvWingL=pvTwin(wingL); pvWingR=pvTwin(wingR);
   /* Aids on if they are on for you. They shape a keyboard's all-or-nothing
      input, and this driver is working a keyboard, so it wants exactly what
-     you have -- see pvStick, where the driver compensates for them rather
-     than the car being given a different rack. */
+     you have. Nothing steers it any more -- it is carried along the line
+     itself -- but the flag is what the other nine cars will want. */
   PVCAR=makeCar(pvGroup, AIDS);
   PVCAR.infGrip=true;              // it turns as hard as it is asked to
 }
@@ -3704,6 +3704,7 @@ function previewStart(){
      engine bog still applied, which reads as a car that will not pull away. */
   probeCar(PVCAR.st.wx, PVCAR.st.wz, PVCAR.st.hdg, PVCAR.groundY-RIDE, PVCAR.surf);
   pvIdx=0; pvS=0; pvPhase=0; pvAcc=0; pvPrevSpd=0; pvHeldT=0; pvHeldB=0; pvLap=0;
+  pvDist=0; pvLapT=0; pvLastLap=0;
   pvGroup.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
   dm('dmpreview').textContent='Stop';
@@ -3716,7 +3717,8 @@ function previewStop(){
   const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
   linePanel();
 }
-function previewReset(){ previewStop(); pvIdx=0; pvS=0; if(PVCAR) PVCAR.st.speed=0; }
+function previewReset(){ previewStop(); pvIdx=0; pvS=0; pvDist=0; pvLap=0;
+                        pvLapT=0; if(PVCAR) PVCAR.st.speed=0; }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
 /* Flat out ignores the markers entirely and holds the throttle down for the
@@ -3736,25 +3738,6 @@ document.getElementById('lineflat').onclick=()=>{
 };
 pvFlatBtn();
 
-/* How far round it has got. Searched forward from where it was, over a window
-   rather than the whole lap, so a car that has run wide keeps a sensible idea
-   of its progress instead of snapping to some other part of the circuit that
-   happens to pass nearby -- which at Spa would be the return leg of every
-   hairpin. */
-function pvTrackProgress(){
-  const N=lineSmooth.length, win=Math.ceil(90/LINE_STEP);
-  let bi=pvIdx, bd=Infinity;
-  for(let k=0;k<win;k++){
-    // round the join on a closed lap, and stop at the end of an open one
-    const i=lineClosed?(pvIdx+k)%N:Math.min(pvIdx+k,N-1);
-    const dx=lineSmooth[i].x-PVCAR.st.wx, dz=lineSmooth[i].z-PVCAR.st.wz;
-    const d=dx*dx+dz*dz;
-    if(d<bd){ bd=d; bi=i; }
-  }
-  if(bi<pvIdx) pvLap++;         // searched forward, so this only means it wrapped
-  pvIdx=bi; pvS=lineCum[bi];
-  return Math.sqrt(bd);                       // how far off the line it is
-}
 /* A pedal, worked by a pair of hands. Down or up -- never "some fraction of
    an engine". Flat out is held; anything less is feathered on and off within
    a tenth of a second, so 60% is the pedal down for 60% of the time and the
@@ -3764,31 +3747,9 @@ function pvPedal(pct){
   if(pct<=0.5)  return 0;
   return ((pvPhase%PV_PULSE)/PV_PULSE) < pct/100 ? 1 : 0;
 }
-/* The stick position that gets the wheel angle it wants.
-
-   The aids are on if they are on for you, and they curve the input and soften
-   it with speed before it reaches the rack, so asking for half lock does not
-   give half lock. A driver compensates for that by turning the wheel further,
-   and so does this: the curve is inverted here, in the driver, leaving the
-   car's rack, lock and grip exactly as they are on yours. Turning the aids
-   off for the preview would have been the other way round -- a different car,
-   which is the whole thing we are trying not to have. */
-function pvStick(C, wantAng){
-  const avail=Math.max(STEER_LOCK*C.lockF,1e-3);
-  let g=clamp(wantAng/avail,-1,1);
-  if(C.aids){
-    const fast=clamp(C.st.speed*3.6/300,0,1);
-    const need=clamp(Math.abs(g)/Math.max(1-0.34*fast,1e-3),0,1);
-    // invert inp = 0.72*x^2 + 0.28*x
-    const x=(-0.28+Math.sqrt(0.0784+2.88*need))/1.44;
-    g=Math.sign(g)*clamp(x,0,1);
-  }
-  return g;
-}
-/* The driver. Three numbers, exactly what a pair of hands would produce:
-   the two pedals off the marker in force, and a stick position from pure
-   pursuit -- aim at a point up the line, further ahead the faster it is
-   going, and ask for the arc that reaches it. */
+/* The driver: the two pedals off the marker in force. There is no steering
+   input any more -- the car is on the line rather than steered at it, so
+   where it goes is the line's business and only how fast is the driver's. */
 function pvInputs(C,dt){
   let q=pvFlat ? PEDAL_LAUNCH : pedalAt(pvS, pvLap>0);
   /* A marker holds until the next one -- but a brake marker has nothing left
@@ -3803,31 +3764,62 @@ function pvInputs(C,dt){
   }
   pvPhase+=dt; pvQ=q;
   pvHeldT=pvPedal(q.thr); pvHeldB=pvPedal(q.brk);
-  const look=clamp(7+C.st.speed*0.62,9,55);
-  const N=lineSmooth.length, ahead=pvIdx+Math.round(look/LINE_STEP);
-  // it aims across the join too, or it would drive at the last point of the
-  // lap as though the road stopped there
-  const T=lineSmooth[lineClosed?ahead%N:Math.min(ahead,N-1)];
-  const fx=Math.sin(C.st.hdg), fz=Math.cos(C.st.hdg);
-  const dx=T.x-C.st.wx, dz=T.z-C.st.wz;
-  const L=Math.max(Math.hypot(dx,dz),1e-3);
-  const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
-  const kappa=2*lat/(L*L);                     // the arc that reaches the target
-  const wantAng=-STEER_RATIO*Math.atan(WHEELBASE*kappa);
-  return { thr:pvHeldT, brk:pvHeldB, steer:pvStick(C,wantAng) };
+  return { thr:pvHeldT, brk:pvHeldB };
+}
+/* Curvature of the line at a distance along it, from the heading a few metres
+   either side. It is what the front wheels are turned to. */
+function lineCurv(s){
+  const h0=lineAt(pvWrap(s-2)).hdg, h1=lineAt(pvWrap(s+2)).hdg;
+  let d=h1-h0;
+  while(d> Math.PI) d-=2*Math.PI;
+  while(d<-Math.PI) d+=2*Math.PI;
+  return d/4;
+}
+function pvWrap(s){
+  if(!lineLen) return 0;
+  if(!lineClosed) return clamp(s,0,lineLen);
+  s%=lineLen; return s<0?s+lineLen:s;
 }
 function previewStep(dt,t){
   dotMenuTrack();
-  if(!previewOn||lineSmooth.length<2||!PVCAR) return;
-  // the curve can be rebuilt underneath a running preview -- L, dragging a
-  // point -- and it comes back a different length, so never index off the end
-  if(pvIdx>=lineSmooth.length){ pvIdx=0; pvS=0; }
-  const off=pvTrackProgress();
-  // an open line runs out; a closed one is a lap, so it keeps going round
-  if(!lineClosed && pvIdx>=lineSmooth.length-2){ previewReset(); return; }
+  if(!previewOn||lineSmooth.length<2||!PVCAR||!lineLen) return;
 
+  /* The AI is on the line, and "on" is meant literally: its position is a
+     distance along the curve and its heading is the curve's own tangent, so
+     it cannot drift off, cut an apex or run wide. That is the whole point of
+     it -- it is there to show what the line is worth, not to audition a
+     driver, and a car that misses the apex by four metres is answering a
+     question nobody asked.
+
+     Steering it there by pure pursuit could never do this, whatever the grip:
+     the aim point runs up to 55 m ahead, and an aim point that far up the road
+     cuts every corner it meets. The rack adds its own lag on top -- a 0.23 s
+     ramp on the input is 18 m of road at 300 kph.
+
+     Everything along the line is still the shared car, unchanged: the same
+     applyPedals for the engine and brakes, the same coast drag, the same
+     gravel and grass under the wheels. Speed is the car's; the path is the
+     line's. */
   const inp=pvInputs(PVCAR,dt);
-  stepCar(PVCAR, inp, dt);
+  applyPedals(PVCAR.st, inp.thr, inp.brk, PVCAR.surf, dt);
+  surfaceDrag(PVCAR.st, PVCAR.surf, dt);
+
+  const prev=pvDist;
+  pvDist=pvWrap(pvDist+PVCAR.st.speed*dt);
+  pvLapT+=dt;
+  // it is on the line to the metre, so the lap time is now a real number about
+  // the pedal markers rather than about how well something drove
+  if(pvDist<prev){ pvLap++; pvLastLap=pvLapT; pvLapT=0; }
+  if(!lineClosed && pvDist>=lineLen-0.5){ previewReset(); return; }
+
+  const at=lineAt(pvDist);
+  PVCAR.st.wx=at.x; PVCAR.st.wz=at.z; PVCAR.st.hdg=at.hdg;
+  pvS=pvDist;
+  pvIdx=Math.min(lineSmooth.length-1, Math.round(pvDist/LINE_STEP));
+  // the front wheels point where the line is going, so it looks steered
+  // rather than slid: the angle a car of this wheelbase would need
+  PVCAR.steerAng=clamp(-STEER_RATIO*Math.atan(WHEELBASE*lineCurv(pvDist)),
+                       -STEER_LOCK, STEER_LOCK);
   placeCar(PVCAR, dt, t);
   // and its wheels turn, by the same v/r the player's do -- a car gliding on
   // frozen wheels reads as slow however fast the number says it is going
@@ -3868,9 +3860,14 @@ function previewStep(dt,t){
   }
   const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
   const lp=document.getElementById('pvlap'); if(lp) lp.textContent=pvLap+1;
-  const ow=document.getElementById('pvoff');
-  if(ow){ ow.textContent=off.toFixed(0);
-          ow.style.color = off>6 ? '#ff5544' : ''; }
+  const lt=document.getElementById('pvlapt');
+  if(lt) lt.textContent=pvClock(pvLapT);
+  const ll=document.getElementById('pvlast');
+  if(ll) ll.textContent=pvLastLap?pvClock(pvLastLap):'--';
+}
+function pvClock(sec){
+  const m=Math.floor(sec/60), s=sec-m*60;
+  return m+':'+(s<10?'0':'')+s.toFixed(1);
 }
 
 /* ------------------------------------------------------- save and restore
