@@ -63,8 +63,8 @@
   #gridpanel .tabs{margin-bottom:9px}
   #gridpanel button.tab{opacity:.5;background:none}
   #gridpanel button.tab.on{opacity:1;background:rgba(255,255,255,.14);color:var(--amber)}
-  #panegrid,#paneline{display:none}
-  #panegrid.on,#paneline.on{display:block}
+  #panegrid{display:none}
+  #panegrid.on{display:block}
   #linesel{margin:0 0 8px;font-size:10.5px;line-height:1.7;opacity:.85}
   #linesel b{color:var(--amber);font-weight:600}
   #pedalrow{display:flex;gap:6px;margin:7px 0 6px}
@@ -76,35 +76,6 @@
   #pedalhint{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.45}
   /* the dot menu tracks its point across the screen, so it is positioned from
      the frame loop and only ever laid out here */
-  #dotmenu{position:fixed;left:0;top:0;z-index:9;display:none;width:172px;
-           transform:translate(-50%,-100%);margin-top:-14px;
-           font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--paper);
-           background:rgba(0,0,0,.78);border:1px solid var(--line);border-radius:4px;
-           padding:9px 10px;box-shadow:0 6px 22px rgba(0,0,0,.5)}
-  #dotmenu.on{display:block}
-  #dotmenu h4{margin:0 0 7px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
-              font-weight:600;opacity:.6}
-  #dotmenu h4 span{color:var(--amber);opacity:1}
-  #dotmenu .row{display:flex;gap:5px;margin-top:5px}
-  #dotmenu button{font:inherit;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
-                  color:var(--paper);background:rgba(255,255,255,.07);cursor:pointer;
-                  border:1px solid var(--line);border-radius:3px;padding:5px 4px;flex:1}
-  #dotmenu button:hover{background:rgba(255,255,255,.16)}
-  #dotmenu button.on{background:var(--amber);color:#111;border-color:var(--amber)}
-  #dotmenu .pedal{display:flex;align-items:center;justify-content:space-between;gap:8px;
-                  padding:3px 0}
-  #dotmenu .pedal label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;opacity:.6}
-  #dotmenu .val{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;
-                letter-spacing:-.02em;cursor:ns-resize;user-select:none;touch-action:none;
-                padding:1px 4px;border-radius:3px}
-  #dotmenu .val:hover{background:rgba(255,255,255,.10)}
-  #dotmenu .val.thr{color:#33ff66}
-  #dotmenu .val.brk{color:#ffbb00}
-  #dotmenu .val small{font-size:10px;letter-spacing:.12em;opacity:.55;margin-left:2px}
-  #dmhint{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.4;
-          text-align:center;margin-top:2px}
-  #dmstate{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);
-           opacity:.8;text-align:center;min-height:12px}
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
@@ -143,30 +114,65 @@
            letter-spacing:.3em;color:#37e06a;text-shadow:0 0 22px rgba(55,224,106,.75);
            pointer-events:none;opacity:0;transition:opacity .45s ease;z-index:6}
   #golabel.show{opacity:1}
+  /* ------------------------------------------------ settings, on the way in */
+  #settings{margin:22px auto 0;max-width:430px;text-align:left}
+  #settings h5{margin:0 0 9px;font-family:var(--mono);font-size:9px;letter-spacing:.34em;
+               text-transform:uppercase;opacity:.5;font-weight:400}
+  #tlpick{display:flex;gap:8px}
+  #tlpick button{flex:1;font:inherit;font-family:var(--mono);font-size:10px;letter-spacing:.13em;
+                 text-transform:uppercase;color:#dfe7f1;cursor:pointer;
+                 background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.12);
+                 border-radius:9px;padding:11px 12px;text-align:left;line-height:1.5;
+                 transition:background .15s ease,border-color .15s ease}
+  #tlpick button:hover{background:rgba(255,255,255,.09)}
+  #tlpick button.on{background:rgba(255,176,32,.14);border-color:rgba(255,176,32,.55)}
+  #tlpick button b{display:block;font-size:11.5px;letter-spacing:.1em;margin-bottom:3px}
+  #tlpick button span{display:block;opacity:.55;letter-spacing:.06em;text-transform:none;
+                      font-size:9.5px}
+  #settings p.note{margin:11px 2px 0;font-family:var(--mono);font-size:9.5px;
+                   letter-spacing:.05em;opacity:.42;line-height:1.75;
+                   text-transform:none}
+
+  /* ---------------------------------------------------------- time trial
+     One column, centred, and nothing in it that is not a number you want
+     while you are driving. */
+  #tt{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:6;
+      font-family:var(--mono);text-align:center;pointer-events:none;
+      opacity:0;transition:opacity .35s ease}
+  #tt.show{opacity:1}
+  #ttcard{background:linear-gradient(180deg,rgba(10,13,19,.72),rgba(10,13,19,.34));
+          border:1px solid rgba(255,255,255,.10);border-radius:14px;
+          padding:9px 26px 12px;backdrop-filter:blur(10px);
+          box-shadow:0 14px 40px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06)}
+  .ttlbl{font-size:8.5px;letter-spacing:.34em;text-transform:uppercase;opacity:.62}
+  #tttime{font-size:clamp(30px,5.2vw,50px);font-weight:600;letter-spacing:-.01em;
+          font-variant-numeric:tabular-nums;line-height:1.02;color:#f2f6fb}
+  #tttime.hot{color:#37e06a}
+  #ttunder{display:flex;gap:26px;justify-content:center;margin-top:8px}
+  #ttunder b{display:block;font-size:15px;font-weight:600;letter-spacing:.02em;
+             font-variant-numeric:tabular-nums;color:var(--amber);margin-top:1px}
+  #ttunder .d b{color:#8fa3bb}
+  #ttunder b.up{color:#ff6b52} #ttunder b.dn{color:#37e06a}
+  /* the five gates, as five bars that fill as you cross them */
+  #ttpips{display:flex;gap:5px;justify-content:center;margin-top:9px}
+  #ttpips i{width:26px;height:4px;border-radius:2px;background:rgba(255,255,255,.16);
+            transition:background .18s ease, box-shadow .18s ease}
+  #ttpips i.on{background:#37e06a;box-shadow:0 0 10px rgba(55,224,106,.65)}
+  #ttpips i.miss{background:#ff6b52;box-shadow:0 0 10px rgba(255,107,82,.6)}
+  /* what just happened to your lap */
+  #ttflash{position:fixed;left:50%;top:31vh;transform:translateX(-50%);z-index:7;
+           font-family:var(--mono);text-align:center;pointer-events:none;
+           opacity:0;transition:opacity .3s ease}
+  #ttflash.show{opacity:1}
+  #ttflash .big{font-size:clamp(22px,4.6vw,46px);letter-spacing:.16em;font-weight:600}
+  #ttflash .sub{font-size:11px;letter-spacing:.22em;opacity:.75;margin-top:8px}
+  #ttflash.good .big{color:#37e06a;text-shadow:0 0 26px rgba(55,224,106,.5)}
+  #ttflash.bad .big{color:#ff6b52;text-shadow:0 0 26px rgba(255,107,82,.45)}
+  #ttflash.rec .big{color:var(--amber);text-shadow:0 0 30px rgba(255,176,32,.55)}
+
   /* the race: a countdown in the middle of the screen and a gap you can read
      without looking away from the road */
-  #racebox{position:fixed;left:50%;top:14vh;transform:translateX(-50%);text-align:center;
-           font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
-           font-size:12px;color:#e9eef5;opacity:0;transition:opacity .3s ease;
-           pointer-events:none;z-index:6;text-shadow:0 2px 12px rgba(0,0,0,.8)}
-  #racebox.show{opacity:.92}
-  #racegap{display:block;font-size:clamp(22px,4vw,40px);letter-spacing:.04em;
-           font-variant-numeric:tabular-nums;margin-top:2px}
-  #racegap.ahead{color:#37e06a} #racegap.behind{color:var(--amber)}
-  #raceend{position:fixed;left:50%;top:32vh;transform:translateX(-50%);text-align:center;
-           font-family:var(--mono);font-size:clamp(20px,4.4vw,44px);letter-spacing:.2em;
-           text-transform:uppercase;color:#e9eef5;opacity:0;transition:opacity .4s ease;
-           pointer-events:none;z-index:7;text-shadow:0 0 24px rgba(0,0,0,.9)}
-  #raceend.show{opacity:1}
-  #raceend small{display:block;font-size:12px;letter-spacing:.16em;opacity:.7;margin-top:10px}
   /* where the other car is, whether or not it is on the screen */
-  #aimark{position:fixed;left:0;top:0;transform:translate(-50%,-50%);text-align:center;
-          font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:#37e06a;
-          text-shadow:0 2px 10px rgba(0,0,0,.9);pointer-events:none;z-index:6;
-          opacity:0;transition:opacity .2s ease}
-  #aimark.show{opacity:.95}
-  #aiarrow{display:block;font-size:17px;line-height:1}
-  #aimark.edge #aidist{display:block;margin-top:1px}
   @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px}
                             #cmap{width:120px;height:138px;top:204px} }
   @media (max-height:620px){ #cmap{display:none} }
@@ -177,12 +183,11 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em><br>Under you <em id="uname">road</em><br>Frames <em id="fname">60</em><br>Detail <em id="dname">Full</em></div>
-<button id="gridtoggle">Editor</button>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Aids <em id="aname">On</em><br>Frames <em id="fname">60</em></div>
+<button id="gridtoggle" style="display:none">Editor</button>
 <div id="gridpanel">
   <div class="row tabs">
     <button id="tabgrid" class="tab">Grid</button>
-    <button id="tabline" class="tab">Racing line</button>
   </div>
 
   <div id="panegrid">
@@ -195,61 +200,15 @@
     </div>
   </div>
 
-  <div id="paneline">
-    <h4>Racing line <span id="linecount">0 points</span></h4>
-    <div id="linesel">
-      <div style="opacity:.55">Click the track to drop a point.<br>Click a dot to set its pedal.</div>
-    </div>
-    <div class="row">
-      <button id="linecopy">Copy</button>
-      <button id="lineundo">Undo</button>
-      <button id="lineclear">Clear</button>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <button id="linepreview">Preview</button>
-      <button id="linereset">Reset</button>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <button id="linerace" title="One lap, side by side off the line, against the AI">Race the AI</button>
-      <button id="linepace" title="How much of its grip the AI uses in a race. Lower is slower through corners, which is the only place it can beat you">Pace 75%</button>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <button id="lineauto" title="Work out the whole lap: every braking point, how hard, and where to get back on the throttle. Replaces the markers — then tweak them">Work out the pedals</button>
-    </div>
-  </div>
-
   <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
 </div>
 
-<!-- the menu that opens on the dot you click, floating over it in the 3D view -->
-<div id="dotmenu">
-  <h4>Point <span id="dmnum">01</span></h4>
-  <div class="pedal">
-    <label>Throttle</label>
-    <div class="val thr" id="dmthrval">0<small>%</small></div>
-  </div>
-  <div class="pedal">
-    <label>Brake</label>
-    <div class="val brk" id="dmbrkval">0<small>%</small></div>
-  </div>
-  <div id="dmhint">drag a number up · down</div>
-  <div id="dmstate"></div>
-  <div class="row">
-    <button id="dmpreview">Preview</button>
-    <button id="dmundo">Undo</button>
-  </div>
-  <div class="row" style="margin-top:5px"><button id="dmclose">Close</button></div>
-</div>
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
-  <div><kbd>W</kbd><kbd>S</kbd> throttle · brake</div>
-  <div><kbd>A</kbd><kbd>D</kbd> steering</div>
-  <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
-  <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights · <kbd>K</kbd> race the ai · <kbd>Q</kbd> detail</div>
-  <div>drag look · tap to cycle · scroll zoom</div>
+  <div><kbd>W</kbd><kbd>S</kbd> throttle · brake &nbsp; <kbd>A</kbd><kbd>D</kbd> steering</div>
+  <div><kbd>R</kbd> restart the lap &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail</div>
 </div>
 
 <div id="lights">
@@ -260,14 +219,30 @@
   <div class="col"><b></b><b></b></div>
 </div>
 <div id="golabel">GO</div>
-<div id="racebox"><span id="racelap">LAP 1</span><span id="racegap">--</span></div>
-<div id="raceend"><span id="raceendmsg"></span><small id="raceendsub"></small></div>
-<div id="aimark"><span id="aiarrow">▲</span><span id="aidist">0 m</span></div>
+<div id="tt"><div id="ttcard">
+  <div class="ttlbl">Lap</div>
+  <div id="tttime">0:00.00</div>
+  <div id="ttunder">
+    <div><span class="ttlbl">Best</span><b id="ttbest">--:--.--</b></div>
+    <div class="d"><span class="ttlbl">Last</span><b id="ttlast">--:--.--</b></div>
+  </div>
+  <div id="ttpips"><i></i><i></i><i></i><i></i><i></i></div>
+</div></div>
+<div id="ttflash"><div class="big" id="ttflashbig"></div><div class="sub" id="ttflashsub"></div></div>
 
 <div id="boot">
   <p id="bootmsg">Spa-Francorchamps</p>
   <div id="pick">
     <button data-track="spa22"><b>Spa-Francorchamps</b><span>2022 layout · free roam · 102 m of elevation</span></button>
+  </div>
+  <div id="settings">
+    <h5>Track limits</h5>
+    <div id="tlpick">
+      <button data-tol="1"><b>Relaxed</b><span>a metre past the white line before it counts</span></button>
+      <button data-tol="0"><b>Very strict</b><span>over the white line at all and the lap is gone</span></button>
+    </div>
+    <p class="note">Two wheels over is fine. Three is fine. A lap is only deleted
+       when all four are past the line — and when you miss one of the five gates.</p>
   </div>
   <div id="bar"><i></i></div>
 </div>
@@ -754,6 +729,7 @@ function fixSceneryMaterials(root){
    Only surfaces you could plausibly sit on are kept (normal.y > 0.3), which
    drops building walls, barrier faces and the backdrop, so the car cannot end
    up perched on the side of something. */
+let roadMesh=null;      // the racing surface, for track limits
 const HF={cell:6, minx:0, minz:0, nx:0, nz:0, bins:null, tri:null, tag:null};
 /* Which surfaces are loose. This model names its materials properly, so the
    gravel traps are found by name rather than guessed at from colour: sand_new
@@ -772,6 +748,9 @@ const LOOSE_RE=/sand_new|gravel/i;
    -- 1 for gravel, 2 for grass -- so a single probe still answers what is
    underneath the car and there is still only one spatial index. */
 const GRASS_RE=/grass/i;
+/* The kerb is where the white line ends. Everything from here out is over the
+   edge of the track, which is what track limits are measured against. */
+const KERB_RE=/kerb|curb|rumble/i;
 function buildHeightField(root){
   const tris=[], tags=[]; const v=new THREE.Vector3();
   root.updateWorldMatrix(true,true);
@@ -786,7 +765,15 @@ function buildHeightField(root){
        service road into one. */
     const ms=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
     const nm=(ms.length===1 && ms[0].name)?ms[0].name:'';
-    const loose = LOOSE_RE.test(nm) ? 1 : (GRASS_RE.test(nm) ? 2 : 0);
+    /* The racing surface itself gets a tag of its own, taken from the mesh
+       found by findRoadMesh rather than from a material name. That is what
+       track limits are measured against, and it has to be exact -- a grid of
+       cells cannot resolve a white line across seven kilometres of circuit,
+       which is why the roadDepth map is not built here at all: Spa's bounding
+       box would need 4.9 million cells and it gives up at 4.2. Triangles have
+       no such problem. */
+    const loose = (roadMesh && o===roadMesh) ? 4
+                : LOOSE_RE.test(nm) ? 1 : (GRASS_RE.test(nm) ? 2 : (KERB_RE.test(nm) ? 3 : 0));
     const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
     const n=idx?idx.count:pos.count;
     const P=new Float32Array(pos.count*3);
@@ -825,16 +812,18 @@ function buildHeightField(root){
   for(let i=0;i<nt;i++){ const [a,b,c,d]=span(i);
     for(let gx=a;gx<=b;gx++) for(let gz=c;gz<=d;gz++) items[fill[gz*HF.nx+gx]++]=i; }
   HF.tri=T; HF.tag=TAG; HF.bins={start,items};
-  let loose=0, grass=0;
-  for(let i=0;i<nt;i++){ if(TAG[i]===1) loose++; else if(TAG[i]===2) grass++; }
-  return {tris:nt, cells:HF.nx*HF.nz, refs:items.length, loose, grass};
+  let loose=0, grass=0, kerb=0, road=0;
+  for(let i=0;i<nt;i++){ const g=TAG[i]; if(g===1) loose++; else if(g===2) grass++;
+                         else if(g===3) kerb++; else if(g===4) road++; }
+  return {tris:nt, cells:HF.nx*HF.nz, refs:items.length, loose, grass, kerb, road};
 }
 
 /* Highest surface at (x,z) at or below refY+2, so driving under a bridge does
    not snap the car onto its deck. Falls back to the highest surface found. */
-const _gnd={y:0,nx:0,ny:1,nz:0,hit:false,loose:false,grass:false};
+const _gnd={y:0,nx:0,ny:1,nz:0,hit:false,loose:false,grass:false,kerb:false,road:false};
 function groundAt(x,z,refY){
-  _gnd.hit=false; _gnd.y=0; _gnd.nx=0; _gnd.ny=1; _gnd.nz=0; _gnd.loose=false; _gnd.grass=false;
+  _gnd.hit=false; _gnd.y=0; _gnd.nx=0; _gnd.ny=1; _gnd.nz=0;
+  _gnd.loose=false; _gnd.grass=false; _gnd.kerb=false; _gnd.road=false;
   if(!HF.bins) return _gnd;
   const gx=((x-HF.minx)/HF.cell)|0, gz=((z-HF.minz)/HF.cell)|0;
   if(gx<0||gz<0||gx>=HF.nx||gz>=HF.nz) return _gnd;
@@ -868,7 +857,8 @@ function groundAt(x,z,refY){
   if(fresh){ bI=hiI; _gnd.y=hiY; }
   const i=bI; if(i<0) return _gnd;
   _gnd.hit=true;
-  const tg=HF.tag?HF.tag[i]:0; _gnd.loose=(tg===1); _gnd.grass=(tg===2);
+  const tg=HF.tag?HF.tag[i]:0; _gnd.loose=(tg===1); _gnd.grass=(tg===2); _gnd.kerb=(tg===3);
+  _gnd.road=(tg===4);
   const ax=T[i*9],ay=T[i*9+1],az=T[i*9+2],bx=T[i*9+3],by=T[i*9+4],bz=T[i*9+5],
         cx=T[i*9+6],cy=T[i*9+7],cz=T[i*9+8];
   let nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay), ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az),
@@ -3031,29 +3021,23 @@ addEventListener('keydown',e=>{
   if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
-  /* L is the racing line: on a track with a hand-drawn one that means editing
-     its shape, and on Pinewood -- which generates its own -- it still means
-     showing or hiding it, as it always did. */
-  if(k==='l'){ editRestore();          // L works without opening the editor first
-               if(linePath.length) pathShow(!pathEdit);
-               else if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
-  if((k==='backspace'||k==='delete') && pathEdit && pathSel>=0){
-    e.preventDefault(); pathDelete();
-  }
-  if(k==='n' && pathEdit){
-    const t=pathText();
-    console.log('racing line path (model coordinates) — paste over SPA_LINE:\n'+t);
-    if(navigator.clipboard) navigator.clipboard.writeText(t).catch(()=>{});
-  }
+  if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
   if(k==='t'){ AIDS=!AIDS; updateStatus(); }
   if(k==='m'){ markMode=!markMode;
     if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
     updateStatus(); }
   if(k==='n'){ markExport(); }
   if(k==='p'){ gridShow(!gridMode); }
-  if(k==='k'){ raceOn?raceStop():raceStart(); }
   if(k==='q'){ detailFull=!detailFull; applyDetail(); }
-  if(k==='r') resetToTrack();                        // back onto the road, stopped
+  if(k==='r'){                                       // back to the line, new lap
+    if(TT.gates.length && trackRoot && FREEROAM){
+      const g=TT.gates[0];
+      carState.wx=g.x; carState.wz=g.z; carState.hdg=Math.atan2(g.dx,g.dz);
+      carState.speed=0; PLAYER.steerIn=0; PLAYER.steerAng=0;
+      PLAYER.groundY=g.y+RIDE; clearDebris();
+      ttStart();
+    } else resetToTrack();
+  }
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
@@ -3076,13 +3060,7 @@ let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
-  document.getElementById('lname').textContent =
-    pathEdit ? (pathSel>=0 ? 'Point '+(pathSel+1)+' picked · Undo or ⌫ deletes it'
-                           : 'Drag to move · click track to add · click a point to pick')
-             : (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
-  const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
-  const dt2=document.getElementById('dname'); if(dt2) dt2.textContent = detailFull?'Full':'Fast';
 }
 /* Full detail by default, and nothing downgrades it behind your back -- the
    old adaptive check dropped the scene to Low a couple of seconds after load
@@ -3241,21 +3219,16 @@ function gridShow(on){
   document.getElementById('gridpanel').classList.toggle('on',on);
   document.getElementById('gridtoggle').classList.toggle('hide',on);
   if(on){ editRestore(); editSetTab(editTab); }
-  else { previewStop(); lineSetVisible(); }   // close the editor, get your own car back
 }
 function editSetTab(tab){
-  editTab=tab;
-  document.getElementById('tabgrid').classList.toggle('on',tab==='grid');
-  document.getElementById('tabline').classList.toggle('on',tab==='line');
-  document.getElementById('panegrid').classList.toggle('on',tab==='grid');
-  document.getElementById('paneline').classList.toggle('on',tab==='line');
-  if(tab==='grid') gridPanel(); else linePanel();
-  lineSetVisible();          // the line is only drawn while its tab is open
+  editTab='grid';
+  document.getElementById('tabgrid').classList.add('on');
+  document.getElementById('panegrid').classList.add('on');
+  gridPanel();
 }
 document.getElementById('gridtoggle').onclick=()=>gridShow(true);
 document.getElementById('gridclose').onclick=()=>gridShow(false);
 document.getElementById('tabgrid').onclick=()=>editSetTab('grid');
-document.getElementById('tabline').onclick=()=>editSetTab('line');
 document.getElementById('gridundo').onclick=()=>{ gridPts.pop(); gridRedraw(); gridPanel(); editSave(); };
 document.getElementById('gridclear').onclick=()=>{ gridPts=[]; gridRedraw(); gridPanel(); editSave(); };
 function copyFlash(b,text){
@@ -3268,995 +3241,347 @@ document.getElementById('gridcopy').onclick=e=>{
   copyFlash(e.currentTarget,t);
 };
 
-/* --------------------------------------------------------------- racing line
-   Two separate things, and keeping them separate is the whole design:
+/* --------------------------------------------------------------- time trial
+   Drive a lap, beat your own lap. Everything here exists to make that one
+   sentence honest: that the time on the screen was set on this circuit, all
+   the way round, and not by cutting the hill at Raidillon.
 
-   THE PATH is the shape of the lap -- SPA_LINE, 207 points clicked by hand in
-   the running game, drawn as a smoothed curve through them rather than
-   straight segment to segment, so the corners are round like a real line and
-   not a chain of kinks. The path carries no pedal information at all.
+   FIVE GATES round the lap and one on the start line. Each is a line across
+   the track, sixteen metres either side of the racing line -- wide enough to
+   take in the whole road, the kerbs, and a few metres of grass past them, so
+   a wheel over the edge does not cost you a lap you actually drove. Cross all
+   five and the lap counts. Miss one and it does not, and it says which.
 
-   PEDAL POINTS are sparse markers dropped *on* that path. Each one says how
-   much throttle and how much brake from here on, and it holds until the next
-   marker says otherwise. Zero and zero is a coast. You can only put one on
-   the line -- a click that misses the line does nothing, because a pedal
-   instruction that isn't on the path the car drives would mean nothing.
+   Crossing is a segment against a segment: where the car was last step, where
+   it is now, against the two ends of the gate. That is exact at any speed --
+   at 300 kph the car moves 1.4 m per step and a gate has no thickness to
+   tunnel through -- and it is checked for direction too, so reversing back
+   over a gate does not collect it twice.
 
-   The line is only drawn while the Racing line tab is open. It is authoring
-   scaffolding, not part of the race. */
-const PEDAL_COL={ coast:0xdddddd, thr:0x33ff66, brk:0xffbb00 };
-const RIBBON_COL={ coast:[0.85,0.85,0.88], thr:[0.20,1.00,0.40], brk:[1.00,0.73,0.00] };
-let linePath=[];                 // Vector3 control points -- the shape
-let pedalPts=[];                 // {s, thr, brk}, sorted by s along the curve
-let pedalSel=-1;
-let lineGroup=null, lineDots=[], lineRibbon=null;
+   The clock starts when the lights go out and restarts every time you cross
+   the line, so it is one flying lap after another rather than a series of
+   standing starts. */
+const TT_GATES=5, TT_HALF=16, TT_KEY='f1sim.tt.best.spa22';
+const TT={ gates:[], hit:[], t:0, last:0, best:null, live:false, cd:0,
+           prevX:0, prevZ:0, group:null, armed:false, started:false };
 
-/* Centripetal Catmull-Rom, specifically: the uniform form overshoots and
-   loops back on itself wherever two control points land close together, and
-   clicks bunch up in the slow corners, which is exactly where a loop would
-   be worst. Centripetal cannot self-intersect between control points. */
-let lineSmooth=[], lineCum=[], lineLen=0, lineClosed=false, lineCurve=null;
-const LINE_STEP=2.5;             // metres between samples along the curve
-function lineBuildCurve(){
-  lineSmooth=[]; lineCum=[]; lineLen=0;
-  if(linePath.length<2) return;
-  /* Closed, so the lap joins up. It was an open curve, which left the stretch
-     between the last point you clicked and the first one as a hole: no ribbon
-     to click on, no samples to follow, and a preview that ran out of line at
-     the start/finish and stopped. A closed centripetal Catmull-Rom carries
-     the curvature across the join like any other part of the lap, so the
-     corner there is a corner rather than a kink or a gap.
-
-     A short line is left open -- three or four points are somebody starting
-     to draw, not a lap, and closing those would loop the car back on itself. */
-  lineClosed = linePath.length>=8;
-  const curve=new THREE.CatmullRomCurve3(linePath.map(v=>v.clone()),lineClosed,'centripetal',0.5);
-  /* Kept, not just sampled. The samples are 2.5 m apart, so anything reading a
-     heading off them gets the direction of the segment it happens to be on --
-     a staircase, which is what made the AI jitter: at 300 kph it crosses a
-     segment every 30 ms and the whole car snapped round by a fraction of a
-     degree each time. The curve itself is continuous, so ask it. The
-     arc-length table is refined to about a point every two metres, or its own
-     lookup would put a ripple back in at a coarser wavelength. */
-  lineCurve=curve;
-  curve.arcLengthDivisions=Math.max(200,Math.ceil(curve.getLength()/2));
+function ttFmt(sec){
+  if(!(sec>0)) return '--:--.--';
+  const m=Math.floor(sec/60), r=sec-m*60;
+  return m+':'+(r<10?'0':'')+r.toFixed(2);
+}
+/* The gates, spaced evenly round the lap by distance, the first on the start
+   line itself. Built off SPA_LINE -- the hand-clicked lap -- because it is the
+   only description of where the circuit goes that this model has. */
+function ttBuild(){
+  if(TT.gates.length || !trackRoot) return;
+  const pts=SPA_LINE.map(editModelToWorld);
+  if(pts.length<8) return;
+  const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal',0.5);
+  const L=curve.getLength();
+  TT.curve=curve; TT.len=L;
+  curve.arcLengthDivisions=Math.max(200,Math.ceil(L/2));
   curve.updateArcLengths();
-  const n=Math.max(2,Math.min(4000,Math.round(curve.getLength()/LINE_STEP)));
-  lineSmooth=curve.getSpacedPoints(n);
-  // sit every sample on the actual ground -- interpolating height between
-  // control points sinks the curve into the road over a crest
-  lineSmooth.forEach(v=>{ const g=groundAt(v.x,v.z,v.y); if(g.hit) v.y=g.y; });
-  lineCum.push(0);
-  for(let i=1;i<lineSmooth.length;i++)
-    lineCum.push(lineCum[i-1]+lineSmooth[i].distanceTo(lineSmooth[i-1]));
-  lineLen=lineCum[lineCum.length-1]||0;
-}
-/* Where along the curve a distance falls, and what the pedals are doing
-   there. The marker in force is the last one you passed.
-
-   Before the first marker it is the *first* one, not the last one round the
-   lap. Wrapping was wrong for the only thing that reads this: a preview
-   starts at the beginning of the line, stopped, so the wrap handed it
-   whatever the final marker of the lap says -- at Spa the Bus Stop, a brake
-   or a part-throttle coast -- and the car crawled off the line under that
-   until it reached the first real marker. A car that has actually driven
-   round to the end of the lap reads the last marker directly anyway, so the
-   wrap was never buying anything. */
-function lineAt(s){
-  const out={x:0,y:0,z:0,hdg:0};
-  if(lineSmooth.length<2) return out;
-  s=clamp(s,0,lineLen);
-  let lo=0, hi=lineCum.length-1;
-  while(lo<hi-1){ const mid=(lo+hi)>>1; if(lineCum[mid]<=s) lo=mid; else hi=mid; }
-  const a=lineSmooth[lo], b=lineSmooth[Math.min(lo+1,lineSmooth.length-1)];
-  const seg=Math.max(lineCum[lo+1]-lineCum[lo],1e-4), f=clamp((s-lineCum[lo])/seg,0,1);
-  out.x=a.x+(b.x-a.x)*f; out.y=a.y+(b.y-a.y)*f; out.z=a.z+(b.z-a.z)*f;
-  out.hdg=Math.atan2(b.x-a.x,b.z-a.z);
-  return out;
-}
-const PEDAL_LAUNCH={thr:100,brk:0};
-function pedalAt(s, lapped){
-  let best=null;
-  for(const q of pedalPts){ if(q.s<=s) best=q; else break; }
-  if(best) return best;
-  /* Nothing has been said yet. On the first lap that means a car being let go
-     from a standstill, and a car being let go goes -- flat, until the first
-     marker says otherwise. This is what was making it crawl from the moment
-     you pressed Preview to the exit of Turn 1: the stretch before the first
-     marker was being given that marker's own instruction, and the first
-     marker on a lap of Spa is the brake board for La Source. It sat there
-     braking down the whole start straight and only came alive once it was
-     past the thing. Coming round again it has genuinely passed the last
-     marker of the lap, so from the second lap on that is what holds. */
-  return lapped ? (pedalPts[pedalPts.length-1]||PEDAL_LAUNCH) : PEDAL_LAUNCH;
-}
-function pedalSort(){
-  const keep=pedalSel>=0?pedalPts[pedalSel]:null;
-  pedalPts.sort((a,b)=>a.s-b.s);
-  pedalSel=keep?pedalPts.indexOf(keep):-1;
-}
-function pedalKind(q){ return q.brk>0 ? 'brk' : (q.thr>0 ? 'thr' : 'coast'); }
-
-function lineRedraw(){
-  if(lineGroup){ scene.remove(lineGroup);
-    lineGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
-  lineGroup=new THREE.Group(); scene.add(lineGroup);
-  lineDots=[]; lineRibbon=null;
-  lineGroup.visible = gridMode && editTab==='line';
-  if(!lineSmooth.length) lineBuildCurve();
-  /* A ribbon rather than a line: GPU line width is one pixel on nearly every
-     browser, so a plain line vanishes at any distance. Two triangles per
-     sample, laid flat on the road, coloured by the pedal in force there --
-     which is also what makes it clickable, since it is a real mesh. */
-  if(lineSmooth.length>1){
-    const N=lineSmooth.length, half=1.3;
-    const pos=new Float32Array(N*2*3), col=new Float32Array(N*2*3), idx=[];
-    for(let i=0;i<N;i++){
-      const a=lineSmooth[Math.max(0,i-1)], b=lineSmooth[Math.min(N-1,i+1)];
-      let dx=b.x-a.x, dz=b.z-a.z; const L=Math.hypot(dx,dz)||1; dx/=L; dz/=L;
-      const px=-dz*half, pz=dx*half, v=lineSmooth[i];
-      pos[i*6]=v.x+px; pos[i*6+1]=v.y+0.10; pos[i*6+2]=v.z+pz;
-      pos[i*6+3]=v.x-px; pos[i*6+4]=v.y+0.10; pos[i*6+5]=v.z-pz;
-      const q=pedalAt(lineCum[i]), kind=pedalKind(q), c=RIBBON_COL[kind];
-      // stronger colour the harder the pedal, so a 20% lift reads differently
-      // from flat out without needing a number on screen
-      const amt = kind==='brk' ? q.brk : (kind==='thr' ? q.thr : 100);
-      const k = kind==='coast' ? 1 : (0.45+0.55*amt/100);
-      for(let s=0;s<2;s++){ col[i*6+s*3]=c[0]*k; col[i*6+s*3+1]=c[1]*k; col[i*6+s*3+2]=c[2]*k; }
-      if(i<N-1){ const o=i*2; idx.push(o,o+1,o+2, o+1,o+3,o+2); }
-    }
-    const g=new THREE.BufferGeometry();
-    g.setAttribute('position',new THREE.BufferAttribute(pos,3));
-    g.setAttribute('color',new THREE.BufferAttribute(col,3));
-    g.setIndex(idx);
-    lineRibbon=new THREE.Mesh(g,new THREE.MeshBasicMaterial({
-      vertexColors:true,transparent:true,opacity:0.70,side:THREE.DoubleSide,
-      depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4}));
-    lineRibbon.renderOrder=998;
-    lineGroup.add(lineRibbon);
+  // start where the car starts, so gate one is the line you are sitting on
+  let u0=0, bd=Infinity;
+  const P=new THREE.Vector3(), T=new THREE.Vector3();
+  for(let u=0;u<1;u+=1/1200){
+    curve.getPointAt(u,P);
+    const d=(P.x-carState.wx)**2+(P.z-carState.wz)**2;
+    if(d<bd){ bd=d; u0=u; }
   }
-  // the markers: a post standing on the line, tall enough to spot from the
-  // car and fat enough to click without hunting for it
-  const geo=new THREE.CylinderGeometry(0.85,0.85,4.2,12);
-  pedalPts.forEach((q,i)=>{
-    const at=lineAt(q.s);
-    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
-      color:PEDAL_COL[pedalKind(q)],depthTest:false}));
-    m.position.set(at.x,at.y+2.2,at.z);
-    m.renderOrder=999;
-    if(i===pedalSel) m.scale.set(1.5,1.15,1.5);
-    m.userData.pedalIndex=i;
-    lineGroup.add(m); lineDots.push(m);
+  TT.group=new THREE.Group(); scene.add(TT.group);
+  for(let i=0;i<=TT_GATES;i++){
+    const u=(u0 + i/(TT_GATES+1)) % 1;
+    curve.getPointAt(u,P); curve.getTangentAt(u,T);
+    const g=groundAt(P.x,P.z,1e9);
+    const y=(g.hit?g.y:P.y);
+    const len=Math.hypot(T.x,T.z)||1;
+    const dx=T.x/len, dz=T.z/len;
+    const rx=dz, rz=-dx;                       // across the track
+    TT.gates.push({ x:P.x, y, z:P.z, dx, dz, rx, rz, start:i===0 });
+    ttGateMesh(TT.gates[i], i);
+  }
+  TT.hit=new Array(TT_GATES).fill(false);
+  tlMeasure(curve,L);
+}
+/* A gate you can see from a long way back and cannot mistake for scenery: a
+   band of light standing on the road, amber for the line and white for the
+   rest, going green as you take it. */
+function ttGateMesh(gate,i){
+  const w=TT_HALF*2, h=7;
+  const geo=new THREE.PlaneGeometry(w,h);
+  const col=gate.start?0xffb020:0x9fd8ff;
+  const mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.16,
+              side:THREE.DoubleSide,depthWrite:false});
+  const m=new THREE.Mesh(geo,mat);
+  m.position.set(gate.x,gate.y+h/2,gate.z);
+  m.rotation.y=Math.atan2(gate.dx,gate.dz);
+  m.renderOrder=997;
+  TT.group.add(m);
+  // a bright edge on the ground, which is what you actually aim at
+  const sg=new THREE.PlaneGeometry(w,1.1);
+  const sm=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.55,
+             side:THREE.DoubleSide,depthWrite:false});
+  const st=new THREE.Mesh(sg,sm);
+  st.rotation.x=-Math.PI/2; st.rotation.z=-Math.atan2(gate.dx,gate.dz);
+  st.position.set(gate.x,gate.y+0.06,gate.z);
+  st.renderOrder=998;
+  TT.group.add(st);
+  gate.mesh=m; gate.strip=st; gate.col=col;
+}
+function ttPaint(){
+  TT.gates.forEach((g,i)=>{
+    const on = i>0 && TT.hit[i-1];
+    const c = on?0x37e06a:g.col;
+    if(g.mesh){ g.mesh.material.color.setHex(c); g.mesh.material.opacity=on?0.10:0.16; }
+    if(g.strip){ g.strip.material.color.setHex(c); }
   });
+  const pips=document.querySelectorAll('#ttpips i');
+  pips.forEach((el,i)=>{ el.className = TT.hit[i]?'on':''; });
 }
-function lineSetVisible(){
-  const on = (gridMode && editTab==='line') || pathEdit;
-  if(lineGroup) lineGroup.visible = on;
-  if(!(gridMode && editTab==='line')) dotMenuClose();
+/* Did the car cross this gate since the last step, going the right way? */
+function ttCrossed(g,x0,z0,x1,z1){
+  const mx=x1-x0, mz=z1-z0;
+  if(mx*g.dx+mz*g.dz <= 0) return false;        // going backwards through it
+  const ax=g.x+g.rx*TT_HALF, az=g.z+g.rz*TT_HALF;
+  const bx=g.x-g.rx*TT_HALF, bz=g.z-g.rz*TT_HALF;
+  const sx=bx-ax, sz=bz-az;
+  const d=mx*sz-mz*sx;
+  if(Math.abs(d)<1e-9) return false;
+  const t=((ax-x0)*sz-(az-z0)*sx)/d;
+  const u=((ax-x0)*mz-(az-z0)*mx)/d;
+  return t>=0 && t<=1 && u>=0 && u<=1;
 }
-
-/* ------------------------------------------------------- the path, editable
-   L puts the shape of the lap in your hands: every control point of the curve
-   comes up as a post you can drag along the ground, and a click anywhere else
-   on the track adds one. Nothing here deletes -- a point put somewhere daft
-   is dragged somewhere sensible, and a lap you can only add to cannot be
-   destroyed by a stray click.
-
-   A new point goes into the *segment it was clicked nearest*, never on the
-   end. Appending would run the lap out to wherever you clicked and back,
-   which is not what anyone means by adding a point to a line.
-
-   The pedal markers are measured in metres along the curve, so moving the
-   shape underneath them would slide them up and down the lap. They are
-   pinned to the ground instead: where each one stood is remembered before the
-   rebuild and it is put back at the nearest point of the new curve, so the
-   brake board for a corner stays with that corner. */
-let pathEdit=false, pathGroup=null, pathDots=[], pathDrag=-1, pathLastBuild=0,
-    pathSel=-1, pathDownX=0, pathDownY=0;
-/* Deleting one is the exception to "moving is enough", so it is deliberate:
-   click a point to pick it -- it goes white and fat -- and then Undo, or
-   Backspace, takes that one out. A click is a pick and a drag is a move, told
-   apart by whether the cursor actually went anywhere, so picking one cannot
-   nudge it out of place. */
-const PATH_MIN=8;                // below this the lap can no longer be closed
-function pathDelete(){
-  if(!pathEdit||pathSel<0||pathSel>=linePath.length) return;
-  if(linePath.length<=PATH_MIN) return;
-  const i=pathSel; pathSel=-1;
-  pathEditing(()=>{ linePath.splice(i,1); });
+function ttFlash(kind,big,sub){
+  const el=document.getElementById('ttflash');
+  document.getElementById('ttflashbig').textContent=big;
+  document.getElementById('ttflashsub').textContent=sub||'';
+  el.className='show '+kind;
+  clearTimeout(TT._ft);
+  TT._ft=setTimeout(()=>{ el.className=''; }, 2600);
 }
-function pathRedraw(){
-  if(pathGroup){ scene.remove(pathGroup);
-    pathGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
-  pathDots=[]; pathGroup=null;
-  if(!pathEdit) return;
-  pathGroup=new THREE.Group(); scene.add(pathGroup);
-  const geo=new THREE.CylinderGeometry(0.55,0.55,3.0,10);
-  linePath.forEach((p,i)=>{
-    const picked = (i===pathSel||i===pathDrag);
-    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
-      color: picked?0xffffff:0x33ddff, depthTest:false }));
-    m.position.set(p.x,p.y+1.6,p.z);
-    m.renderOrder=1000;
-    if(picked) m.scale.set(1.6,1.2,1.6);
-    m.userData.pathIndex=i;
-    pathGroup.add(m); pathDots.push(m);
-  });
+function ttReset(){
+  TT.t=0; TT.started=false; TT.hit=new Array(TT_GATES).fill(false); ttPaint();
 }
-function pickPathDot(clientX,clientY){
-  if(!pathDots.length) return -1;
-  const r=canvas.getBoundingClientRect();
-  _markMouse.x=((clientX-r.left)/r.width)*2-1;
-  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
-  _markRay.setFromCamera(_markMouse,camera);
-  const hit=_markRay.intersectObjects(pathDots,false);
-  return hit.length?hit[0].object.userData.pathIndex:-1;
-}
-/* Where on the curve a world point falls, to the nearest sample. */
-function lineNearestS(p){
-  let bd=Infinity, bs=0;
-  for(let i=0;i<lineSmooth.length;i++){
-    const dx=lineSmooth[i].x-p.x, dz=lineSmooth[i].z-p.z, d=dx*dx+dz*dz;
-    if(d<bd){ bd=d; bs=lineCum[i]; }
-  }
-  return bs;
-}
-/* Change the path, keeping every pedal marker over the piece of road it was
-   standing on rather than at the number of metres it happened to be at. */
-function pathEditing(change){
-  const held=pedalPts.map(q=>{ const a=lineAt(q.s); return {x:a.x,z:a.z}; });
-  change();
-  lineBuildCurve();
-  pedalPts.forEach((q,i)=>{ q.s=lineNearestS(held[i]); });
-  pedalSort();
-  lineRedraw(); pathRedraw(); lineSetVisible(); updateStatus(); editSave();
-}
-/* Which pair of control points a click belongs between: the segment whose
-   closest approach to the click is nearest, the closing pair included, since
-   the lap joins up. */
-function pathInsertIndex(p){
-  const n=linePath.length, last=lineClosed?n:n-1;
-  let bd=Infinity, bi=n;
-  for(let i=0;i<last;i++){
-    const a=linePath[i], b=linePath[(i+1)%n];
-    const ax=b.x-a.x, az=b.z-a.z, L=ax*ax+az*az||1e-9;
-    const t=clamp(((p.x-a.x)*ax+(p.z-a.z)*az)/L,0,1);
-    const dx=a.x+ax*t-p.x, dz=a.z+az*t-p.z, d=dx*dx+dz*dz;
-    if(d<bd){ bd=d; bi=i+1; }
-  }
-  return bi;
-}
-function pathShow(on){
-  pathEdit=on; pathDrag=-1; pathSel=-1;
-  pathRedraw(); lineSetVisible(); updateStatus();
-}
-/* The path as it would be written in the file: model coordinates, the frame
-   spawnAt is in, so the numbers survive a reload. */
-function pathText(){
-  if(!trackRoot) return '';
-  return '['+linePath.map(v=>{ const m=gridToModel(v); return '['+m[0]+','+m[1]+']'; })
-                     .join(',\n ')+']';
-}
-/* A click lands on the line or it does nothing. The ribbon is the test: hit
-   it, and the nearest sample to the hit gives the distance along the lap. */
-function lineHitS(clientX,clientY){
-  if(!lineRibbon||!lineSmooth.length) return -1;
-  const r=canvas.getBoundingClientRect();
-  _markMouse.x=((clientX-r.left)/r.width)*2-1;
-  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
-  _markRay.setFromCamera(_markMouse,camera);
-  const hit=_markRay.intersectObject(lineRibbon,false);
-  if(!hit.length) return -1;
-  const p=hit[0].point;
-  let bi=0, bd=Infinity;
-  for(let i=0;i<lineSmooth.length;i++){
-    const d=lineSmooth[i].distanceToSquared(p);
-    if(d<bd){ bd=d; bi=i; }
-  }
-  return lineCum[bi];
-}
-function pickPedalPost(clientX,clientY){
-  if(!lineDots.length) return -1;
-  const r=canvas.getBoundingClientRect();
-  _markMouse.x=((clientX-r.left)/r.width)*2-1;
-  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
-  _markRay.setFromCamera(_markMouse,camera);
-  const hit=_markRay.intersectObjects(lineDots,false);
-  return hit.length?hit[0].object.userData.pedalIndex:-1;
-}
-
-/* -------------------------------------------------------------- dot menu
-   Opens on the marker you clicked and follows it across the screen, so the
-   numbers you are setting stay next to the piece of track they apply to. */
-const dm=id=>document.getElementById(id);
-function dotMenuClose(){ pedalSel=-1; dm('dotmenu').classList.remove('on'); lineRedraw(); linePanel(); }
-function dotMenuOpen(i){ pedalSel=i; dotMenuFill(); dm('dotmenu').classList.add('on'); }
-function dotMenuFill(){
-  const q=pedalPts[pedalSel]; if(!q) return;
-  dm('dmnum').textContent=String(pedalSel+1).padStart(2,'0')+' · '+Math.round(q.s)+' m';
-  dm('dmthrval').innerHTML=Math.round(q.thr)+'<small>%</small>';
-  dm('dmbrkval').innerHTML=Math.round(q.brk)+'<small>%</small>';
-  dm('dmstate').textContent = (q.thr<=0&&q.brk<=0) ? 'coasting' : '';
-}
-function dotMenuTrack(){
-  const el=dm('dotmenu');
-  if(!el.classList.contains('on')) return;
-  const q=pedalPts[pedalSel];
-  if(!q){ el.classList.remove('on'); return; }
-  const at=lineAt(q.s);
-  const v=new THREE.Vector3(at.x,at.y+4.6,at.z).project(camera);
-  const r=canvas.getBoundingClientRect();
-  // behind the camera, or off the edge: park it rather than let it fly about
-  if(v.z>1){ el.style.opacity='0.25'; return; }
-  el.style.opacity='1';
-  el.style.left=(r.left+(v.x*0.5+0.5)*r.width)+'px';
-  el.style.top =(r.top +(-v.y*0.5+0.5)*r.height)+'px';
-}
-/* Drag a number up to raise it. Both pedals are their own value: zero and
-   zero is a coast, and nothing stops you asking for both at once -- that is
-   left in deliberately rather than forbidden, since it is a legitimate
-   thing to want on a corner entry. */
-function dragNumber(el,get,set){
-  el.addEventListener('pointerdown',e=>{
-    e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId);
-    let lastY=e.clientY;
-    const move=ev=>{
-      set(clamp(get()+(lastY-ev.clientY)*0.7,0,100)); lastY=ev.clientY;
-      dotMenuFill(); lineRedraw();
-    };
-    const up=()=>{ el.removeEventListener('pointermove',move);
-      el.removeEventListener('pointerup',up); editSave(); };
-    el.addEventListener('pointermove',move);
-    el.addEventListener('pointerup',up);
-  });
-}
-dragNumber(dm('dmthrval'),()=>pedalPts[pedalSel]?pedalPts[pedalSel].thr:0,
-                          v=>{ if(pedalPts[pedalSel]) pedalPts[pedalSel].thr=v; });
-dragNumber(dm('dmbrkval'),()=>pedalPts[pedalSel]?pedalPts[pedalSel].brk:0,
-                          v=>{ if(pedalPts[pedalSel]) pedalPts[pedalSel].brk=v; });
-dm('dmpreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
-dm('dmundo').onclick=()=>{
-  if(pedalSel<0) return;
-  pedalPts.splice(pedalSel,1); pedalSel=-1;
-  dm('dotmenu').classList.remove('on');
-  lineRedraw(); linePanel(); editSave();
-};
-dm('dmclose').onclick=dotMenuClose;
-
-function linePanel(){
-  document.getElementById('linecount').textContent=
-    pedalPts.length+(pedalPts.length===1?' point':' points');
-  const el=document.getElementById('linesel');
-  /* The two things that can make the preview slow are the pedal numbers you
-     wrote and the surface it is standing on -- the engine, the brakes and the
-     drag are one piece of code shared with your own car, so they cannot
-     differ. Both are on the panel, so a car that will not pull away says why:
-     a low throttle figure, or a surface that is not road. */
-  el.innerHTML = previewOn
-    ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m · lap <b id="pvlap">1</b></div>'+
-      '<div style="opacity:.7">thr <b id="pvthr">0</b>% · brk <b id="pvbrk">0</b>%'+
-      ' · pedal <b id="pvpedal">lift</b></div>'+
-      '<div style="opacity:.7">accel <b id="pvacc">0 / 0</b> m/s² · '+
-      '<b id="pvsurf">road</b></div>'+
-      '<div style="opacity:.7">lap <b id="pvlapt">0:00.0</b> · last <b id="pvlast">--</b></div>'
-    : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
-      'Click a point to set throttle and brake.</div>';
-}
-function lineText(){
-  if(!trackRoot) return '';
-  return '['+pedalPts.map(q=>{
-    const at=lineAt(q.s);
-    const m=gridToModel(new THREE.Vector3(at.x,at.y,at.z));
-    return '['+Math.round(q.s)+','+Math.round(q.thr)+','+Math.round(q.brk)+
-           ']  /* '+m[0]+', '+m[1]+' */';
-  }).join(',\n ')+']';
-}
-document.getElementById('lineundo').onclick=()=>{
-  // in L mode with a point picked, Undo takes that point out of the lap;
-  // otherwise it is what it always was, the last pedal marker placed
-  if(pathEdit && pathSel>=0){ pathDelete(); return; }
-  pedalPts.pop(); pedalSel=-1; dm('dotmenu').classList.remove('on');
-  lineRedraw(); linePanel(); editSave();
-};
-document.getElementById('lineclear').onclick=()=>{
-  pedalPts=[]; pedalSel=-1; dm('dotmenu').classList.remove('on');
-  previewStop(); lineRedraw(); linePanel(); editSave();
-};
-document.getElementById('linecopy').onclick=e=>{
-  const t=lineText();
-  console.log('pedal points [metres along the lap, throttle %, brake %]:\n'+t);
-  copyFlash(e.currentTarget,t);
-};
-
-/* ------------------------------------------------------------------ preview
-   The preview car is your car. Not a ghost of it and not a copy of its
-   numbers: the same model with the same materials, unfaded; the same makeCar()
-   state; the same stepCar() and placeCar(); the same wheels turning at v/r;
-   the same driving aids you have switched on; the same camera you drive with;
-   the same engine note. The only thing about it that is not yours is the pair
-   of hands, and those work the pedals the way yours do.
-
-   That last part is the thing that was wrong, and it was wrong in a way no
-   amount of sharing code could fix, because it was in what the code was being
-   handed. A pedal marker was going in as a *scale on the engine*: 100% became
-   "1.0 times the thrust", 60% became "0.6 times the thrust", as though the
-   car had a weaker engine that day. That is not what a percentage on a pedal
-   means and it is not what your keyboard does. W is down or it is up. 100%
-   means the pedal is on the floor and stays there; 60% means it is being
-   feathered -- held for six hundredths of every tenth of a second and
-   released for the other four, which is the only honest thing a percentage of
-   a key can mean.
-
-   So applyPedals now gets a 1 or a 0 from both cars, always. At 100% the
-   preview is doing precisely what you do holding W: same 26 m/s2, same
-   (1 - v^2) knee, same top end. */
-let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
-    pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
-    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0, pvDist=0,
-    pvLapT=0, pvLastLap=0, pvGripHeld=false, pvQ={thr:0,brk:0};
-const PV_PULSE=0.10;             // seconds: one feather of a part-pressed pedal
-
-/* The same node in the copy as in the original, found by its place in the
-   hierarchy rather than by name, so it works whatever the exporter called
-   things. clone(true) keeps the tree shape, so the path is all it takes. */
-function pvTwin(node){
-  if(!node||!pvGroup) return null;
-  const path=[];
-  for(let n=node; n&&n!==carGroup; n=n.parent){
-    if(!n.parent) return null;
-    path.unshift(n.parent.children.indexOf(n));
-  }
-  let o=pvGroup;
-  for(const i of path){ if(!o.children[i]) return null; o=o.children[i]; }
-  return o;
-}
-function pvBuild(){
-  /* Rebuilt if the model finished loading after the first preview, or the
-     copy would be an empty group with no wheels in it. */
-  if(pvGroup && pvWheels.length===wheels.length) return;
-  if(pvGroup){ scene.remove(pvGroup); pvGroup=null; }
-  /* Materials are shared, not cloned and faded. It is the same car, so it
-     should be the same car to look at -- if you cannot tell which one is
-     which except by which one is moving, this is doing its job. */
-  pvGroup=carGroup.clone(true);
-  scene.add(pvGroup);
-  pvObj=pvTwin(carObj)||pvGroup;
-  pvWheels=[];
-  for(const w of wheels){
-    const m=pvTwin(w);
-    if(m){ m.userData.steers=w.userData.steers; pvWheels.push(m); }
-  }
-  pvWingL=pvTwin(wingL); pvWingR=pvTwin(wingR);
-  /* Aids on if they are on for you. They shape a keyboard's all-or-nothing
-     input, and this driver is working a keyboard, so it wants exactly what
-     you have. Nothing steers it any more -- it is carried along the line
-     itself -- but the grip figure is what the other nine will want. */
-  PVCAR=makeCar(pvGroup, AIDS);
-  PVCAR.gripMul=AI_GRIP;
-}
-function previewStart(){
-  if(lineSmooth.length<2||!carGroup) return;
-  pvBuild();
-  PVCAR.aids=AIDS;                 // whatever T is set to right now
-  PVCAR.gripMul=AI_GRIP;
-  const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
-  PVCAR.st.speed=0; PVCAR.st.wx=a.x; PVCAR.st.wz=a.z;
-  PVCAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
-  PVCAR.steerIn=0; PVCAR.steerAng=0; PVCAR.lockF=1;
-  PVCAR.groundY=a.y+RIDE; PVCAR.carVY=0; PVCAR.slipAng=0;
-  PVCAR.carPitch=0; PVCAR.carRoll=0;
-  /* Read the ground it is actually standing on before the first step, rather
-     than launching on whatever the last run left in .surf. A run that ended
-     in a gravel trap otherwise starts the next one with gravel drag and
-     engine bog still applied, which reads as a car that will not pull away. */
-  probeCar(PVCAR.st.wx, PVCAR.st.wz, PVCAR.st.hdg, PVCAR.groundY-RIDE, PVCAR.surf);
-  pvIdx=0; pvS=0; pvPhase=0; pvAcc=0; pvPrevSpd=0; pvHeldT=0; pvHeldB=0; pvLap=0;
-  pvDist=0; pvLapT=0; pvLastLap=0;
-  pvGroup.visible=true; previewOn=true;
-  document.getElementById('linepreview').textContent='Stop';
-  dm('dmpreview').textContent='Stop';
-  linePanel();
-}
-function previewStop(){
-  previewOn=false;
-  if(pvGroup) pvGroup.visible=false;
-  const b=document.getElementById('linepreview'); if(b) b.textContent='Preview';
-  const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
-  linePanel();
-}
-function previewReset(){ previewStop(); pvIdx=0; pvS=0; pvDist=0; pvLap=0;
-                        pvLapT=0; if(PVCAR) PVCAR.st.speed=0; }
-document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
-document.getElementById('linereset').onclick=previewReset;
-/* A pedal, worked by a pair of hands. Down or up -- never "some fraction of
-   an engine". Flat out is held; anything less is feathered on and off within
-   a tenth of a second, so 60% is the pedal down for 60% of the time and the
-   car in between is doing exactly what your car does when you lift. */
-function pvPedal(pct){
-  if(pct>=99.5) return 1;
-  if(pct<=0.5)  return 0;
-  return ((pvPhase%PV_PULSE)/PV_PULSE) < pct/100 ? 1 : 0;
-}
-/* The driver: the two pedals off the marker in force. There is no steering
-   input any more -- the car is on the line rather than steered at it, so
-   where it goes is the line's business and only how fast is the driver's. */
-function pvInputs(C,dt){
-  let q=pedalAt(pvS, pvLap>0);
-  /* A marker holds until the next one -- but a brake marker has nothing left
-     to do once the car is stopped, and holding it is a deadlock: the car sits
-     still, so its distance along the line never advances, so the marker in
-     force never changes, so it sits still. It brakes perfectly and then never
-     drives again, which is not a fault in the numbers and should not look
-     like one. Stopped with nothing on the throttle, it takes the next
-     marker's instruction, the way a driver who had stopped would. */
-  if(C.st.speed<0.5 && q.thr<=0){
-    for(const n of pedalPts){ if(n.s>pvS){ q=n; break; } }
-  }
-  pvPhase+=dt; pvQ=q;
-  pvHeldT=pvPedal(q.thr); pvHeldB=pvPedal(q.brk);
-  return { thr:pvHeldT, brk:pvHeldB };
-}
-function pvWrap(s){
-  if(!lineLen) return 0;
-  if(!lineClosed) return clamp(s,0,lineLen);
-  s%=lineLen; return s<0?s+lineLen:s;
-}
-/* The curve itself, at a distance along it -- continuous position and
-   continuous heading, rather than the direction of whichever 2.5 m sample the
-   car is standing on. This is the difference between a car that flows round
-   Pouhon and one that shivers its way round. */
-const _lp=new THREE.Vector3(), _lp2=new THREE.Vector3(), _lt=new THREE.Vector3();
-function lineHdgAt(s){
-  if(!lineCurve||!lineLen) return lineAt(s).hdg;
-  lineCurve.getTangentAt(clamp(pvWrap(s)/lineLen,0,1),_lt);
-  return Math.atan2(_lt.x,_lt.z);
-}
-function linePosAt(s,out){
-  if(!lineCurve||!lineLen) { const a=lineAt(s); return out.set(a.x,a.y,a.z); }
-  return lineCurve.getPointAt(clamp(pvWrap(s)/lineLen,0,1),out);
-}
-/* Curvature: how much the heading turns per metre, over a baseline long
-   enough that the hand-clicked control points do not show through it. */
-function lineCurv(s,span){
-  const h=span||6;
-  let d=lineHdgAt(s+h*0.5)-lineHdgAt(s-h*0.5);
-  while(d> Math.PI) d-=2*Math.PI;
-  while(d<-Math.PI) d+=2*Math.PI;
-  return d/h;
-}
-/* Grip, for a car that is on the line rather than steered at it.
-
-   Infinite was the wrong answer and so was the old ceiling. A railed car
-   cannot understeer, so a yaw limit does nothing to it at all -- the number
-   has to show up somewhere else or it is not a number about anything. Where
-   it shows up is speed: the fastest a corner can be taken is sqrt(a/k), the
-   lateral grip over the curvature, and that is a limit this car can be held
-   to exactly because it always knows which corner it is in.
-
-   80% more than the player's, as asked. On this circuit that is barely felt
-   anywhere quick -- Eau Rouge would allow over 450 kph and the car only does
-   360 -- and it is the slow corners where it bites: about 170 through La
-   Source, 190 through the Bus Stop. Which is what stops "flat out" meaning
-   "takes the hairpin at 360 and looks ridiculous".
-
-   It brakes for them properly rather than braking when it arrives: the limit
-   is worked out over the distance it would need to slow down, so it is off
-   the throttle before the corner the way anybody would be. */
-/* Your grip. A_GRIP is the car's lateral figure, 50 m/s2, and the AI gets
-   exactly that -- same tyres, same 5.1 g. Any corner it takes is a corner you
-   can take. */
-const AI_GRIP=1;                 // times the player's own lateral grip
-/* How much of that it actually uses when it is racing you.
-
-   At everything it has, it is not an opponent, it is a rumour: it is out of
-   sight before the first corner is over, which is not a race and is not even a
-   thing to watch. A pace figure below 1 slows it
-   in the corners and nowhere else, which is exactly where the difference
-   between a car on a perfect line and a person driving one shows up -- both
-   cars have the same engine, so the straights were never going to separate
-   them. Previewing a line still uses everything, since there the question is
-   what the line is worth rather than whether you can take it. */
-let AI_PACE=0.75;
-const AI_PACES=[0.55,0.65,0.75,0.85,1.0];
-function paceBtn(){
-  const b=document.getElementById('linepace');
-  if(b) b.textContent='Pace '+Math.round(AI_PACE*100)+'%';
-}
-function pvCornerSpeed(s, v){
-  let lim=Infinity;
-  // how far ahead it needs to care about, from its own braking rate
-  const look=Math.min(500, v*v/(2*46)+40);
-  for(let d=0; d<look; d+=6){
-    /* Over fifteen metres, not six. Curvature is the second derivative of
-       points clicked by hand, so a short baseline finds corners that are not
-       there -- and it finds most of them in a fast sequence of kinks, which is
-       exactly what Eau Rouge is. Fifteen metres is still far shorter than any
-       real corner here, so a genuine one reads at full strength: over an arc
-       of constant radius this is exact, and it only rounds off the entry and
-       exit of one. */
-    const k=Math.abs(lineCurv(pvWrap(s+d),15));
-    if(k<2e-4) continue;                       // straight enough to ignore
-    /* A_GRIP alone, not A_GRIP*turnBoost. turnBoost is how much more the car
-       is allowed to rotate than the tyres would really give -- steering feel,
-       deliberately unphysical, up to 4x. Multiplying a cornering speed by it
-       claims 36 g and the limit stops limiting anything: La Source at 271 kph.
-       The honest figure is the lateral grip itself, and the AI runs the same
-       one you do. */
-    const pace = raceOn ? AI_PACE : 1;
-    const vc=Math.sqrt(A_GRIP*AI_GRIP/k)*pace;             // through that corner
-    // and the speed it may be doing here to still be down to vc by then
-    const allow=Math.sqrt(vc*vc + 2*46*d);
-    if(allow<lim) lim=allow;
-  }
-  return lim;
-}
-function previewStep(dt,t){
-  dotMenuTrack();
-  // the same car runs in a race; what differs there is only that the camera
-  // and the engine note stay with you, since you are the one driving
-  if(!(previewOn||raceOn)||lineSmooth.length<2||!PVCAR||!lineLen) return;
-  if(raceOn && raceCd>0) return;                     // held on the line
-
-  /* The AI is on the line, and "on" is meant literally: its position is a
-     distance along the curve and its heading is the curve's own tangent, so
-     it cannot drift off, cut an apex or run wide. That is the whole point of
-     it -- it is there to show what the line is worth, not to audition a
-     driver, and a car that misses the apex by four metres is answering a
-     question nobody asked.
-
-     Steering it there by pure pursuit could never do this, whatever the grip:
-     the aim point runs up to 55 m ahead, and an aim point that far up the road
-     cuts every corner it meets. The rack adds its own lag on top -- a 0.23 s
-     ramp on the input is 18 m of road at 300 kph.
-
-     Everything along the line is still the shared car, unchanged: the same
-     applyPedals for the engine and brakes, the same coast drag, the same
-     gravel and grass under the wheels. Speed is the car's; the path is the
-     line's. */
-  const inp=pvInputs(PVCAR,dt);
-  applyPedals(PVCAR.st, inp.thr, inp.brk, PVCAR.surf, dt);
-  surfaceDrag(PVCAR.st, PVCAR.surf, dt);
-  // and it will not carry more speed into a corner than the corner will take
-  const vLim=pvCornerSpeed(pvDist, PVCAR.st.speed);
-  pvGripHeld = PVCAR.st.speed>vLim;
-  if(pvGripHeld) PVCAR.st.speed=Math.max(vLim, PVCAR.st.speed-46*dt);
-
-  const prev=pvDist;
-  pvDist=pvWrap(pvDist+PVCAR.st.speed*dt);
-  pvLapT+=dt;
-  // it is on the line to the metre, so the lap time is now a real number about
-  // the pedal markers rather than about how well something drove
-  if(pvDist<prev){ pvLap++; pvLastLap=pvLapT; pvLapT=0; }
-  if(!lineClosed && pvDist>=lineLen-0.5){ previewReset(); return; }
-
-  linePosAt(pvDist,_lp);
-  PVCAR.st.wx=_lp.x; PVCAR.st.wz=_lp.z; PVCAR.st.hdg=lineHdgAt(pvDist);
-  pvS=pvDist;
-  pvIdx=Math.min(lineSmooth.length-1, Math.round(pvDist/LINE_STEP));
-  /* The front wheels point where the line is going: the angle a car of this
-     wheelbase would need for the curvature it is on. Eased, because curvature
-     is the second derivative of points somebody clicked by hand and it is
-     lumpy however smooth the path through them is -- the car's line is exact,
-     only the wheels are averaged, and a real rack has that lag anyway. */
-  const wantAng=clamp(-STEER_RATIO*Math.atan(WHEELBASE*lineCurv(pvDist)),
-                      -STEER_LOCK, STEER_LOCK);
-  PVCAR.steerAng += (wantAng-PVCAR.steerAng)*(1-Math.pow(0.0005,dt));
-  placeCar(PVCAR, dt, t);
-  // and its wheels turn, by the same v/r the player's do -- a car gliding on
-  // frozen wheels reads as slow however fast the number says it is going
-  pvSpin+=(PVCAR.st.speed/wheelR)*dt;
-  if(pvSpin>6.283185307) pvSpin-=6.283185307;
-  turnWheels(pvWheels, pvWingL, pvWingR, pvSpin, PVCAR.steerAng);
-  // the cockpit camera reads a mount point off the bodywork, so its matrices
-  // have to be current before the camera runs -- same as the player's car
-  pvGroup.updateMatrixWorld(true);
-
-  /* Measured, not asserted. This is the acceleration the car is actually
-     getting, next to what a clean car flat out would get at this speed --
-     26*(1-v^2). Equal means the preview is your car; short means something is
-     taking it, and the surface beside it says what. */
-  const dv=(PVCAR.st.speed-pvPrevSpd)/Math.max(dt,1e-4);
-  pvPrevSpd=PVCAR.st.speed;
-  pvAcc += (dv-pvAcc)*(1-Math.pow(0.02,dt));      // eased, or it is unreadable
-  const vN=PVCAR.st.speed/MAXSPEED, ideal=26.0*(1-vN*vN);
-
-  const sp=document.getElementById('pvspeed');
-  if(sp) sp.textContent=Math.round(PVCAR.st.speed*3.6);
-  const th=document.getElementById('pvthr');
-  if(th) th.textContent=Math.round(pvQ.thr);
-  const bk=document.getElementById('pvbrk');
-  if(bk) bk.textContent=Math.round(pvQ.brk);
-  const pd=document.getElementById('pvpedal');
-  if(pd) pd.textContent = pvGripHeld ? 'GRIP' : inp.brk ? 'BRAKE' : inp.thr ? 'FLAT' : 'lift';
-  const ac=document.getElementById('pvacc');
-  if(ac){ ac.textContent=pvAcc.toFixed(1)+' / '+ideal.toFixed(1);
-          ac.style.color = (inp.thr && pvAcc < ideal-3) ? '#ff5544' : ''; }
-  const sf=document.getElementById('pvsurf');
-  if(sf){
-    const S=PVCAR.surf;
-    sf.textContent = S.loose ? 'GRAVEL '+Math.round(S.looseFrac*100)+'%'
-                   : S.grass ? 'GRASS '+Math.round(S.grassFrac*100)+'%'
-                   : 'road';
-    sf.style.color = (S.loose||S.grass) ? '#ff5544' : '';
-  }
-  const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
-  const lp=document.getElementById('pvlap'); if(lp) lp.textContent=pvLap+1;
-  const lt=document.getElementById('pvlapt');
-  if(lt) lt.textContent=pvClock(pvLapT);
-  const ll=document.getElementById('pvlast');
-  if(ll) ll.textContent=pvLastLap?pvClock(pvLastLap):'--';
-}
-function pvClock(sec){
-  const m=Math.floor(sec/60), s=sec-m*60;
-  return m+':'+(s<10?'0':'')+s.toFixed(1);
-}
-
-/* ------------------------------------------------- the pedals, worked out
-   Where to brake, how hard, and where to get back on it -- for the whole lap,
-   from the shape of the line and the car's own numbers. Placing these by hand
-   is the slow, miserable part of authoring a lap, and it is slow for a reason:
-   a braking point is not a property of the corner you are at. It is set by the
-   corner *ahead*, by how fast you arrive, and by how hard this car stops, and
-   changing any one of those moves it. That is arithmetic, not judgement.
-
-   The standard three passes, on samples 2.5 m apart:
-
-   1. What each point of the lap allows on its own -- sqrt(a/k), the grip over
-      the curvature there, capped at the car's top speed.
-   2. Backwards round the lap, applying the brakes: no point may be quicker
-      than what it can still slow down from before the next one. This is what
-      pulls the braking point back up the straight, and pulls it further for a
-      slower corner, which is the whole thing you would otherwise be hunting
-      for by trial and error.
-   3. Forwards round the lap, applying the engine: no point may be quicker
-      than the engine can get it to from the last one, using the same
-      26*(1-v^2) curve the car itself uses. This is what puts the exit right.
-
-   Twice round, since it is a closed lap and the start of the first pass has
-   not seen the end of it yet.
-
-   Then the profile is turned back into pedals: what acceleration each stretch
-   needs, as a percentage of the 46 m/s2 the brakes give or of the engine at
-   that speed, with a coast where it needs neither. Markers are emitted only
-   where that materially changes, so you get a few dozen you can read and
-   argue with rather than three thousand.
-
-   It uses the pace setting, so "work out the pedals" at 65% gives a lap a
-   careful driver could hold, and at 100% the fastest the line allows. */
-function lineAutoPedals(){
-  if(!lineLen||lineSmooth.length<8) return 0;
-  const N=lineSmooth.length, ds=lineLen/N, BRK=46;
-  const v=new Float64Array(N);
-  for(let i=0;i<N;i++){
-    const k=Math.abs(lineCurv(i*ds,15));      // see pvCornerSpeed for the 15
-    v[i] = k<2e-4 ? MAXSPEED
-                  : Math.min(MAXSPEED, Math.sqrt(A_GRIP*AI_GRIP/k)*AI_PACE);
-  }
-  const eng=u=>26.0*(1-(u/MAXSPEED)*(u/MAXSPEED));
-  for(let pass=0;pass<2;pass++){
-    for(let n=N;n>0;n--){                       // brakes, backwards
-      const i=(n-1)%N, j=n%N;
-      const cap=Math.sqrt(v[j]*v[j]+2*BRK*ds);
-      if(v[i]>cap) v[i]=cap;
-    }
-    for(let n=0;n<N;n++){                       // engine, forwards
-      const i=n%N, j=(n+1)%N;
-      const cap=Math.sqrt(v[i]*v[i]+2*Math.max(eng(v[i]),0)*ds);
-      if(v[j]>cap) v[j]=cap;
-    }
-  }
-  /* pedals from the profile, then runs of the same pedal merged into one
-     marker at the point it starts */
-  const out=[];
-  let lastT=-99, lastB=-99;
-  for(let i=0;i<N;i++){
-    const j=(i+1)%N;
-    const a=(v[j]*v[j]-v[i]*v[i])/(2*ds);
-    let thr=0, brk=0;
-    if(a<-0.6)      brk=clamp(-a/BRK*100,0,100);
-    else if(a>0.6)  thr=clamp(a/Math.max(eng(v[i]),1e-3)*100,0,100);
-    else            thr=clamp((0.8+v[i]*0.028)/Math.max(eng(v[i]),1e-3)*100,0,100);
-    thr=Math.round(thr/5)*5; brk=Math.round(brk/5)*5;
-    const chg=Math.max(Math.abs(thr-lastT),Math.abs(brk-lastB));
-    // brakes ramp in over a few metres, which would otherwise leave a 90% and
-    // a 100% marker three metres apart and nothing to choose between them
-    const room = !out.length || (i*ds-out[out.length-1].s)>=12;
-    if(chg>=10 && (room||chg>=35)){
-      out.push({s:i*ds, thr, brk});
-      lastT=thr; lastB=brk;
-    }
-  }
-  if(!out.length) return 0;
-  pedalPts=out; pedalSel=-1; pedalSort();
-  dm('dotmenu').classList.remove('on');
-  lineRedraw(); linePanel(); editSave();
-  return out.length;
-}
-document.getElementById('lineauto').onclick=()=>{
-  const n=lineAutoPedals();
-  const b=document.getElementById('lineauto');
-  if(b){ b.textContent=n?n+' markers':'need a lap first';
-         setTimeout(()=>{ b.textContent='Work out the pedals'; },2200); }
-};
-
-/* --------------------------------------------------------------- the race
-   One lap of the line, side by side off the start, 3-2-1-GO.
-
-   The AI is the preview car doing exactly what it does in a preview -- on the
-   line, flat where the line allows it, off the throttle early enough for the
-   corner it is coming to -- so a race is an honest measure of the line as much
-   as of you. What changes is who the camera and the engine note belong to:
-   both stay with your car, because you are driving.
-
-   Where each car goes is the only thing that has to be invented here. The AI
-   starts on the line, since that is where it lives; you start beside it, one
-   car's width to the right, which is the side the run-off is on at the start
-   at Spa. Your progress is measured along the same curve it drives, so the
-   gap between you is a real distance on the same lap rather than two
-   different measurements compared.
-
-   You can leave the road, spin, or drive the lap backwards -- the gap simply
-   stops making sense until you rejoin, which is a fair description of what
-   has happened to your race anyway. */
-let raceOn=false, raceCd=0, raceMyIdx=0, raceMyDist=0, raceMyLap=0,
-    raceT=0, raceAiT=0, raceAiDone=false, raceLaps=1;
-const raceBox=document.getElementById('racebox');
-const raceEndEl=document.getElementById('raceend');
-function raceStop(){
-  raceOn=false; raceCd=0;
-  raceBox.classList.remove('show');
-  // the other car leaves the circuit rather than standing on it like a bollard
-  if(pvGroup && !previewOn) pvGroup.visible=false;
-  const b=document.getElementById('linerace'); if(b) b.textContent='Race the AI';
-}
-function raceStart(){
-  editRestore();                      // K works without opening the editor first
-  if(lineSmooth.length<2||!lineLen||!carGroup) return;
-  if(!lineClosed){ goEl.textContent='LINE MUST BE A LAP';
-                   goEl.classList.add('show');
-                   setTimeout(()=>goEl.classList.remove('show'),1600); return; }
-  previewStop();                      // the preview camera must not steal the view
-  pvBuild();
-  // the AI on the line, stopped
-  PVCAR.aids=AIDS; PVCAR.gripMul=AI_GRIP;
-  PVCAR.st.speed=0; PVCAR.steerAng=0; PVCAR.slipAng=0;
-  PVCAR.carPitch=0; PVCAR.carRoll=0; PVCAR.carVY=0;
-  pvDist=0; pvLap=0; pvLapT=0; pvLastLap=0; pvPhase=0; pvSpin=0;
-  linePosAt(0,_lp);
-  PVCAR.st.wx=_lp.x; PVCAR.st.wz=_lp.z; PVCAR.st.hdg=lineHdgAt(0);
-  PVCAR.groundY=_lp.y+RIDE;
-  probeCar(PVCAR.st.wx,PVCAR.st.wz,PVCAR.st.hdg,PVCAR.groundY-RIDE,PVCAR.surf);
-  pvGroup.visible=true;
-  /* You start behind it and off to one side, the way a grid is staggered --
-     not level with it. Level looked right on paper and was useless in the
-     car: from the cockpit, a car exactly beside you is at ninety degrees,
-     which is outside the field of view of any camera here, so the race began
-     with the thing you are racing invisible and it was never seen again. Ten
-     metres back puts it in front of you, where you can watch it brake. */
-  const h=PVCAR.st.hdg, rx=Math.cos(h), rz=-Math.sin(h);     // right of the line
-  linePosAt(pvWrap(-10),_lp2);
+function ttStart(){
+  ttBuild();
+  if(!TT.gates.length) return;
+  try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b; }catch(e){}
+  TT.live=true; TT.cd=4.2; TT.armed=false;
+  ttReset();
+  TT.prevX=carState.wx; TT.prevZ=carState.wz;
   carState.speed=0;
-  carState.wx=_lp2.x+rx*4.4; carState.wz=_lp2.z+rz*4.4;
-  carState.hdg=lineHdgAt(pvWrap(-10));
-  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
-  PLAYER.groundY=_lp.y+RIDE;
-  clearDebris();
-  /* You are ten metres back, so you are ten metres short of the lap: your
-     count starts at -1 and the first crossing of the line, a second later,
-     makes it 0. Otherwise the flag falls ten metres early. */
-  raceMyIdx=Math.max(0,lineSmooth.length-Math.round(10/LINE_STEP));
-  raceMyDist=lineCum[raceMyIdx]; raceMyLap=-1;
-  raceT=0; raceAiT=0; raceAiDone=false;
-  raceOn=true; raceCd=3.999;
-  startPhase='hold'; startT=0; holdFor=1e9;   // you are pinned until GO
+  startPhase='hold'; startT=0; holdFor=1e9;      // held until the lights go out
   lightsEl.classList.remove('show');
-  raceBox.classList.add('show');
-  raceEndEl.classList.remove('show');
-  gridShow(false); pathShow(false);           // out of the editor, into the car
-  const b=document.getElementById('linerace'); if(b) b.textContent='Stop race';
+  document.getElementById('tt').classList.add('show');
+  ttHUD();
 }
-/* Your distance round the same lap the AI is driving, searched forward from
-   where you were so a hairpin's return leg cannot claim you. */
-function raceProgress(){
-  const N=lineSmooth.length, win=Math.ceil(200/LINE_STEP);
-  let bi=raceMyIdx, bd=Infinity;
-  for(let k=0;k<win;k++){
-    const i=(raceMyIdx+k)%N;
-    const dx=lineSmooth[i].x-carState.wx, dz=lineSmooth[i].z-carState.wz;
-    const d=dx*dx+dz*dz;
+function ttStep(dt){
+  if(!TT.live) return;
+  if(TT.cd>0){                                  // 3 - 2 - 1 - GO
+    const was=Math.ceil(TT.cd-0.2);
+    TT.cd-=dt;
+    const now=Math.ceil(TT.cd-0.2);
+    if(now!==was){
+      goEl.textContent = now>0 ? String(Math.min(3,now)) : 'GO';
+      goEl.classList.add('show');
+      if(now<=0){
+        startPhase='go'; startT=0; TT.armed=true;
+        TT.prevX=carState.wx; TT.prevZ=carState.wz;
+        setTimeout(()=>goEl.classList.remove('show'),900);
+      }
+    }
+    return;
+  }
+  TT.t+=dt;
+  tlCheck();
+  const x0=TT.prevX, z0=TT.prevZ, x1=carState.wx, z1=carState.wz;
+  TT.prevX=x1; TT.prevZ=z1;
+  if(x0===x1 && z0===z1) { ttHUD(); return; }
+  for(let i=1;i<TT.gates.length;i++){
+    if(TT.hit[i-1]) continue;
+    if(ttCrossed(TT.gates[i],x0,z0,x1,z1)){ TT.hit[i-1]=true; TT.started=true; ttPaint(); }
+  }
+  if(ttCrossed(TT.gates[0],x0,z0,x1,z1)) ttLine();
+  ttHUD();
+}
+/* Crossing the line: the lap either counts or it is thrown away, and it says
+   which gate you missed rather than leaving you to guess. */
+function ttLine(){
+  const missed=TT.hit.indexOf(false);
+  /* You start sitting on the line, so the first thing you do is cross it. That
+     is not a lap and it is not a deleted lap either -- it is the beginning.
+     The test for it is exact rather than a threshold on the clock: a lap has
+     begun once any gate has been taken, and you cannot reach any of them
+     without driving. Until then, crossing the line just starts the clock
+     again. */
+  if(!TT.started){ ttReset(); return; }
+  if(missed>=0){
+    ttFlash('bad','LAP DELETED','you missed gate '+(missed+1)+' of '+TT_GATES);
+    const pip=document.querySelectorAll('#ttpips i')[missed];
+    if(pip) pip.className='miss';
+    TT.last=0;
+    setTimeout(ttReset,900);
+    TT.t=0;
+    return;
+  }
+  TT.last=TT.t;
+  const rec = TT.best===null || TT.t<TT.best;
+  if(rec){
+    TT.best=TT.t;
+    try{ localStorage.setItem(TT_KEY,String(TT.t)); }catch(e){}
+    ttFlash('rec','NEW BEST',ttFmt(TT.t));
+  } else {
+    ttFlash('good','LAP '+ttFmt(TT.t),'+'+(TT.t-TT.best).toFixed(2)+' off your best');
+  }
+  ttReset();
+}
+function ttHUD(){
+  const te=document.getElementById('tttime');
+  if(te){ te.textContent=ttFmt(TT.t||0.001).replace('--:--.--','0:00.00');
+          te.classList.toggle('hot', TT.best!==null && TT.t>0 && TT.t<TT.best); }
+  const be=document.getElementById('ttbest'); if(be) be.textContent=ttFmt(TT.best);
+  const le=document.getElementById('ttlast'); if(le) le.textContent=ttFmt(TT.last);
+}
+
+
+/* -------------------------------------------------------- track limits
+   The white line is the track. Past it is the kerb, and past that the grass,
+   and the model tells us which is which by material -- so "over the line" is
+   a real test against the circuit's own geometry rather than a guess at where
+   the edge might be.
+
+   The rule is the one everybody actually races to: two wheels over is fine,
+   three is fine, and a lap only dies when all four are past the line. That is
+   deliberately generous. You are meant to be able to use the kerbs.
+
+   Strict measures it at the line itself -- all four over by any amount at all.
+   Relaxed gives you a metre past it before it counts, tested by asking whether
+   the ground a metre back inboard of each wheel is still track. A metre is
+   about a wheel's width, so it forgives the sort of edge case you would argue
+   about on television and catches the sort you would not.
+
+   Two frames in a row, not one: a single probe landing in a seam between two
+   triangles should never cost somebody a lap. */
+const TL_KEY='f1sim.tt.limits';
+let TL_TOL=1.0;                    // metres past the line before it counts
+let _tlFrames=0;
+function tlLoad(){
+  try{ const v=localStorage.getItem(TL_KEY); if(v!==null) TL_TOL=parseFloat(v)||0; }catch(e){}
+}
+function tlSet(tol){
+  TL_TOL=tol;
+  try{ localStorage.setItem(TL_KEY,String(tol)); }catch(e){}
+  document.querySelectorAll('#tlpick button').forEach(b=>
+    b.classList.toggle('on', parseFloat(b.dataset.tol)===tol));
+}
+/* Where the white lines are, measured once off the model's own geometry.
+
+   No material test can do this here. The circuit's asphalt is asph_new and
+   asph-grv, and both of them appear on the track AND in the run-off -- the
+   start line is asph-grv and so is the tarmac twenty-five metres off the road
+   at La Source. The road mesh is no better: findRoadMesh picks the single
+   biggest ribbon, and this circuit's surface is split across several meshes,
+   so the start line is not even in it.
+
+   But line.001 is a real mesh: the white lines are modelled. So the edge is
+   measured rather than guessed. Every eight metres round the lap a ray is
+   fired left and right from the racing line, and where it meets a white line
+   is the edge of the track at that station. Once, at load, about 1700 rays --
+   and after that it is arithmetic per frame.
+
+   Where no line is found (the pit entry, a gap in the painting) the last good
+   width carries over, which is better than declaring the track infinitely wide
+   or infinitely narrow at that station. */
+const TL_STEP=8;
+let tlSt=[], tlIdx=0;
+function tlMeasure(curve,L){
+  tlSt=[];
+  if(!trackRoot||!curve) return;
+  let lineMesh=null;
+  trackRoot.traverse(o=>{
+    if(lineMesh||!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    if(ms.some(m=>m&&m.name&&/^line\b|^line\./i.test(m.name))) lineMesh=o;
+  });
+  const P=new THREE.Vector3(), T=new THREE.Vector3();
+  const rc=new THREE.Raycaster(); rc.far=34;
+  const dir=new THREE.Vector3(), org=new THREE.Vector3();
+  let lastR=7.5, lastL=7.5;
+  for(let d=0; d<L; d+=TL_STEP){
+    const u=d/L;
+    curve.getPointAt(u,P); curve.getTangentAt(u,T);
+    const tl=Math.hypot(T.x,T.z)||1, dx=T.x/tl, dz=T.z/tl;
+    const rx=dz, rz=-dx;
+    let dR=lastR, dL=lastL;
+    if(lineMesh){
+      org.set(P.x,P.y+0.35,P.z);
+      dir.set(rx,0,rz); rc.set(org,dir);
+      const hR=rc.intersectObject(lineMesh,false);
+      if(hR.length) dR=hR[0].distance;
+      dir.set(-rx,0,-rz); rc.set(org,dir);
+      const hL=rc.intersectObject(lineMesh,false);
+      if(hL.length) dL=hL[0].distance;
+    }
+    lastR=dR; lastL=dL;
+    tlSt.push({x:P.x,z:P.z,rx,rz,dR,dL});
+  }
+  console.log('track limits: '+tlSt.length+' stations, '+(lineMesh?'white lines found':'NO LINE MESH — falling back to 7.5 m'));
+}
+/* The station the car is at, searched around where it was so a hairpin's
+   return leg cannot claim it. */
+function tlStation(x,z){
+  const n=tlSt.length; if(!n) return null;
+  let bi=tlIdx, bd=Infinity;
+  for(let k=-6;k<=14;k++){
+    const i=((tlIdx+k)%n+n)%n, s=tlSt[i];
+    const d=(s.x-x)**2+(s.z-z)**2;
     if(d<bd){ bd=d; bi=i; }
   }
-  if(bi<raceMyIdx) raceMyLap++;
-  raceMyIdx=bi; raceMyDist=lineCum[bi];
-}
-function raceUpdate(dt){
-  if(!raceOn) return;
-  if(raceCd>0){
-    const was=Math.ceil(raceCd);
-    raceCd-=dt;
-    const now=Math.ceil(raceCd);
-    if(now!==was){
-      goEl.textContent = now>0 ? String(now) : 'GO';
-      goEl.classList.add('show');
-      if(now<=0){ startPhase='go'; startT=0;
-                  setTimeout(()=>goEl.classList.remove('show'),1100); }
-    }
-    return;                            // nothing moves until the lights go out
+  if(bd>90*90){                         // lost it: sweep the lap once
+    for(let i=0;i<n;i++){ const s=tlSt[i], d=(s.x-x)**2+(s.z-z)**2;
+      if(d<bd){ bd=d; bi=i; } }
   }
-  raceT+=dt;
-  if(!raceAiDone) raceAiT=raceT;
-  raceProgress();
-  // the AI has its own finish, and keeps going round until you are done
-  if(!raceAiDone && pvLap>=raceLaps){ raceAiDone=true; raceAiT=raceT; }
-  const mine=raceMyLap*lineLen+raceMyDist, theirs=pvLap*lineLen+pvDist;
-  const gapM=theirs-mine;
-  const ref=Math.max(carState.speed, 12);          // metres to seconds
-  const lapEl=document.getElementById('racelap');
-  if(lapEl) lapEl.textContent='LAP '+clamp(raceMyLap+1,1,raceLaps)+' / '+raceLaps;
-  const gEl=document.getElementById('racegap');
-  if(gEl){
-    const s=Math.abs(gapM)/ref;
-    gEl.textContent=(gapM>0?'+':'-')+s.toFixed(1);
-    gEl.className = gapM>0 ? 'behind' : 'ahead';
-  }
-  if(raceMyLap>=raceLaps) raceFinish();
+  tlIdx=bi; return tlSt[bi];
 }
-function raceFinish(){
-  const won = !raceAiDone || raceT<=raceAiT;
-  raceStop();
-  raceEndEl.classList.add('show');
-  document.getElementById('raceendmsg').textContent = won?'YOU WIN':'AI WINS';
-  document.getElementById('raceendsub').textContent =
-    'you '+pvClock(raceT)+'  ·  ai '+(raceAiDone?pvClock(raceAiT):'still out there');
-  setTimeout(()=>raceEndEl.classList.remove('show'),6000);
-}
-document.getElementById('linerace').onclick=()=>{ raceOn?raceStop():raceStart(); };
-document.getElementById('linepace').onclick=()=>{
-  const i=AI_PACES.indexOf(AI_PACE);
-  AI_PACE=AI_PACES[(i+1)%AI_PACES.length];
-  paceBtn();
-};
-paceBtn();
+/* Is this wheel still on the track, allowing the tolerance? */
+document.querySelectorAll('#tlpick button').forEach(b=>{
+  b.addEventListener('click',()=>tlSet(parseFloat(b.dataset.tol)));
+});
+function tlWheelOn(lx,lz){
+  const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+  /* On the road ribbon or not, tested against the road mesh's own triangles.
 
-/* Where the other car is, on the screen. It is a real car in the world and it
-   is drawn like one, but on a circuit this size "drawn" and "visible" are not
-   the same thing: over a crest, behind a tree, or four hundred metres up the
-   road at Kemmel, there is nothing to see and no way to tell whether you are
-   losing by a little or by a lot. So it is always marked -- a chevron over the
-   car when it is in front of you, and pinned to the edge of the screen with
-   the distance on it when it is not. */
-const _mk=new THREE.Vector3();
-function aiMarkUpdate(){
-  const el=document.getElementById('aimark');
-  if(!el) return;
-  if(!(raceOn && PVCAR && pvGroup && pvGroup.visible && raceCd<=0)){
-    el.classList.remove('show'); return;
-  }
-  _mk.set(PVCAR.st.wx, PVCAR.groundY+1.4, PVCAR.st.wz).project(camera);
-  const behind=_mk.z>1;
-  const w=innerWidth, h=innerHeight, pad=34;
-  let x=(_mk.x*0.5+0.5)*w, y=(-_mk.y*0.5+0.5)*h;
-  // a point behind the camera projects to the opposite side, so reflect it
-  // through the middle of the screen before clamping or the arrow points the
-  // wrong way exactly when you most want to know
-  if(behind){ x=w-x; y=h+pad; }
-  const off = behind || x<pad || x>w-pad || y<pad || y>h-pad;
-  const cx=clamp(x,pad,w-pad), cy=clamp(y,pad,h-pad);
-  el.style.left=cx+'px'; el.style.top=cy+'px';
-  el.classList.toggle('edge',off);
-  el.classList.add('show');
-  const ar=document.getElementById('aiarrow');
-  if(ar){
-    // pointing from the middle of the screen at where it really is when it is
-    // off the edge, and simply down at the car when it is on screen
-    const a=off ? Math.atan2(cy-h*0.5, cx-w*0.5)+Math.PI/2 : Math.PI;
-    ar.style.transform='rotate('+a+'rad)';
-  }
-  const ds=document.getElementById('aidist');
-  if(ds){
-    const dx=PVCAR.st.wx-carState.wx, dz=PVCAR.st.wz-carState.wz;
-    ds.textContent=Math.round(Math.hypot(dx,dz))+' m';
-  }
+     "Is the car on tarmac" was the first attempt and it is hopeless here: the
+     run-off at half of Spa's corners is asphalt, so it had the car legal
+     twenty-five metres off the circuit. Metres-inside-the-road from the
+     roadDepth grid was the second, and that grid is never built at this size
+     -- 2454 metres across needs 4.9 million cells and it gives up at 4.2, so
+     it answered zero everywhere, including on the start line.
+
+     The triangles are exact and always there. The road mesh is the racing
+     surface: the kerbs are their own mesh with their own material, so its
+     edge is the white line, which is the thing being measured. */
+  const wx=carState.wx + lx*fz + lz*fx, wz=carState.wz - lx*fx + lz*fz;
+  const st=tlStation(wx,wz);
+  if(!st) return true;                  // nothing measured: never take a lap away
+  const off=(wx-st.x)*st.rx + (wz-st.z)*st.rz;    // + is right of the line
+  return off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL;
+}
+tlLoad(); tlSet(TL_TOL);
+function tlCheck(){
+  if(!TT.live || TT.cd>0 || CARPTS.length!==4) return;
+  let on=0;
+  for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
+  if(on>0){ _tlFrames=0; return; }
+  if(++_tlFrames<2) return;                      // one frame is noise, not a lap
+  _tlFrames=0;
+  if(!TT.started) return;                        // nothing to delete yet
+  ttFlash('bad','TRACK LIMITS', TL_TOL>0 ? 'all four wheels more than a metre over the line'
+                                         : 'all four wheels over the white line');
+  TT.last=0; TT.t=0;
+  ttReset();
 }
 
 /* ------------------------------------------------------- save and restore
@@ -4270,10 +3595,7 @@ function editSave(){
   try{
     localStorage.setItem(EDIT_KEY,JSON.stringify({
       grid: gridPts.map(gridToModel),
-      // the path is a constant in the file, but it is editable now, so an
-      // afternoon of moving points is not lost to a refresh either
-      path: linePath.map(gridToModel),
-      pedals: pedalPts.map(q=>[Math.round(q.s),Math.round(q.thr),Math.round(q.brk)])
+      grid2: 1
     }));
   }catch(e){}
 }
@@ -4287,78 +3609,26 @@ function editRestore(){
   if(editRestored||!trackRoot) return;
   editRestored=true;
   // the path first: it is the thing everything else is measured along
-  linePath=SPA_LINE.map(editModelToWorld);
   let d=null;
   try{ d=JSON.parse(localStorage.getItem(EDIT_KEY)||'null'); }catch(e){}
-  // a path that has been dragged about wins over the one in the file
-  if(d && Array.isArray(d.path) && d.path.length>=8)
-    linePath=d.path.map(editModelToWorld);
-  lineBuildCurve();
-  if(d){
-    if(Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
-    if(Array.isArray(d.pedals)) pedalPts=d.pedals.map(a=>({s:a[0],thr:a[1],brk:a[2]}));
-  }
+  if(d && Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
   if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
-  pedalSort();
-  gridRedraw(); lineRedraw();
+  gridRedraw();
 }
 
 // orbit drag
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
   unlockAudio();
-  /* A point under the cursor is grabbed rather than orbited: the camera must
-     not swing about while you are placing a corner. */
-  if(pathEdit){
-    const i=pickPathDot(e.clientX,e.clientY);
-    if(i>=0){ pathDrag=i; pathDownX=e.clientX; pathDownY=e.clientY;
-              pathRedraw(); canvas.setPointerCapture(e.pointerId); return; }
-  }
   dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
-  /* Let go of a point: rebuild properly this time, re-pin the markers and
-     save. The rebuilds during the drag are the cheap kind. */
-  if(pathDrag>=0){
-    const i=pathDrag; pathDrag=-1;
-    const still = Math.abs(e.clientX-pathDownX)+Math.abs(e.clientY-pathDownY) < 8;
-    if(still){                       // a pick, not a move: nothing shifts
-      pathSel = (pathSel===i) ? -1 : i;
-      pathRedraw(); updateStatus();
-      return;
-    }
-    pathSel=i;
-    const p=markScreenToGround(e.clientX,e.clientY);
-    pathEditing(()=>{ if(p) linePath[i].copy(p); });
-    return;
-  }
-  if(moved<8 && pathEdit){
-    const p=markScreenToGround(e.clientX,e.clientY);
-    if(p) pathEditing(()=>{ linePath.splice(pathInsertIndex(p),0,p); });
-    return;
-  }
   if(moved<8 && gridMode && editTab==='grid'){
     if(gridPts.length<GRID_MAX){
       const p=markScreenToGround(e.clientX,e.clientY);
       if(p){ gridPts.push(p); gridRedraw(); gridPanel(); editSave(); }
-    }
-    return;
-  }
-  if(moved<8 && gridMode && editTab==='line'){
-    /* An existing marker under the cursor opens its menu. Otherwise the click
-       has to land on the line itself to do anything -- a pedal instruction
-       off the path the car drives would mean nothing, so a miss is ignored
-       rather than guessed at. */
-    const post=pickPedalPost(e.clientX,e.clientY);
-    if(post>=0){ dotMenuOpen(post); lineRedraw(); linePanel(); return; }
-    const s=lineHitS(e.clientX,e.clientY);
-    if(s>=0){
-      pedalPts.push({s:s,thr:0,brk:0});
-      pedalSort();
-      dotMenuOpen(pedalPts.findIndex(q=>q.s===s));
-      lineRedraw(); linePanel(); editSave();
     }
     return;
   }
@@ -4373,19 +3643,6 @@ canvas.addEventListener('pointerup',e=>{
   }
 });
 canvas.addEventListener('pointermove',e=>{
-  /* Dragging a control point. The post follows the cursor every frame because
-     that is what makes it feel like a thing you are holding; the curve through
-     it is rebuilt a few times a second, which is enough to see the shape
-     change and cheap enough not to stutter on a 200-point lap. */
-  if(pathDrag>=0){
-    const p=markScreenToGround(e.clientX,e.clientY);
-    if(!p) return;
-    linePath[pathDrag].copy(p);
-    const d=pathDots[pathDrag]; if(d) d.position.set(p.x,p.y+1.6,p.z);
-    const now=performance.now();
-    if(now-pathLastBuild>90){ pathLastBuild=now; lineBuildCurve(); lineRedraw(); lineSetVisible(); }
-    return;
-  }
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY;
   moved+=Math.abs(dx)+Math.abs(dy);
@@ -5057,14 +4314,8 @@ function drive(dt){
      rather than replaying the rev sweep from nothing. */
   // on the grid the car is stationary but the engine is not: holding W there
   // has to rev it, or sitting on the lights is silent
-  /* While the preview runs it is the car you are watching, so it is the car
-     you should be hearing: a silent car with an idling engine behind it reads
-     as slow whatever the speedometer says. Same clips, same states, driven by
-     the preview's pedals instead of your keys. */
-  const wSpd = previewOn&&PVCAR ? PVCAR.st.speed : carState.speed;
-  const wThr = previewOn&&PVCAR ? pvHeldT : (thr?1:0);
-  const wBrk = previewOn&&PVCAR ? pvHeldB : (brk?1:0);
-  const st = (gridded && !previewOn) ? (thr?'accel':'idle')
+  const wSpd = carState.speed, wThr = thr?1:0, wBrk = brk?1:0;
+  const st = gridded ? (thr?'accel':'idle')
            : wSpd<0.6 ? 'idle' : wBrk ? 'brake' : wThr ? 'accel' : 'coast';
   if(st!==sndCur){
     // resuming onto the throttle mid-clip: half way through the sounding part,
@@ -5085,26 +4336,32 @@ window.SIM={
   get player(){ return {kph:carState.speed*3.6, x:carState.wx, z:carState.wz,
                         hdg:carState.hdg, groundY:PLAYER.groundY,
                         surf:{...PLAYER.surf, y:undefined}}; },
-  get ai(){ return PVCAR ? {kph:PVCAR.st.speed*3.6, s:pvDist, lap:pvLap,
-                            thr:pvQ.thr, brk:pvQ.brk, grip:pvGripHeld,
-                            surf:{...PVCAR.surf, y:undefined}} : null; },
-  get line(){ return {len:lineLen, closed:lineClosed, pts:linePath.length,
-                      markers:pedalPts.length}; },
-  probe(x,z,refY){ return {...probeCar(x,z,0,refY,{}), y:undefined}; },
-  restore(){ editRestore(); return this.line; },
-  preview(){ editRestore(); previewStart(); return this.line; },
-  seek(s){ pvDist=pvWrap(s); return pvDist; },
+  get lap(){ return {t:TT.t, best:TT.best, last:TT.last, gates:TT.hit.slice(), started:TT.started,
+                     live:TT.live, cd:TT.cd, armed:TT.armed, n:TT.gates.length}; },
+  gate(i){ const g=TT.gates[i]; return g?{x:g.x,y:g.y,z:g.z,hdg:Math.atan2(g.dx,g.dz)}:null; },
   place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
-                  carState.speed=0; PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
-  hold(k,on){ keys[k]=!!on; },
+                  PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
   speed(v){ carState.speed=v; },
+  hold(k,on){ keys[k]=!!on; },
+  skipCountdown(){ TT.cd=0.001; },
+  depth(){ return CARPTS.length===4 ? CARPTS.map(c=>{ const h=carState.hdg,fx=Math.sin(h),fz=Math.cos(h);
+      return +roadDepth(carState.wx+c.x*fz+c.z*fx, carState.wz-c.x*fx+c.z*fz).toFixed(2); }) : null; },
+  matAt(x,z){
+    if(!trackRoot) return null;
+    const rc=new THREE.Raycaster(new THREE.Vector3(x,4000,z), new THREE.Vector3(0,-1,0));
+    rc.far=8000;
+    const hits=rc.intersectObject(trackRoot,true).filter(h=>h.object.isMesh);
+    return hits.slice(0,4).map(h=>{
+      const m=h.object.material;
+      const nm=(Array.isArray(m)?m.map(x=>x&&x.name).join('+'):(m&&m.name))||'(none)';
+      return nm+' @'+h.point.y.toFixed(1);
+    });
+  },
+  tagAt(x,z,refY){ const g=groundAt(x,z,refY===undefined?1e9:refY);
+    return {hit:g.hit,y:+g.y.toFixed(2),road:g.road,kerb:g.kerb,grass:g.grass,loose:g.loose}; },
+  wheels(){ return CARPTS.length===4 ? CARPTS.map((c,i)=>tlWheelOn(c.x,c.z)) : null; },
+  probe(x,z,refY){ return {...probeCar(x,z,0,refY,{}), y:undefined}; },
   get fps(){ return _simFps; },
-  get simT(){ return t; },
-  get steps(){ return _stepCount; },
-  get freeroam(){ return FREEROAM; },
-  get phase(){ return startPhase; },
-  at(s){ const p=new THREE.Vector3(); linePosAt(s,p);
-         return {x:p.x, y:p.y, z:p.z, hdg:lineHdgAt(s)}; }
 };
 
 /* ------------------------------------------------------------- main loop */
@@ -5131,9 +4388,8 @@ function stepWorld(dt){
     else if(fFwd<=F_FWD_MIN){ fFwd=F_FWD_MIN; fwdDir=1; }
   }
   updateStart(dt);
-  raceUpdate(dt);
+  ttStep(dt);
   drive(dt);
-  previewStep(dt,t);        // before the camera, so the chase rig is not a frame behind
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
@@ -5217,13 +4473,6 @@ function frame(now){
       if(fn.textContent!==String(f)){ fn.textContent=f;
         fn.style.color = f<24 ? '#ff5544' : f<40 ? 'var(--amber)' : ''; }
     }
-    const un=document.getElementById('uname');
-    if(un){
-      const txt = onLoose ? 'GRAVEL '+Math.round(looseFrac*100)+'%'
-                : onGrass ? 'GRASS '+Math.round(grassFrac*100)+'%' : 'road';
-      if(un.textContent!==txt){ un.textContent=txt;
-        un.style.color = (onLoose||onGrass) ? '#ff5544' : ''; }
-    }
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
@@ -5247,18 +4496,30 @@ function frame(now){
   updateDust(dt);
   updateDebris(dt);
 
-  /* Which car the camera is on. Watching the preview means watching the
-     preview car -- through your own rig, in whatever mode you drive in,
-     cockpit included. It had its own hard-coded chase camera at 64 degrees
-     while the default view is the cockpit at 70, and a wider lens closer to
-     the ground reads as faster: the preview looked slower than your car partly
-     because you were watching it through a different lens. Same rig, same
-     mounts, same shake, or the comparison this thing exists to make is not a
-     comparison at all. */
-  const V = (previewOn && PVCAR && pvGroup && pvGroup.visible) ? PVCAR : PLAYER;
-  const vGroup = V.group||carGroup, vObj = (V===PVCAR ? pvObj : carObj);
-  const vSpeed = V.st.speed;
-  const vPoint = (x,y,z)=>pointOn(vObj,vGroup,x,y,z);
+  /* The drone. Before the lights go out the camera is not in the car at all:
+     it stands off ahead and above the start, looking back down the pit straight
+     with Eau Rouge and the climb to Raidillon in the same frame -- the shot
+     that tells you where you are and what you are about to drive. It drifts
+     in slowly, and hands the view to the car at GO, so the cut happens on the
+     word rather than a second either side of it. */
+  if(TT.live && TT.cd>0){
+    const k=clamp((4.2-TT.cd)/4.2,0,1);
+    const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+    const out=150-k*38, up=54-k*17;
+    const gx=carGroup.position.x, gz=carGroup.position.z;
+    const base=carGroup.position.y-RIDE;
+    camera.position.set(gx+fx*out, base+up, gz+fz*out);
+    camera.up.set(0,1,0);
+    camera.lookAt(gx+fx*24, base+3, gz+fz*24);
+    camera.fov=42+k*6;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    skyDome.position.copy(camera.position);
+    renderer.render(scene,camera);
+    return;
+  }
+  const vGroup=carGroup, vObj=carObj, V=PLAYER, vSpeed=carState.speed;
+  const vPoint=(x,y,z)=>pointOn(vObj,vGroup,x,y,z);
 
   const sp=vSpeed/MAXSPEED;
   const C=CAMS[camMode];
@@ -5379,7 +4640,6 @@ function frame(now){
   // runs after this loop -- so derive it here or the cull tests a stale (on the
   // first frame, identity) view matrix.
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
-  aiMarkUpdate();          // needs the camera it is being projected through
   _pmv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   _frustum.setFromProjectionMatrix(_pmv);
   for(let i=0;i<treeCells.length;i++){
@@ -5534,8 +4794,9 @@ function startTrack(id){
           .forEach(m=>{ if(m&&m.map) m.map.anisotropy=MAXANISO; }); } } });
       scene.add(root);
       trackRoot=root;
+      roadMesh=rd.mesh;
       const st0=buildHeightField(root);
-      console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass');
+      console.log('height field: '+st0.tris+' triangles, '+st0.loose+' gravel, '+st0.grass+' grass, '+st0.kerb+' kerb, '+st0.road+' road');
       buildRoadMap(rd.mesh);
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
@@ -5545,6 +4806,8 @@ function startTrack(id){
       console.log('spawn: explicit, at model '+sx+', '+sz+' facing '+sdeg+' deg');
       scene.fog.density=0.00035;
       buildWorld();
+      editRestore();          // gate positions come off the hand-clicked lap
+      ttStart();
       return;
     }
     /* The start lights hang over the start line, so their position is the line.
