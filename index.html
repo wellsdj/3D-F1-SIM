@@ -184,6 +184,7 @@
     <div class="row" style="margin-top:6px">
       <button id="linepreview">Preview</button>
       <button id="linereset">Reset</button>
+      <button id="lineflat" title="Ignore the markers and hold the throttle flat: the car's own acceleration, on your line">Flat out</button>
     </div>
   </div>
 
@@ -2411,11 +2412,12 @@ const WHEELBASE=3.60;
 
 /* model-space point -> world, so cameras can be bolted to real car features */
 const _cp=new THREE.Vector3();
-function carPoint(x,y,z){
+function pointOn(obj,group,x,y,z){
   _cp.set(x,y,z);
-  if(carObj) return carObj.localToWorld(_cp);
-  return _cp.set(carGroup.position.x,y,carGroup.position.z);
+  if(obj) return obj.localToWorld(_cp);
+  return _cp.set(group.position.x,y,group.position.z);
 }
+function carPoint(x,y,z){ return pointOn(carObj,carGroup,x,y,z); }
 
 /* ----------------------------------------------------------------- debris */
 /* Bodywork that comes off in a barrier hit. A single instanced mesh with a
@@ -3440,7 +3442,9 @@ function linePanel(){
   el.innerHTML = previewOn
     ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'+
       '<div style="opacity:.7">thr <b id="pvthr">0</b>% · brk <b id="pvbrk">0</b>%'+
-      ' · <b id="pvsurf">road</b></div>'+
+      ' · pedal <b id="pvpedal">lift</b></div>'+
+      '<div style="opacity:.7">accel <b id="pvacc">0 / 0</b> m/s² · '+
+      '<b id="pvsurf">road</b></div>'+
       '<div style="opacity:.7"><b id="pvoff">0</b> m off the line</div>'
     : '<div style="opacity:.55">Click the line to drop a pedal point.<br>'+
       'Click a point to set throttle and brake.</div>';
@@ -3469,63 +3473,112 @@ document.getElementById('linecopy').onclick=e=>{
 };
 
 /* ------------------------------------------------------------------ preview
-   A second car, in the literal sense: makeCar() gives it the same state a
-   player's car has, stepCar() and placeCar() move it, and the only thing that
-   differs is where its three inputs come from. It reads the pedal markers for
-   throttle and brake, and steers at the line by pure pursuit, expressed as
-   the same -1..1 a key gives. Nothing about how it accelerates, brakes,
-   turns, grips or sits on the road is written down twice, so it cannot be
-   "not the same stats" -- there is only one car in this file.
+   The preview car is your car. Not a ghost of it and not a copy of its
+   numbers: the same model with the same materials, unfaded; the same makeCar()
+   state; the same stepCar() and placeCar(); the same wheels turning at v/r;
+   the same driving aids you have switched on; the same camera you drive with;
+   the same engine note. The only thing about it that is not yours is the pair
+   of hands, and those work the pedals the way yours do.
 
-   It is your own car's model, faded, so you can see it is yours. Swap the
-   clone for a different model here and nothing else changes. */
-let previewOn=false, AICAR=null, aiGroup=null, pvIdx=0, pvS=0;
-function aiBuild(){
-  if(aiGroup) return;
-  aiGroup=carGroup.clone(true);
-  aiGroup.traverse(o=>{
-    if(!o.isMesh||!o.material) return;
-    const fade=m=>{ const c=m.clone(); c.transparent=true; c.opacity=0.42;
-                    c.depthWrite=false; return c; };
-    o.material=Array.isArray(o.material)?o.material.map(fade):fade(o.material);
-    o.castShadow=false; o.receiveShadow=false;
-  });
-  scene.add(aiGroup);
-  // aids are a keyboard crutch -- curved input, slew, self-centring. A program
-  // steers with a real number and wants none of it. Every limit that belongs
-  // to the car itself still applies, because they live in the shared code.
-  AICAR=makeCar(aiGroup,false);
+   That last part is the thing that was wrong, and it was wrong in a way no
+   amount of sharing code could fix, because it was in what the code was being
+   handed. A pedal marker was going in as a *scale on the engine*: 100% became
+   "1.0 times the thrust", 60% became "0.6 times the thrust", as though the
+   car had a weaker engine that day. That is not what a percentage on a pedal
+   means and it is not what your keyboard does. W is down or it is up. 100%
+   means the pedal is on the floor and stays there; 60% means it is being
+   feathered -- held for six hundredths of every tenth of a second and
+   released for the other four, which is the only honest thing a percentage of
+   a key can mean.
+
+   So applyPedals now gets a 1 or a 0 from both cars, always. At 100% the
+   preview is doing precisely what you do holding W: same 26 m/s2, same
+   (1 - v^2) knee, same top end. */
+let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
+    pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
+    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvFlat=false,
+    pvQ={thr:0,brk:0};
+const PV_PULSE=0.10;             // seconds: one feather of a part-pressed pedal
+
+/* The same node in the copy as in the original, found by its place in the
+   hierarchy rather than by name, so it works whatever the exporter called
+   things. clone(true) keeps the tree shape, so the path is all it takes. */
+function pvTwin(node){
+  if(!node||!pvGroup) return null;
+  const path=[];
+  for(let n=node; n&&n!==carGroup; n=n.parent){
+    if(!n.parent) return null;
+    path.unshift(n.parent.children.indexOf(n));
+  }
+  let o=pvGroup;
+  for(const i of path){ if(!o.children[i]) return null; o=o.children[i]; }
+  return o;
+}
+function pvBuild(){
+  /* Rebuilt if the model finished loading after the first preview, or the
+     copy would be an empty group with no wheels in it. */
+  if(pvGroup && pvWheels.length===wheels.length) return;
+  if(pvGroup){ scene.remove(pvGroup); pvGroup=null; }
+  /* Materials are shared, not cloned and faded. It is the same car, so it
+     should be the same car to look at -- if you cannot tell which one is
+     which except by which one is moving, this is doing its job. */
+  pvGroup=carGroup.clone(true);
+  scene.add(pvGroup);
+  pvObj=pvTwin(carObj)||pvGroup;
+  pvWheels=[];
+  for(const w of wheels){
+    const m=pvTwin(w);
+    if(m){ m.userData.steers=w.userData.steers; pvWheels.push(m); }
+  }
+  pvWingL=pvTwin(wingL); pvWingR=pvTwin(wingR);
+  /* Aids on if they are on for you. They shape a keyboard's all-or-nothing
+     input, and this driver is working a keyboard, so it wants exactly what
+     you have -- see pvStick, where the driver compensates for them rather
+     than the car being given a different rack. */
+  PVCAR=makeCar(pvGroup, AIDS);
 }
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
-  aiBuild();
+  pvBuild();
+  PVCAR.aids=AIDS;                 // whatever T is set to right now
   const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
-  AICAR.st.speed=0; AICAR.st.wx=a.x; AICAR.st.wz=a.z;
-  AICAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
-  AICAR.steerIn=0; AICAR.steerAng=0; AICAR.lockF=1;
-  AICAR.groundY=a.y+RIDE; AICAR.carVY=0; AICAR.slipAng=0;
-  AICAR.carPitch=0; AICAR.carRoll=0;
+  PVCAR.st.speed=0; PVCAR.st.wx=a.x; PVCAR.st.wz=a.z;
+  PVCAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
+  PVCAR.steerIn=0; PVCAR.steerAng=0; PVCAR.lockF=1;
+  PVCAR.groundY=a.y+RIDE; PVCAR.carVY=0; PVCAR.slipAng=0;
+  PVCAR.carPitch=0; PVCAR.carRoll=0;
   /* Read the ground it is actually standing on before the first step, rather
      than launching on whatever the last run left in .surf. A run that ended
      in a gravel trap otherwise starts the next one with gravel drag and
      engine bog still applied, which reads as a car that will not pull away. */
-  probeCar(AICAR.st.wx, AICAR.st.wz, AICAR.st.hdg, AICAR.groundY-RIDE, AICAR.surf);
-  pvIdx=0; pvS=0;
-  aiGroup.visible=true; previewOn=true;
+  probeCar(PVCAR.st.wx, PVCAR.st.wz, PVCAR.st.hdg, PVCAR.groundY-RIDE, PVCAR.surf);
+  pvIdx=0; pvS=0; pvPhase=0; pvAcc=0; pvPrevSpd=0; pvHeldT=0; pvHeldB=0;
+  pvGroup.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
   dm('dmpreview').textContent='Stop';
   linePanel();
 }
 function previewStop(){
   previewOn=false;
-  if(aiGroup) aiGroup.visible=false;
+  if(pvGroup) pvGroup.visible=false;
   const b=document.getElementById('linepreview'); if(b) b.textContent='Preview';
   const b2=dm('dmpreview'); if(b2) b2.textContent='Preview';
   linePanel();
 }
-function previewReset(){ previewStop(); pvIdx=0; pvS=0; if(AICAR) AICAR.st.speed=0; }
+function previewReset(){ previewStop(); pvIdx=0; pvS=0; if(PVCAR) PVCAR.st.speed=0; }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
+/* Flat out ignores the markers entirely and holds the throttle down for the
+   whole line. It settles the only question that kept coming back: a car that
+   is quick like this and slow with your numbers is telling you the numbers
+   are what is slow, and a car that is slow even here is telling you the fault
+   is in the car or the ground under it, not in the authoring. */
+document.getElementById('lineflat').onclick=()=>{
+  pvFlat=!pvFlat;
+  document.getElementById('lineflat').style.opacity=pvFlat?'1':'';
+  document.getElementById('lineflat').textContent=pvFlat?'Flat out ✓':'Flat out';
+  if(!previewOn) previewStart(); else { pvIdx=0; pvS=0; previewStart(); }
+};
 
 /* How far round it has got. Searched forward from where it was, over a window
    rather than the whole lap, so a car that has run wide keeps a sensible idea
@@ -3536,20 +3589,49 @@ function pvTrackProgress(){
   const N=lineSmooth.length, win=Math.ceil(90/LINE_STEP);
   let bi=pvIdx, bd=Infinity;
   for(let i=pvIdx;i<Math.min(N,pvIdx+win);i++){
-    const dx=lineSmooth[i].x-AICAR.st.wx, dz=lineSmooth[i].z-AICAR.st.wz;
+    const dx=lineSmooth[i].x-PVCAR.st.wx, dz=lineSmooth[i].z-PVCAR.st.wz;
     const d=dx*dx+dz*dz;
     if(d<bd){ bd=d; bi=i; }
   }
   pvIdx=bi; pvS=lineCum[bi];
   return Math.sqrt(bd);                       // how far off the line it is
 }
+/* A pedal, worked by a pair of hands. Down or up -- never "some fraction of
+   an engine". Flat out is held; anything less is feathered on and off within
+   a tenth of a second, so 60% is the pedal down for 60% of the time and the
+   car in between is doing exactly what your car does when you lift. */
+function pvPedal(pct){
+  if(pct>=99.5) return 1;
+  if(pct<=0.5)  return 0;
+  return ((pvPhase%PV_PULSE)/PV_PULSE) < pct/100 ? 1 : 0;
+}
+/* The stick position that gets the wheel angle it wants.
+
+   The aids are on if they are on for you, and they curve the input and soften
+   it with speed before it reaches the rack, so asking for half lock does not
+   give half lock. A driver compensates for that by turning the wheel further,
+   and so does this: the curve is inverted here, in the driver, leaving the
+   car's rack, lock and grip exactly as they are on yours. Turning the aids
+   off for the preview would have been the other way round -- a different car,
+   which is the whole thing we are trying not to have. */
+function pvStick(C, wantAng){
+  const avail=Math.max(STEER_LOCK*C.lockF,1e-3);
+  let g=clamp(wantAng/avail,-1,1);
+  if(C.aids){
+    const fast=clamp(C.st.speed*3.6/300,0,1);
+    const need=clamp(Math.abs(g)/Math.max(1-0.34*fast,1e-3),0,1);
+    // invert inp = 0.72*x^2 + 0.28*x
+    const x=(-0.28+Math.sqrt(0.0784+2.88*need))/1.44;
+    g=Math.sign(g)*clamp(x,0,1);
+  }
+  return g;
+}
 /* The driver. Three numbers, exactly what a pair of hands would produce:
-   throttle and brake straight off the marker in force, and a stick position
-   from pure pursuit -- aim at a point up the line, further ahead the faster
-   it is going, and ask for the arc that reaches it, as a fraction of the lock
-   actually available at this speed. */
-function aiInputs(C){
-  let q=pedalAt(pvS);
+   the two pedals off the marker in force, and a stick position from pure
+   pursuit -- aim at a point up the line, further ahead the faster it is
+   going, and ask for the arc that reaches it. */
+function pvInputs(C,dt){
+  let q=pvFlat ? {thr:100,brk:0} : pedalAt(pvS);
   /* A marker holds until the next one -- but a brake marker has nothing left
      to do once the car is stopped, and holding it is a deadlock: the car sits
      still, so its distance along the line never advances, so the marker in
@@ -3560,6 +3642,8 @@ function aiInputs(C){
   if(C.st.speed<0.5 && q.thr<=0){
     for(const n of pedalPts){ if(n.s>pvS){ q=n; break; } }
   }
+  pvPhase+=dt; pvQ=q;
+  pvHeldT=pvPedal(q.thr); pvHeldB=pvPedal(q.brk);
   const look=clamp(7+C.st.speed*0.62,9,55);
   const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
   const T=lineSmooth[ti];
@@ -3569,28 +3653,49 @@ function aiInputs(C){
   const lat=fz*dx-fx*dz;                       // +ve = the line is to the right
   const kappa=2*lat/(L*L);                     // the arc that reaches the target
   const wantAng=-STEER_RATIO*Math.atan(WHEELBASE*kappa);
-  const avail=Math.max(STEER_LOCK*C.lockF,1e-3);
-  return { thr:q.thr/100, brk:q.brk/100, steer:clamp(wantAng/avail,-1,1) };
+  return { thr:pvHeldT, brk:pvHeldB, steer:pvStick(C,wantAng) };
 }
 function previewStep(dt,t){
   dotMenuTrack();
-  if(!previewOn||lineSmooth.length<2||!AICAR) return;
+  if(!previewOn||lineSmooth.length<2||!PVCAR) return;
   const off=pvTrackProgress();
   if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
 
-  const inp=aiInputs(AICAR);
-  stepCar(AICAR, inp, dt);
-  placeCar(AICAR, dt, t);
+  const inp=pvInputs(PVCAR,dt);
+  stepCar(PVCAR, inp, dt);
+  placeCar(PVCAR, dt, t);
+  // and its wheels turn, by the same v/r the player's do -- a car gliding on
+  // frozen wheels reads as slow however fast the number says it is going
+  pvSpin+=(PVCAR.st.speed/wheelR)*dt;
+  if(pvSpin>6.283185307) pvSpin-=6.283185307;
+  turnWheels(pvWheels, pvWingL, pvWingR, pvSpin, PVCAR.steerAng);
+  // the cockpit camera reads a mount point off the bodywork, so its matrices
+  // have to be current before the camera runs -- same as the player's car
+  pvGroup.updateMatrixWorld(true);
+
+  /* Measured, not asserted. This is the acceleration the car is actually
+     getting, next to what a clean car flat out would get at this speed --
+     26*(1-v^2). Equal means the preview is your car; short means something is
+     taking it, and the surface beside it says what. */
+  const dv=(PVCAR.st.speed-pvPrevSpd)/Math.max(dt,1e-4);
+  pvPrevSpd=PVCAR.st.speed;
+  pvAcc += (dv-pvAcc)*(1-Math.pow(0.02,dt));      // eased, or it is unreadable
+  const vN=PVCAR.st.speed/MAXSPEED, ideal=26.0*(1-vN*vN);
 
   const sp=document.getElementById('pvspeed');
-  if(sp) sp.textContent=Math.round(AICAR.st.speed*3.6);
+  if(sp) sp.textContent=Math.round(PVCAR.st.speed*3.6);
   const th=document.getElementById('pvthr');
-  if(th) th.textContent=Math.round(inp.thr*100);
+  if(th) th.textContent=Math.round(pvQ.thr);
   const bk=document.getElementById('pvbrk');
-  if(bk) bk.textContent=Math.round(inp.brk*100);
+  if(bk) bk.textContent=Math.round(pvQ.brk);
+  const pd=document.getElementById('pvpedal');
+  if(pd) pd.textContent = inp.brk ? 'BRAKE' : inp.thr ? 'FLAT' : 'lift';
+  const ac=document.getElementById('pvacc');
+  if(ac){ ac.textContent=pvAcc.toFixed(1)+' / '+ideal.toFixed(1);
+          ac.style.color = (inp.thr && pvAcc < ideal-3) ? '#ff5544' : ''; }
   const sf=document.getElementById('pvsurf');
   if(sf){
-    const S=AICAR.surf;
+    const S=PVCAR.surf;
     sf.textContent = S.loose ? 'GRAVEL '+Math.round(S.looseFrac*100)+'%'
                    : S.grass ? 'GRASS '+Math.round(S.grassFrac*100)+'%'
                    : 'road';
@@ -4124,6 +4229,23 @@ function probeCar(wx,wz,hdg,refY,out){
   return out;
 }
 
+/* The wheels of one car: rolled by however far it has travelled, steered by
+   its own rack. Shared, like everything else about a car -- the preview car
+   was gliding on frozen wheels, which reads as slow at any speed. */
+function turnWheels(list, wl, wr, spinAng, steerAng){
+  if(!list||!list.length) return;
+  _qRoll.setFromAxisAngle(_AXIS_X, spinAng);
+  _qSteer.setFromAxisAngle(_AXIS_Y, -steerAng/STEER_RATIO);
+  for(let i=0;i<list.length;i++){
+    const w=list[i];
+    if(w.userData.steers) w.quaternion.copy(_qSteer).multiply(_qRoll);
+    else                  w.quaternion.copy(_qRoll);
+  }
+  // winglets steer with the uprights but never roll
+  if(wl) wl.quaternion.copy(_qSteer);
+  if(wr) wr.quaternion.copy(_qSteer);
+}
+
 /* One free-roam step of one car. This is the whole car: pedals, rack, grip
    ceiling, surface, and the integration that moves it. The player calls it
    with the keys, the preview car calls it with what it has worked out it
@@ -4308,16 +4430,7 @@ function drive(dt){
   // stretch on the tyres, covers or discs at any angle.
   spin += (carState.speed/wheelR)*dt;
   if(spin>6.283185307) spin-=6.283185307;
-  _qRoll.setFromAxisAngle(_AXIS_X, spin);
-  _qSteer.setFromAxisAngle(_AXIS_Y, -PLAYER.steerAng/STEER_RATIO);
-  for(let i=0;i<wheels.length;i++){
-    const w=wheels[i];
-    if(w.userData.steers) w.quaternion.copy(_qSteer).multiply(_qRoll);
-    else                  w.quaternion.copy(_qRoll);
-  }
-  // winglets steer with the uprights but never roll
-  if(wingL) wingL.quaternion.copy(_qSteer);
-  if(wingR) wingR.quaternion.copy(_qSteer);
+  turnWheels(wheels, wingL, wingR, spin, PLAYER.steerAng);
 
   /* engine bed: idle when stopped, otherwise brake > throttle > coast.
      Lifting off the brake back onto the throttle while still rolling means
@@ -4325,16 +4438,23 @@ function drive(dt){
      rather than replaying the rev sweep from nothing. */
   // on the grid the car is stationary but the engine is not: holding W there
   // has to rev it, or sitting on the lights is silent
-  const st = gridded ? (thr?'accel':'idle')
-           : carState.speed<0.6 ? 'idle' : brk ? 'brake' : thr ? 'accel' : 'coast';
+  /* While the preview runs it is the car you are watching, so it is the car
+     you should be hearing: a silent car with an idling engine behind it reads
+     as slow whatever the speedometer says. Same clips, same states, driven by
+     the preview's pedals instead of your keys. */
+  const wSpd = previewOn&&PVCAR ? PVCAR.st.speed : carState.speed;
+  const wThr = previewOn&&PVCAR ? pvHeldT : (thr?1:0);
+  const wBrk = previewOn&&PVCAR ? pvHeldB : (brk?1:0);
+  const st = (gridded && !previewOn) ? (thr?'accel':'idle')
+           : wSpd<0.6 ? 'idle' : wBrk ? 'brake' : wThr ? 'accel' : 'coast';
   if(st!==sndCur){
     // resuming onto the throttle mid-clip: half way through the sounding part,
     // not half way through the file, which would land inside the dead air
-    const rolling = (st==='accel' && sndCur==='brake' && carState.speed>0.6);
+    const rolling = (st==='accel' && sndCur==='brake' && wSpd>0.6);
     setSound(st, rolling && sbufTrim.accel ? sbufTrim.accel.len*0.5 : 0);
   }
 
-  kmhEl.textContent = Math.round(carState.speed*3.6);
+  kmhEl.textContent = Math.round(wSpd*3.6);
 }
 
 /* ------------------------------------------------------------- main loop */
@@ -4418,7 +4538,20 @@ function frame(now){
   updateDust(dt);
   updateDebris(dt);
 
-  const sp=carState.speed/MAXSPEED;
+  /* Which car the camera is on. Watching the preview means watching the
+     preview car -- through your own rig, in whatever mode you drive in,
+     cockpit included. It had its own hard-coded chase camera at 64 degrees
+     while the default view is the cockpit at 70, and a wider lens closer to
+     the ground reads as faster: the preview looked slower than your car partly
+     because you were watching it through a different lens. Same rig, same
+     mounts, same shake, or the comparison this thing exists to make is not a
+     comparison at all. */
+  const V = (previewOn && PVCAR && pvGroup && pvGroup.visible) ? PVCAR : PLAYER;
+  const vGroup = V.group||carGroup, vObj = (V===PVCAR ? pvObj : carObj);
+  const vSpeed = V.st.speed;
+  const vPoint = (x,y,z)=>pointOn(vObj,vGroup,x,y,z);
+
+  const sp=vSpeed/MAXSPEED;
   const C=CAMS[camMode];
 
   /* Every camera height below is measured from the car rather than from y=0.
@@ -4426,7 +4559,7 @@ function frame(now){
      them tens of metres underground the moment the car climbed -- at Spa the
      road reaches 66 m, so a chase camera pinned to y=3.15 sat inside the hill.
      On flat ground base is 0 and the framing is exactly what it was. */
-  const camBase=FREEROAM?carGroup.position.y-RIDE:0;
+  const camBase=FREEROAM?vGroup.position.y-RIDE:0;
   /* And a camera can still end up inside a slope even at the right height --
      behind the car on a descent, the ground behind is higher than the car. So
      lift it clear of whatever is under it. */
@@ -4436,20 +4569,8 @@ function frame(now){
     return v;
   };
 
-  /* Watching the preview means watching the preview car, not your own parked
-     one -- so the chase rig moves over to the ghost for as long as it runs,
-     and hands the view straight back when it stops. */
-  if(previewOn && AICAR && aiGroup.visible){
-    const h=AICAR.st.hdg, hx=Math.sin(h), hz=Math.cos(h);
-    const base=AICAR.groundY-RIDE;
-    camera.position.set(AICAR.st.wx-hx*9.5, base+3.15, AICAR.st.wz-hz*9.5);
-    clearGround(camera.position,1.2);
-    camera.up.set(0,1,0);
-    camera.lookAt(AICAR.st.wx+hx*8, base+1.15, AICAR.st.wz+hz*8);
-    camera.fov = 64 + clamp(AICAR.st.speed/MAXSPEED,0,1)*8;
-  }
-  else if(orbit){
-    const cx=carGroup.position.x, cz=carGroup.position.z;
+  if(orbit){
+    const cx=vGroup.position.x, cz=vGroup.position.z;
     camera.position.set(
       cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
       camBase+1.0+Math.sin(orbPitch)*orbDist,
@@ -4463,27 +4584,27 @@ function frame(now){
        the car was welded to it. Now that it steers, they follow the car: the
        cockpit looks where the nose points, and the chase sits behind the car's
        own heading rather than behind a point on the track you may have left. */
-    const LA=14+carState.speed*0.8;
-    const h=carGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
+    const LA=14+vSpeed*0.8;
+    const h=vGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
 
     if(C.chase){
       /* Sits behind at the car's own height, lifted clear if the ground
          behind happens to be higher, and aims down the slope the car is on so
          a descent shows the road rather than the sky. */
-      camera.position.set(carGroup.position.x-hx*C.back, camBase+C.up,
-                          carGroup.position.z-hz*C.back);
+      camera.position.set(vGroup.position.x-hx*C.back, camBase+C.up,
+                          vGroup.position.z-hz*C.back);
       clearGround(camera.position,1.2);
       camera.up.set(0,1,0);
-      camera.lookAt(carGroup.position.x+hx*8,
-                    camBase+1.15+Math.sin(PLAYER.carPitch)*8*CAM_SLOPE,
-                    carGroup.position.z+hz*8);
+      camera.lookAt(vGroup.position.x+hx*8,
+                    camBase+1.15+Math.sin(V.carPitch)*8*CAM_SLOPE,
+                    vGroup.position.z+hz*8);
     }else if(freeLook){
       /* Head moved and aimed in the car's own space, so it rides the shell.
          The eye offset is clamped at source, and the aim is built from the
          eye rather than from the centreline -- otherwise looking sideways
          would still drag the view back to the road ahead. */
       const ex=C.p[0], ey=C.p[1]+fUp, ez=C.p[2]+fFwd;
-      camera.position.copy(carPoint(ex,ey,ez));
+      camera.position.copy(vPoint(ex,ey,ez));
       // aim: a model-space point 24 m ahead of the eye along the yawed and
       // pitched gaze, then taken to world -- a point, so localToWorld is valid
       const cy=Math.cos(fPitch), R=24;   // fPitch is the head; the body's own
@@ -4491,20 +4612,20 @@ function frame(now){
       _fwd.set(ex + Math.sin(fYaw)*cy*R,
                ey + Math.sin(fPitch)*R,
                ez + Math.cos(fYaw)*cy*R);
-      if(carObj) carObj.localToWorld(_fwd);
-      else _fwd.set(carGroup.position.x, ey, carGroup.position.z+R);
+      if(vObj) vObj.localToWorld(_fwd);
+      else _fwd.set(vGroup.position.x, ey, vGroup.position.z+R);
       camera.up.set(0,1,0);
       camera.lookAt(_fwd);
     }else{
       // mount point is a real feature on the model, so it tracks the bodywork.
       // the seat trim applies here too, not just in free look.
-      const P=carPoint(C.p[0],C.p[1]+fUp,C.p[2]+fFwd);
+      const P=vPoint(C.p[0],C.p[1]+fUp,C.p[2]+fFwd);
       camera.position.copy(P);
       /* The aim was horizontal, so going downhill you looked at the horizon
          and could not see the road falling away underneath you. It now runs
          out along the slope the car is standing on, over-driven a little so a
          descent opens up properly rather than just clipping the nose. */
-      const aimP=clamp(PLAYER.carPitch*CAM_SLOPE, -0.62, 0.52);
+      const aimP=clamp(V.carPitch*CAM_SLOPE, -0.62, 0.52);
       _aim.set(P.x+hx*LA*Math.cos(aimP), P.y+0.06+Math.sin(aimP)*LA,
                P.z+hz*LA*Math.cos(aimP));
       camera.up.set(0,1,0);
