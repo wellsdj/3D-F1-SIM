@@ -155,6 +155,16 @@
   #tttime{font-size:clamp(30px,5.2vw,50px);font-weight:600;letter-spacing:-.01em;
           font-variant-numeric:tabular-nums;line-height:1.02;color:#f2f6fb}
   #tttime.hot{color:#37e06a}
+  #tttime.void{color:#ff5a4a}
+  /* why the lap died, under the time it died on */
+  #ttvoid{display:none;font-size:9px;letter-spacing:.28em;text-transform:uppercase;
+          color:#ff5a4a;margin-top:5px}
+  #ttvoid.on{display:block}
+  /* and how you are doing against your own best, where you are on the road */
+  #ttdelta{display:none;font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;
+           letter-spacing:.02em;margin-top:6px}
+  #ttdelta.on{display:block}
+  #ttdelta.up{color:#ff6b52} #ttdelta.dn{color:#37e06a}
   #ttunder{display:flex;gap:26px;justify-content:center;margin-top:8px}
   #ttunder b{display:block;font-size:15px;font-weight:600;letter-spacing:.02em;
              font-variant-numeric:tabular-nums;color:var(--amber);margin-top:1px}
@@ -229,6 +239,8 @@
 <div id="tt"><div id="ttcard">
   <div class="ttlbl">Lap</div>
   <div id="tttime">0:00.00</div>
+  <div id="ttvoid"></div>
+  <div id="ttdelta"></div>
   <div id="ttunder">
     <div><span class="ttlbl">Best</span><b id="ttbest">--:--.--</b></div>
     <div class="d"><span class="ttlbl">Last</span><b id="ttlast">--:--.--</b></div>
@@ -3259,13 +3271,15 @@ document.getElementById('gridcopy').onclick=e=>{
    the line, so it is one flying lap after another rather than a series of
    standing starts. */
 const TT_GATES=5, TT_HALF=16, TT_KEY='f1sim.tt.best.spa22';
+const TT_SPLITS_KEY='f1sim.tt.splits.spa22';
 /* Two phases before you drive, not one on top of the other: the drone shot
    runs first and the countdown starts when it ends. They used to overlap, so
    the numbers ticked away over a camera move nobody was watching them
    through, and the lights went out a moment after the cut -- which is exactly
    backwards. Watch the circuit, then count, then go. */
 const TT={ gates:[], hit:[], t:0, last:0, best:null, live:false, cd:0, drone:0,
-           prevX:0, prevZ:0, group:null, armed:false, started:false, shown:-1 };
+           prevX:0, prevZ:0, group:null, armed:false, started:false, shown:-1,
+           void:false, why:'', splits:[], bestSplits:null, delta:null, lastIdx:-1 };
 /* Two shots, then the count. The first is the whole circuit from above --
    seven kilometres of it, which is a thing worth seeing before you are asked
    to drive it -- and the second drops in behind the start line. Then three,
@@ -3297,7 +3311,6 @@ function ttBuild(){
     const d=(P.x-carState.wx)**2+(P.z-carState.wz)**2;
     if(d<bd){ bd=d; u0=u; }
   }
-  TT.group=new THREE.Group(); scene.add(TT.group);
   for(let i=0;i<=TT_GATES;i++){
     const u=(u0 + i/(TT_GATES+1)) % 1;
     curve.getPointAt(u,P); curve.getTangentAt(u,T);
@@ -3306,8 +3319,11 @@ function ttBuild(){
     const len=Math.hypot(T.x,T.z)||1;
     const dx=T.x/len, dz=T.z/len;
     const rx=dz, rz=-dx;                       // across the track
+    /* No mesh. The gates are invisible: they are a rule about where the car
+       has been, not scenery, and a row of glowing walls across the circuit
+       was the loudest thing on it. The five bars on the card still fill as
+       you take them, which is the part worth seeing. */
     TT.gates.push({ x:P.x, y, z:P.z, dx, dz, rx, rz, start:i===0 });
-    ttGateMesh(TT.gates[i], i);
   }
   TT.hit=new Array(TT_GATES).fill(false);
   /* Where the circuit is and how big it is, straight off the curve, so the
@@ -3323,38 +3339,7 @@ function ttBuild(){
   TT.ang0=Math.atan2(carState.wx-TT.cx, carState.wz-TT.cz);   // start over the grid
   tlMeasure(curve,L);
 }
-/* A gate you can see from a long way back and cannot mistake for scenery: a
-   band of light standing on the road, amber for the line and white for the
-   rest, going green as you take it. */
-function ttGateMesh(gate,i){
-  const w=TT_HALF*2, h=7;
-  const geo=new THREE.PlaneGeometry(w,h);
-  const col=gate.start?0xffb020:0x9fd8ff;
-  const mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.16,
-              side:THREE.DoubleSide,depthWrite:false});
-  const m=new THREE.Mesh(geo,mat);
-  m.position.set(gate.x,gate.y+h/2,gate.z);
-  m.rotation.y=Math.atan2(gate.dx,gate.dz);
-  m.renderOrder=997;
-  TT.group.add(m);
-  // a bright edge on the ground, which is what you actually aim at
-  const sg=new THREE.PlaneGeometry(w,1.1);
-  const sm=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.55,
-             side:THREE.DoubleSide,depthWrite:false});
-  const st=new THREE.Mesh(sg,sm);
-  st.rotation.x=-Math.PI/2; st.rotation.z=-Math.atan2(gate.dx,gate.dz);
-  st.position.set(gate.x,gate.y+0.06,gate.z);
-  st.renderOrder=998;
-  TT.group.add(st);
-  gate.mesh=m; gate.strip=st; gate.col=col;
-}
 function ttPaint(){
-  TT.gates.forEach((g,i)=>{
-    const on = i>0 && TT.hit[i-1];
-    const c = on?0x37e06a:g.col;
-    if(g.mesh){ g.mesh.material.color.setHex(c); g.mesh.material.opacity=on?0.10:0.16; }
-    if(g.strip){ g.strip.material.color.setHex(c); }
-  });
   const pips=document.querySelectorAll('#ttpips i');
   pips.forEach((el,i)=>{ el.className = TT.hit[i]?'on':''; });
 }
@@ -3380,12 +3365,39 @@ function ttFlash(kind,big,sub){
   TT._ft=setTimeout(()=>{ el.className=''; }, 2600);
 }
 function ttReset(){
-  TT.t=0; TT.started=false; TT.hit=new Array(TT_GATES).fill(false); ttPaint();
+  TT.t=0; TT.started=false; TT.hit=new Array(TT_GATES).fill(false);
+  TT.void=false; TT.why=''; TT.splits=[]; TT.delta=null; TT.lastIdx=-1;
+  ttPaint();
+}
+/* The delta is your own best lap, held as the time it was at every station
+   round the circuit -- 1741 of them, four metres apart, the same stations
+   track limits already measures against. Where you are now, what the clock
+   said there last time, and the difference is the number. It is saved with
+   the lap it came from, so it is still there tomorrow. */
+function ttSplit(){
+  const st=tlStation(carState.wx,carState.wz);
+  if(!st) return;
+  const i=tlIdx;
+  if(i!==TT.lastIdx){
+    TT.lastIdx=i;
+    if(TT.splits[i]===undefined) TT.splits[i]=TT.t;
+  }
+  if(TT.bestSplits && TT.bestSplits[i]>0) TT.delta=TT.t-TT.bestSplits[i];
+}
+function ttSaveBest(){
+  try{
+    localStorage.setItem(TT_KEY,String(TT.best));
+    const packed=TT.splits.map(v=>v===undefined?0:+v.toFixed(2));
+    localStorage.setItem(TT_SPLITS_KEY,JSON.stringify(packed));
+  }catch(e){}
+  TT.bestSplits=TT.splits.slice();
 }
 function ttStart(){
   ttBuild();
   if(!TT.gates.length) return;
-  try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b; }catch(e){}
+  try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b;
+       const sp=JSON.parse(localStorage.getItem(TT_SPLITS_KEY)||'null');
+       if(Array.isArray(sp)&&sp.length) TT.bestSplits=sp; }catch(e){}
   TT.live=true; TT.drone=TT_DRONE; TT.cd=TT_COUNT; TT.shown=-1; TT.armed=false;
   document.body.classList.add('cinema');
   ttReset();
@@ -3425,6 +3437,7 @@ function ttStep(dt){
   }
   TT.t+=dt;
   tlCheck();
+  ttSplit();
   const x0=TT.prevX, z0=TT.prevZ, x1=carState.wx, z1=carState.wz;
   TT.prevX=x1; TT.prevZ=z1;
   if(x0===x1 && z0===z1) { ttHUD(); return; }
@@ -3446,20 +3459,22 @@ function ttLine(){
      without driving. Until then, crossing the line just starts the clock
      again. */
   if(!TT.started){ ttReset(); return; }
-  if(missed>=0){
-    ttFlash('bad','LAP DELETED','you missed gate '+(missed+1)+' of '+TT_GATES);
-    const pip=document.querySelectorAll('#ttpips i')[missed];
-    if(pip) pip.className='miss';
+  if(missed>=0 || TT.void){
+    const why = TT.void ? TT.why : ('missed gate '+(missed+1));
+    if(missed>=0){ const pip=document.querySelectorAll('#ttpips i')[missed];
+                   if(pip) pip.className='miss'; }
+    ttFlash('bad','LAP DELETED', why);
     TT.last=0;
-    setTimeout(ttReset,900);
-    TT.t=0;
+    const keep=()=>{ ttReset(); };
+    setTimeout(keep,700);
+    TT.t=0; TT.void=false; TT.why='';
     return;
   }
   TT.last=TT.t;
   const rec = TT.best===null || TT.t<TT.best;
   if(rec){
     TT.best=TT.t;
-    try{ localStorage.setItem(TT_KEY,String(TT.t)); }catch(e){}
+    ttSaveBest();
     ttFlash('rec','NEW BEST',ttFmt(TT.t));
   } else {
     ttFlash('good','LAP '+ttFmt(TT.t),'+'+(TT.t-TT.best).toFixed(2)+' off your best');
@@ -3468,8 +3483,24 @@ function ttLine(){
 }
 function ttHUD(){
   const te=document.getElementById('tttime');
-  if(te){ te.textContent=ttFmt(TT.t||0.001).replace('--:--.--','0:00.00');
-          te.classList.toggle('hot', TT.best!==null && TT.t>0 && TT.t<TT.best); }
+  if(te){
+    te.textContent = TT.void ? 'N/A' : ttFmt(TT.t||0.001).replace('--:--.--','0:00.00');
+    te.classList.toggle('void', TT.void);
+    te.classList.toggle('hot', !TT.void && TT.best!==null && TT.t>0 && TT.t<TT.best);
+  }
+  const ve=document.getElementById('ttvoid');
+  if(ve){ ve.textContent = TT.void ? ('Lap deleted · '+TT.why) : '';
+          ve.classList.toggle('on', TT.void); }
+  const de=document.getElementById('ttdelta');
+  if(de){
+    const show = !TT.void && TT.delta!==null && TT.started;
+    de.classList.toggle('on', show);
+    if(show){
+      de.textContent=(TT.delta>=0?'+':'−')+Math.abs(TT.delta).toFixed(2);
+      de.classList.toggle('up', TT.delta>=0);
+      de.classList.toggle('dn', TT.delta<0);
+    }
+  }
   const be=document.getElementById('ttbest'); if(be) be.textContent=ttFmt(TT.best);
   const le=document.getElementById('ttlast'); if(le) le.textContent=ttFmt(TT.last);
 }
@@ -3673,10 +3704,15 @@ function tlCheck(){
   if(++_tlFrames<2) return;                      // one frame is noise, not a lap
   _tlFrames=0;
   if(!TT.started) return;                        // nothing to delete yet
-  ttFlash('bad','TRACK LIMITS', TL_TOL>0 ? 'all four wheels more than a metre over the line'
-                                         : 'all four wheels over the white line');
-  TT.last=0; TT.t=0;
-  ttReset();
+  ttVoid('track limits');
+}
+/* A lap that is gone. The clock is not wiped and no banner is thrown across
+   the screen: the time turns red, it says underneath what killed it, and it
+   keeps running until you come back round to the line, which is where a lap
+   ends whether or not it counted. */
+function ttVoid(why){
+  if(TT.void) return;
+  TT.void=true; TT.why=why;
 }
 
 /* ------------------------------------------------------- save and restore
@@ -4438,7 +4474,11 @@ window.SIM={
                   PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
   speed(v){ carState.speed=v; },
   hold(k,on){ keys[k]=!!on; },
-  skipCountdown(){ TT.cd=0.001; },
+  seedBest(perStation){    // a synthetic best lap, for testing the delta
+    TT.bestSplits=tlSt.map((_,i)=>i*perStation); TT.best=tlSt.length*perStation; return TT.bestSplits.length; },
+  get station(){ return tlIdx; },
+  skipCountdown(){ TT.drone=0; TT.cd=0.001; document.body.classList.remove('cinema');
+                   if(scene.fog&&TT._fog!==undefined){ scene.fog.density=TT._fog; TT._fog=undefined; } },
   depth(){ return CARPTS.length===4 ? CARPTS.map(c=>{ const h=carState.hdg,fx=Math.sin(h),fz=Math.cos(h);
       return +roadDepth(carState.wx+c.x*fz+c.z*fx, carState.wz-c.x*fx+c.z*fz).toFixed(2); }) : null; },
   matAt(x,z){
