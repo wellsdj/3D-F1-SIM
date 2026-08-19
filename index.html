@@ -60,6 +60,34 @@
               padding:6px 10px;cursor:pointer}
   #gridtoggle:hover{background:rgba(255,255,255,.12)}
   #gridtoggle.hide{display:none}
+  /* --------------------------------------------- track limits, by hand */
+  #tlbtn{position:fixed;right:18px;top:96px;z-index:8;font-family:var(--mono);
+         font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
+         background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:4px;
+         padding:7px 11px;cursor:pointer}
+  #tlbtn:hover{background:rgba(255,255,255,.12)}
+  #tlbtn.on{background:rgba(255,176,32,.2);border-color:rgba(255,176,32,.6);color:#ffdca6}
+  #tlpanel{position:fixed;right:18px;top:132px;z-index:8;width:246px;display:none;
+           font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--paper);
+           background:rgba(6,9,14,.86);border:1px solid rgba(255,255,255,.12);
+           border-radius:9px;padding:12px 13px;backdrop-filter:blur(8px)}
+  #tlpanel.on{display:block}
+  #tlpanel h4{margin:0 0 9px;font-size:9px;letter-spacing:.28em;text-transform:uppercase;
+              opacity:.55;font-weight:400}
+  #tlpanel .row{display:flex;gap:6px;margin-top:7px}
+  #tlpanel button{flex:1;font:inherit;font-size:9.5px;letter-spacing:.12em;
+                  text-transform:uppercase;color:var(--paper);cursor:pointer;
+                  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+                  border-radius:5px;padding:6px 4px}
+  #tlpanel button:hover{background:rgba(255,255,255,.14)}
+  #tlpanel button.on{background:var(--amber);border-color:var(--amber);color:#111}
+  #tllist{margin-top:9px;max-height:126px;overflow:auto;line-height:1.85;
+          font-size:9.5px;opacity:.72;border-top:1px solid rgba(255,255,255,.09);
+          padding-top:7px}
+  #tllist div span{opacity:.45;margin-right:7px}
+  #tlhint{margin-top:8px;font-size:9px;opacity:.42;line-height:1.7;text-transform:none;
+          letter-spacing:.04em}
+
   #gridpanel .tabs{margin-bottom:9px}
   #gridpanel button.tab{opacity:.5;background:none}
   #gridpanel button.tab.on{opacity:1;background:rgba(255,255,255,.14);color:var(--amber)}
@@ -202,6 +230,23 @@
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
 <div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Aids <em id="aname">On</em><br>Frames <em id="fname">60</em></div>
 <button id="gridtoggle" style="display:none">Editor</button>
+<button id="tlbtn">Track limits</button>
+<div id="tlpanel">
+  <h4>Track limits &mdash; mark the edges</h4>
+  <div class="row">
+    <button id="tledgeA" class="on">Inside</button>
+    <button id="tledgeB">Outside</button>
+  </div>
+  <div class="row">
+    <button id="tlundo">Undo</button>
+    <button id="tlclear">Clear</button>
+    <button id="tlcopy">Copy</button>
+  </div>
+  <div id="tllist"></div>
+  <div id="tlhint">Click the track to drop a point on the edge you are marking.
+    Eight a side is enough to take over from the measured line; more is better.</div>
+</div>
+
 <div id="gridpanel">
   <div class="row tabs">
     <button id="tabgrid" class="tab">Grid</button>
@@ -3036,9 +3081,9 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
-  if(k==='c'){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
-  if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
-  if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
+  if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
+  if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
+  if(k==='v' && !(TT.live&&TT.drone>0)){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
   if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
   if(k==='t'){ AIDS=!AIDS; updateStatus(); }
@@ -3650,13 +3695,138 @@ function tlMeasure(curve,L){
       if(Math.abs(raw[i]-m)>3.5) tlSt[i][key]=m;
     }
   }
+  /* And if the edges have been marked by hand, they win. Each station takes
+     the nearest point on each marked line; which line is which does not
+     matter, because the side comes out of the geometry. A station too far
+     from both keeps what was measured, so a half-marked circuit is still
+     drivable. */
+  if(tleLines[0].length>=8 && tleLines[1].length>=8){
+    let used=0;
+    for(const st of tlSt){
+      /* Each side takes the marked line that is nearest to it on that side.
+         Sides are handled one at a time rather than as a pair, so a station
+         where only one line is close still gets the benefit of it -- which
+         matters through a hairpin, where a line clicked every eighty metres
+         cuts the corner and lands well away on the inside. */
+      let bR=null, bL=null;
+      for(const line of tleLines){
+        const o=tleOffset(line,st.x,st.z,st.rx,st.rz);
+        if(!o||o.dist>40) continue;
+        if(o.off>0.5){ if(!bR||o.dist<bR.dist) bR=o; }
+        else if(o.off<-0.5){ if(!bL||o.dist<bL.dist) bL=o; }
+      }
+      if(bR){ st.dR=bR.off; used++; }
+      if(bL){ st.dL=-bL.off; used++; }
+    }
+    console.log('track limits: '+used+' of '+(tlSt.length*2)+' station edges taken from the marked lines');
+  }
   const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
   console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
     +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
     +' m, max '+w[w.length-1].toFixed(1)+' m');
 }
+
+/* ------------------------------------------- track limits, marked by hand
+   The measured edge is good and it is not perfect: it is read off the white
+   lines with a ray every four metres, and where the paint is missing, or the
+   run-off is bare asphalt, or the pit lane runs alongside, it has to guess.
+   Clicking on the real thing beats guessing.
+
+   Two lines, inside and outside. Click along an edge and the points land at
+   the true ground height under the cursor, exactly like the barrier tool. The
+   panel shows what you have placed, in the model's own coordinate frame -- the
+   frame spawnAt is written in, so the numbers survive a reload and can be
+   pasted into the file for good.
+
+   Eight points a side and they take over from the measurement: each station
+   round the lap looks for the nearest point on each marked line and takes its
+   edge from that instead. Which line is which does not matter, since the side
+   is worked out from the geometry -- draw them in whatever order suits you. */
+let tleOn=false, tleEdge=0, tleLines=[[],[]], tleGroup=null;
+const TLE_KEY='f1sim.tl.edges.spa22';
+const TLE_COL=[0x33ddff, 0xffb020];
+
+function tleModel(v){ return gridToModel(v); }
+function tleSave(){
+  try{ localStorage.setItem(TLE_KEY, JSON.stringify(tleLines.map(l=>l.map(tleModel)))); }catch(e){}
+}
+function tleLoad(){
+  try{
+    const d=JSON.parse(localStorage.getItem(TLE_KEY)||'null');
+    if(Array.isArray(d)&&d.length===2) tleLines=d.map(l=>l.map(editModelToWorld));
+  }catch(e){}
+}
+function tleShow(on){
+  tleOn=on;
+  document.getElementById('tlbtn').classList.toggle('on',on);
+  document.getElementById('tlpanel').classList.toggle('on',on);
+  tleRedraw(); tlePanel();
+}
+function tleRedraw(){
+  if(tleGroup){ scene.remove(tleGroup);
+    tleGroup.traverse(o=>{ if(o.geometry) o.geometry.dispose(); }); tleGroup=null; }
+  if(!tleOn) return;
+  tleGroup=new THREE.Group(); scene.add(tleGroup);
+  const dot=new THREE.SphereGeometry(0.55,10,8);
+  tleLines.forEach((pts,li)=>{
+    const col=TLE_COL[li];
+    pts.forEach(p=>{
+      const m=new THREE.Mesh(dot,new THREE.MeshBasicMaterial({color:col,depthTest:false}));
+      m.position.set(p.x,p.y+0.5,p.z); m.renderOrder=1001; tleGroup.add(m);
+    });
+    if(pts.length>1){
+      const g=new THREE.BufferGeometry();
+      const a=new Float32Array(pts.length*3);
+      pts.forEach((p,i)=>{ a[i*3]=p.x; a[i*3+1]=p.y+0.25; a[i*3+2]=p.z; });
+      g.setAttribute('position',new THREE.BufferAttribute(a,3));
+      const ln=new THREE.Line(g,new THREE.LineBasicMaterial({color:col,depthTest:false}));
+      ln.renderOrder=1001; tleGroup.add(ln);
+    }
+  });
+}
+function tlePanel(){
+  const el=document.getElementById('tllist'); if(!el) return;
+  const pts=tleLines[tleEdge];
+  const rows=pts.slice(-7).map((p,i)=>{
+    const m=tleModel(p), n=pts.length-Math.min(7,pts.length)+i+1;
+    return '<div><span>'+String(n).padStart(2,'0')+'</span>'+m[0]+', '+m[1]+'</div>';
+  });
+  el.innerHTML = (pts.length? rows.join('') : '<div style="opacity:.4">nothing marked yet</div>')
+    + '<div style="margin-top:6px;opacity:.5">inside '+tleLines[0].length
+    + ' · outside '+tleLines[1].length
+    + (tleLines[0].length>=8&&tleLines[1].length>=8 ? ' — in use' : ' — measured line still in use')+'</div>';
+}
+function tleClick(clientX,clientY){
+  const p=markScreenToGround(clientX,clientY);
+  if(!p) return;
+  tleLines[tleEdge].push(p);
+  tleSave(); tleRedraw(); tlePanel();
+  if(tleLines[0].length>=8&&tleLines[1].length>=8) ttRemeasure();
+}
+function tleText(){
+  return JSON.stringify(tleLines.map(l=>l.map(tleModel)));
+}
+/* Nearest point on a marked line, as an offset along the station's own across
+   direction: positive to the right of the racing line, negative to the left. */
+function tleOffset(pts, x, z, rx, rz){
+  let best=Infinity, bx=0, bz=0;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i];
+    const ux=b.x-a.x, uz=b.z-a.z, L=ux*ux+uz*uz||1e-9;
+    const t=clamp(((x-a.x)*ux+(z-a.z)*uz)/L,0,1);
+    const px=a.x+ux*t, pz=a.z+uz*t;
+    const d=(px-x)**2+(pz-z)**2;
+    if(d<best){ best=d; bx=px; bz=pz; }
+  }
+  if(!isFinite(best)) return null;
+  return { off:(bx-x)*rx+(bz-z)*rz, dist:Math.sqrt(best) };
+}
+
 /* The station the car is at, searched around where it was so a hairpin's
    return leg cannot claim it. */
+function ttRemeasure(){
+  if(TT.curve && TT.len) tlMeasure(TT.curve,TT.len);
+}
 function tlStation(x,z){
   const n=tlSt.length; if(!n) return null;
   let bi=tlIdx, bd=Infinity;
@@ -3696,6 +3866,19 @@ function tlWheelOn(lx,lz){
   return off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL;
 }
 tlLoad(); tlSet(TL_TOL);
+document.getElementById('tlbtn').onclick=()=>tleShow(!tleOn);
+document.getElementById('tledgeA').onclick=()=>{ tleEdge=0;
+  document.getElementById('tledgeA').classList.add('on');
+  document.getElementById('tledgeB').classList.remove('on'); tlePanel(); };
+document.getElementById('tledgeB').onclick=()=>{ tleEdge=1;
+  document.getElementById('tledgeB').classList.add('on');
+  document.getElementById('tledgeA').classList.remove('on'); tlePanel(); };
+document.getElementById('tlundo').onclick=()=>{ tleLines[tleEdge].pop(); tleSave();
+  tleRedraw(); tlePanel(); ttRemeasure(); };
+document.getElementById('tlclear').onclick=()=>{ tleLines[tleEdge]=[]; tleSave();
+  tleRedraw(); tlePanel(); ttRemeasure(); };
+document.getElementById('tlcopy').onclick=e=>{ const t=tleText();
+  console.log('track limit edges (model coordinates):\n'+t); copyFlash(e.currentTarget,t); };
 function tlCheck(){
   if(!TT.live || TT.cd>0 || CARPTS.length!==4) return;
   let on=0;
@@ -3756,6 +3939,10 @@ canvas.addEventListener('pointerdown',e=>{
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
+  if(moved<8 && tleOn){
+    tleClick(e.clientX,e.clientY);
+    return;
+  }
   if(moved<8 && gridMode && editTab==='grid'){
     if(gridPts.length<GRID_MAX){
       const p=markScreenToGround(e.clientX,e.clientY);
@@ -3768,6 +3955,9 @@ canvas.addEventListener('pointerup',e=>{
     if(p){ markPts.push(p); markRedraw(); }
     return;
   }
+  // the opening shots are a cutscene: a stray tap or drag must not cycle the
+  // camera or drop you into orbit halfway through one
+  if(TT.live && TT.drone>0) return;
   if(moved<8 && !freeLook){          // a tap, not a drag — cycle the view
     if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
     updateStatus();
@@ -3785,6 +3975,7 @@ canvas.addEventListener('pointermove',e=>{
   }
   orbYaw   -= dx*0.005;
   orbPitch = clamp(orbPitch+dy*0.004,-0.12,1.15);
+  if(TT.live && TT.drone>0) return;      // not during the opening shots
   if(!orbit && moved>8){ orbit=true; updateStatus(); }
 });
 // the wheel only zooms the orbit camera; nothing but the arrows moves the eye
@@ -4474,6 +4665,14 @@ window.SIM={
                   PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
   speed(v){ carState.speed=v; },
   hold(k,on){ keys[k]=!!on; },
+  mark(edge, pts){          // drop points on an edge, as the mouse would
+    tleLines[edge]=pts.map(m=>editModelToWorld(m));
+    tleSave(); tleRedraw(); tlePanel(); ttRemeasure();
+    return tleLines[edge].length; },
+  toModel(x,z){ return gridToModel(new THREE.Vector3(x,0,z)); },
+  get marked(){ return [tleLines[0].length, tleLines[1].length]; },
+  station2(x,z){ const st=tlStation(x,z); return st?{dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2)}:null; },
+  edgeAt(i){ const st=tlSt[i]; return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:+st.dR.toFixed(2),dL:+st.dL.toFixed(2)}:null; },
   seedBest(perStation){    // a synthetic best lap, for testing the delta
     TT.bestSplits=tlSt.map((_,i)=>i*perStation); TT.best=tlSt.length*perStation; return TT.bestSplits.length; },
   get station(){ return tlIdx; },
@@ -4967,6 +5166,7 @@ function startTrack(id){
       scene.fog.density=0.00035;
       buildWorld();
       editRestore();          // gate positions come off the hand-clicked lap
+      tleLoad();
       ttStart();
       return;
     }
