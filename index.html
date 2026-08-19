@@ -3236,12 +3236,22 @@ let lineGroup=null, lineDots=[], lineRibbon=null;
    loops back on itself wherever two control points land close together, and
    clicks bunch up in the slow corners, which is exactly where a loop would
    be worst. Centripetal cannot self-intersect between control points. */
-let lineSmooth=[], lineCum=[], lineLen=0;
+let lineSmooth=[], lineCum=[], lineLen=0, lineClosed=false;
 const LINE_STEP=2.5;             // metres between samples along the curve
 function lineBuildCurve(){
   lineSmooth=[]; lineCum=[]; lineLen=0;
   if(linePath.length<2) return;
-  const curve=new THREE.CatmullRomCurve3(linePath.map(v=>v.clone()),false,'centripetal',0.5);
+  /* Closed, so the lap joins up. It was an open curve, which left the stretch
+     between the last point you clicked and the first one as a hole: no ribbon
+     to click on, no samples to follow, and a preview that ran out of line at
+     the start/finish and stopped. A closed centripetal Catmull-Rom carries
+     the curvature across the join like any other part of the lap, so the
+     corner there is a corner rather than a kink or a gap.
+
+     A short line is left open -- three or four points are somebody starting
+     to draw, not a lap, and closing those would loop the car back on itself. */
+  lineClosed = linePath.length>=8;
+  const curve=new THREE.CatmullRomCurve3(linePath.map(v=>v.clone()),lineClosed,'centripetal',0.5);
   const n=Math.max(2,Math.min(4000,Math.round(curve.getLength()/LINE_STEP)));
   lineSmooth=curve.getSpacedPoints(n);
   // sit every sample on the actual ground -- interpolating height between
@@ -3275,11 +3285,21 @@ function lineAt(s){
   out.hdg=Math.atan2(b.x-a.x,b.z-a.z);
   return out;
 }
-function pedalAt(s){
-  if(!pedalPts.length) return {thr:0,brk:0};
+const PEDAL_LAUNCH={thr:100,brk:0};
+function pedalAt(s, lapped){
   let best=null;
   for(const q of pedalPts){ if(q.s<=s) best=q; else break; }
-  return best || pedalPts[0];
+  if(best) return best;
+  /* Nothing has been said yet. On the first lap that means a car being let go
+     from a standstill, and a car being let go goes -- flat, until the first
+     marker says otherwise. This is what was making it crawl from the moment
+     you pressed Preview to the exit of Turn 1: the stretch before the first
+     marker was being given that marker's own instruction, and the first
+     marker on a lap of Spa is the brake board for La Source. It sat there
+     braking down the whole start straight and only came alive once it was
+     past the thing. Coming round again it has genuinely passed the last
+     marker of the lap, so from the second lap on that is what holds. */
+  return lapped ? (pedalPts[pedalPts.length-1]||PEDAL_LAUNCH) : PEDAL_LAUNCH;
 }
 function pedalSort(){
   const keep=pedalSel>=0?pedalPts[pedalSel]:null;
@@ -3440,7 +3460,7 @@ function linePanel(){
      differ. Both are on the panel, so a car that will not pull away says why:
      a low throttle figure, or a surface that is not road. */
   el.innerHTML = previewOn
-    ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m</div>'+
+    ? '<div><b id="pvspeed">0</b> km/h · <b id="pvdist">0</b> m · lap <b id="pvlap">1</b></div>'+
       '<div style="opacity:.7">thr <b id="pvthr">0</b>% · brk <b id="pvbrk">0</b>%'+
       ' · pedal <b id="pvpedal">lift</b></div>'+
       '<div style="opacity:.7">accel <b id="pvacc">0 / 0</b> m/s² · '+
@@ -3496,8 +3516,14 @@ document.getElementById('linecopy').onclick=e=>{
    (1 - v^2) knee, same top end. */
 let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
     pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
-    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvFlat=false,
+    pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0,
     pvQ={thr:0,brk:0};
+/* Flat out, on by default: the throttle stays on the floor for the whole line
+   and the markers are not consulted at all. It is the plain question -- what
+   does this car do on this line, driven the way you drive it -- and it is the
+   one you want answered first. Turn it off with the button and the markers
+   drive it again, which is what you want once the line is worth timing. */
+let pvFlat=true;
 const PV_PULSE=0.10;             // seconds: one feather of a part-pressed pedal
 
 /* The same node in the copy as in the original, found by its place in the
@@ -3552,7 +3578,7 @@ function previewStart(){
      in a gravel trap otherwise starts the next one with gravel drag and
      engine bog still applied, which reads as a car that will not pull away. */
   probeCar(PVCAR.st.wx, PVCAR.st.wz, PVCAR.st.hdg, PVCAR.groundY-RIDE, PVCAR.surf);
-  pvIdx=0; pvS=0; pvPhase=0; pvAcc=0; pvPrevSpd=0; pvHeldT=0; pvHeldB=0;
+  pvIdx=0; pvS=0; pvPhase=0; pvAcc=0; pvPrevSpd=0; pvHeldT=0; pvHeldB=0; pvLap=0;
   pvGroup.visible=true; previewOn=true;
   document.getElementById('linepreview').textContent='Stop';
   dm('dmpreview').textContent='Stop';
@@ -3573,12 +3599,17 @@ document.getElementById('linereset').onclick=previewReset;
    is quick like this and slow with your numbers is telling you the numbers
    are what is slow, and a car that is slow even here is telling you the fault
    is in the car or the ground under it, not in the authoring. */
+function pvFlatBtn(){
+  const b=document.getElementById('lineflat');
+  if(!b) return;
+  b.textContent=pvFlat?'Flat out ✓':'Use markers';
+  b.style.opacity=pvFlat?'1':'';
+}
 document.getElementById('lineflat').onclick=()=>{
-  pvFlat=!pvFlat;
-  document.getElementById('lineflat').style.opacity=pvFlat?'1':'';
-  document.getElementById('lineflat').textContent=pvFlat?'Flat out ✓':'Flat out';
-  if(!previewOn) previewStart(); else { pvIdx=0; pvS=0; previewStart(); }
+  pvFlat=!pvFlat; pvFlatBtn();
+  if(previewOn) previewStart();     // from the top, so the change is visible
 };
+pvFlatBtn();
 
 /* How far round it has got. Searched forward from where it was, over a window
    rather than the whole lap, so a car that has run wide keeps a sensible idea
@@ -3588,11 +3619,14 @@ document.getElementById('lineflat').onclick=()=>{
 function pvTrackProgress(){
   const N=lineSmooth.length, win=Math.ceil(90/LINE_STEP);
   let bi=pvIdx, bd=Infinity;
-  for(let i=pvIdx;i<Math.min(N,pvIdx+win);i++){
+  for(let k=0;k<win;k++){
+    // round the join on a closed lap, and stop at the end of an open one
+    const i=lineClosed?(pvIdx+k)%N:Math.min(pvIdx+k,N-1);
     const dx=lineSmooth[i].x-PVCAR.st.wx, dz=lineSmooth[i].z-PVCAR.st.wz;
     const d=dx*dx+dz*dz;
     if(d<bd){ bd=d; bi=i; }
   }
+  if(bi<pvIdx) pvLap++;         // searched forward, so this only means it wrapped
   pvIdx=bi; pvS=lineCum[bi];
   return Math.sqrt(bd);                       // how far off the line it is
 }
@@ -3631,7 +3665,7 @@ function pvStick(C, wantAng){
    pursuit -- aim at a point up the line, further ahead the faster it is
    going, and ask for the arc that reaches it. */
 function pvInputs(C,dt){
-  let q=pvFlat ? {thr:100,brk:0} : pedalAt(pvS);
+  let q=pvFlat ? PEDAL_LAUNCH : pedalAt(pvS, pvLap>0);
   /* A marker holds until the next one -- but a brake marker has nothing left
      to do once the car is stopped, and holding it is a deadlock: the car sits
      still, so its distance along the line never advances, so the marker in
@@ -3645,8 +3679,10 @@ function pvInputs(C,dt){
   pvPhase+=dt; pvQ=q;
   pvHeldT=pvPedal(q.thr); pvHeldB=pvPedal(q.brk);
   const look=clamp(7+C.st.speed*0.62,9,55);
-  const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
-  const T=lineSmooth[ti];
+  const N=lineSmooth.length, ahead=pvIdx+Math.round(look/LINE_STEP);
+  // it aims across the join too, or it would drive at the last point of the
+  // lap as though the road stopped there
+  const T=lineSmooth[lineClosed?ahead%N:Math.min(ahead,N-1)];
   const fx=Math.sin(C.st.hdg), fz=Math.cos(C.st.hdg);
   const dx=T.x-C.st.wx, dz=T.z-C.st.wz;
   const L=Math.max(Math.hypot(dx,dz),1e-3);
@@ -3659,7 +3695,8 @@ function previewStep(dt,t){
   dotMenuTrack();
   if(!previewOn||lineSmooth.length<2||!PVCAR) return;
   const off=pvTrackProgress();
-  if(pvIdx>=lineSmooth.length-2){ previewReset(); return; }   // end of the line
+  // an open line runs out; a closed one is a lap, so it keeps going round
+  if(!lineClosed && pvIdx>=lineSmooth.length-2){ previewReset(); return; }
 
   const inp=pvInputs(PVCAR,dt);
   stepCar(PVCAR, inp, dt);
@@ -3702,6 +3739,7 @@ function previewStep(dt,t){
     sf.style.color = (S.loose||S.grass) ? '#ff5544' : '';
   }
   const ds=document.getElementById('pvdist'); if(ds) ds.textContent=Math.round(pvS);
+  const lp=document.getElementById('pvlap'); if(lp) lp.textContent=pvLap+1;
   const ow=document.getElementById('pvoff');
   if(ow){ ow.textContent=off.toFixed(0);
           ow.style.color = off>6 ? '#ff5544' : ''; }
