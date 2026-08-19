@@ -143,6 +143,22 @@
            letter-spacing:.3em;color:#37e06a;text-shadow:0 0 22px rgba(55,224,106,.75);
            pointer-events:none;opacity:0;transition:opacity .45s ease;z-index:6}
   #golabel.show{opacity:1}
+  /* the race: a countdown in the middle of the screen and a gap you can read
+     without looking away from the road */
+  #racebox{position:fixed;left:50%;top:14vh;transform:translateX(-50%);text-align:center;
+           font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
+           font-size:12px;color:#e9eef5;opacity:0;transition:opacity .3s ease;
+           pointer-events:none;z-index:6;text-shadow:0 2px 12px rgba(0,0,0,.8)}
+  #racebox.show{opacity:.92}
+  #racegap{display:block;font-size:clamp(22px,4vw,40px);letter-spacing:.04em;
+           font-variant-numeric:tabular-nums;margin-top:2px}
+  #racegap.ahead{color:#37e06a} #racegap.behind{color:var(--amber)}
+  #raceend{position:fixed;left:50%;top:32vh;transform:translateX(-50%);text-align:center;
+           font-family:var(--mono);font-size:clamp(20px,4.4vw,44px);letter-spacing:.2em;
+           text-transform:uppercase;color:#e9eef5;opacity:0;transition:opacity .4s ease;
+           pointer-events:none;z-index:7;text-shadow:0 0 24px rgba(0,0,0,.9)}
+  #raceend.show{opacity:1}
+  #raceend small{display:block;font-size:12px;letter-spacing:.16em;opacity:.7;margin-top:10px}
   @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px}
                             #cmap{width:120px;height:138px;top:204px} }
   @media (max-height:620px){ #cmap{display:none} }
@@ -186,6 +202,9 @@
       <button id="linereset">Reset</button>
       <button id="lineflat" title="Ignore the markers and hold the throttle flat: the car's own acceleration, on your line">Flat out</button>
     </div>
+    <div class="row" style="margin-top:6px">
+      <button id="linerace" title="One lap, side by side off the line, against the AI">Race the AI</button>
+    </div>
   </div>
 
   <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
@@ -218,7 +237,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights</div>
+  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights · <kbd>K</kbd> race the ai</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -230,6 +249,8 @@
   <div class="col"><b></b><b></b></div>
 </div>
 <div id="golabel">GO</div>
+<div id="racebox"><span id="racelap">LAP 1</span><span id="racegap">--</span></div>
+<div id="raceend"><span id="raceendmsg"></span><small id="raceendsub"></small></div>
 
 <div id="boot">
   <p id="bootmsg">Spa-Francorchamps</p>
@@ -3018,6 +3039,7 @@ addEventListener('keydown',e=>{
     updateStatus(); }
   if(k==='n'){ markExport(); }
   if(k==='p'){ gridShow(!gridMode); }
+  if(k==='k'){ raceOn?raceStop():raceStart(); }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -3845,7 +3867,10 @@ function pvCornerSpeed(s, v){
 }
 function previewStep(dt,t){
   dotMenuTrack();
-  if(!previewOn||lineSmooth.length<2||!PVCAR||!lineLen) return;
+  // the same car runs in a race; what differs there is only that the camera
+  // and the engine note stay with you, since you are the one driving
+  if(!(previewOn||raceOn)||lineSmooth.length<2||!PVCAR||!lineLen) return;
+  if(raceOn && raceCd>0) return;                     // held on the line
 
   /* The AI is on the line, and "on" is meant literally: its position is a
      distance along the curve and its heading is the curve's own tangent, so
@@ -3940,6 +3965,128 @@ function pvClock(sec){
   const m=Math.floor(sec/60), s=sec-m*60;
   return m+':'+(s<10?'0':'')+s.toFixed(1);
 }
+
+/* --------------------------------------------------------------- the race
+   One lap of the line, side by side off the start, 3-2-1-GO.
+
+   The AI is the preview car doing exactly what it does in a preview -- on the
+   line, flat where the line allows it, off the throttle early enough for the
+   corner it is coming to -- so a race is an honest measure of the line as much
+   as of you. What changes is who the camera and the engine note belong to:
+   both stay with your car, because you are driving.
+
+   Where each car goes is the only thing that has to be invented here. The AI
+   starts on the line, since that is where it lives; you start beside it, one
+   car's width to the right, which is the side the run-off is on at the start
+   at Spa. Your progress is measured along the same curve it drives, so the
+   gap between you is a real distance on the same lap rather than two
+   different measurements compared.
+
+   You can leave the road, spin, or drive the lap backwards -- the gap simply
+   stops making sense until you rejoin, which is a fair description of what
+   has happened to your race anyway. */
+let raceOn=false, raceCd=0, raceMyIdx=0, raceMyDist=0, raceMyLap=0,
+    raceT=0, raceAiT=0, raceAiDone=false, raceLaps=1;
+const raceBox=document.getElementById('racebox');
+const raceEndEl=document.getElementById('raceend');
+function raceStop(){
+  raceOn=false; raceCd=0;
+  raceBox.classList.remove('show');
+  // the other car leaves the circuit rather than standing on it like a bollard
+  if(pvGroup && !previewOn) pvGroup.visible=false;
+  const b=document.getElementById('linerace'); if(b) b.textContent='Race the AI';
+}
+function raceStart(){
+  editRestore();                      // K works without opening the editor first
+  if(lineSmooth.length<2||!lineLen||!carGroup) return;
+  if(!lineClosed){ goEl.textContent='LINE MUST BE A LAP';
+                   goEl.classList.add('show');
+                   setTimeout(()=>goEl.classList.remove('show'),1600); return; }
+  previewStop();                      // the preview camera must not steal the view
+  pvBuild();
+  pvFlat=true; pvFlatBtn();
+  // the AI on the line, stopped
+  PVCAR.aids=AIDS; PVCAR.gripMul=AI_GRIP;
+  PVCAR.st.speed=0; PVCAR.steerAng=0; PVCAR.slipAng=0;
+  PVCAR.carPitch=0; PVCAR.carRoll=0; PVCAR.carVY=0;
+  pvDist=0; pvLap=0; pvLapT=0; pvLastLap=0; pvPhase=0; pvSpin=0;
+  linePosAt(0,_lp);
+  PVCAR.st.wx=_lp.x; PVCAR.st.wz=_lp.z; PVCAR.st.hdg=lineHdgAt(0);
+  PVCAR.groundY=_lp.y+RIDE;
+  probeCar(PVCAR.st.wx,PVCAR.st.wz,PVCAR.st.hdg,PVCAR.groundY-RIDE,PVCAR.surf);
+  pvGroup.visible=true;
+  // and you beside it, a car's width over, pointing the same way
+  const h=PVCAR.st.hdg, rx=Math.cos(h), rz=-Math.sin(h);     // right of the line
+  carState.speed=0; carState.wx=_lp.x+rx*4.4; carState.wz=_lp.z+rz*4.4;
+  carState.hdg=h;
+  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
+  PLAYER.groundY=_lp.y+RIDE;
+  clearDebris();
+  raceMyIdx=0; raceMyDist=0; raceMyLap=0; raceT=0; raceAiT=0; raceAiDone=false;
+  raceOn=true; raceCd=3.999;
+  startPhase='hold'; startT=0; holdFor=1e9;   // you are pinned until GO
+  lightsEl.classList.remove('show');
+  raceBox.classList.add('show');
+  raceEndEl.classList.remove('show');
+  gridShow(false); pathShow(false);           // out of the editor, into the car
+  const b=document.getElementById('linerace'); if(b) b.textContent='Stop race';
+}
+/* Your distance round the same lap the AI is driving, searched forward from
+   where you were so a hairpin's return leg cannot claim you. */
+function raceProgress(){
+  const N=lineSmooth.length, win=Math.ceil(200/LINE_STEP);
+  let bi=raceMyIdx, bd=Infinity;
+  for(let k=0;k<win;k++){
+    const i=(raceMyIdx+k)%N;
+    const dx=lineSmooth[i].x-carState.wx, dz=lineSmooth[i].z-carState.wz;
+    const d=dx*dx+dz*dz;
+    if(d<bd){ bd=d; bi=i; }
+  }
+  if(bi<raceMyIdx) raceMyLap++;
+  raceMyIdx=bi; raceMyDist=lineCum[bi];
+}
+function raceUpdate(dt){
+  if(!raceOn) return;
+  if(raceCd>0){
+    const was=Math.ceil(raceCd);
+    raceCd-=dt;
+    const now=Math.ceil(raceCd);
+    if(now!==was){
+      goEl.textContent = now>0 ? String(now) : 'GO';
+      goEl.classList.add('show');
+      if(now<=0){ startPhase='go'; startT=0;
+                  setTimeout(()=>goEl.classList.remove('show'),1100); }
+    }
+    return;                            // nothing moves until the lights go out
+  }
+  raceT+=dt;
+  if(!raceAiDone) raceAiT=raceT;
+  raceProgress();
+  // the AI has its own finish, and keeps going round until you are done
+  if(!raceAiDone && pvLap>=raceLaps){ raceAiDone=true; raceAiT=raceT; }
+  const mine=raceMyLap*lineLen+raceMyDist, theirs=pvLap*lineLen+pvDist;
+  const gapM=theirs-mine;
+  const ref=Math.max(carState.speed, 12);          // metres to seconds
+  const lapEl=document.getElementById('racelap');
+  if(lapEl) lapEl.textContent='LAP '+Math.min(raceLaps,raceMyLap+1)+' / '+raceLaps;
+  const gEl=document.getElementById('racegap');
+  if(gEl){
+    const s=Math.abs(gapM)/ref;
+    gEl.textContent=(gapM>0?'+':'-')+s.toFixed(1);
+    gEl.className = gapM>0 ? 'behind' : 'ahead';
+  }
+  if(raceMyLap>=raceLaps) raceFinish();
+}
+function raceFinish(){
+  const won = !raceAiDone || raceT<=raceAiT;
+  raceStop();
+  raceEndEl.classList.add('show');
+  document.getElementById('raceendmsg').textContent = won?'YOU WIN':'AI WINS';
+  document.getElementById('raceendsub').textContent =
+    'you '+pvClock(raceT)+'  ·  ai '+(raceAiDone?pvClock(raceAiT):'still out there');
+  setTimeout(()=>raceEndEl.classList.remove('show'),6000);
+}
+document.getElementById('linerace').onclick=()=>{ raceOn?raceStop():raceStart(); };
 
 /* ------------------------------------------------------- save and restore
    The path is a constant in this file, so only the pedal points and the grid
@@ -4146,6 +4293,7 @@ function updateStart(dt){
     startPhase='go'; startT=0;
     setLights(0);
     lightsEl.classList.remove('show');
+    goEl.textContent='GO';
     goEl.classList.add('show');
     setTimeout(()=>goEl.classList.remove('show'),1100);
   }
@@ -4770,6 +4918,7 @@ function frame(now){
   }
 
   updateStart(dt);
+  raceUpdate(dt);
   drive(dt);
   previewStep(dt,t);        // before the camera, so the chase rig is not a frame behind
   windU.value=t;
