@@ -3685,11 +3685,13 @@ function pvBuild(){
      you have -- see pvStick, where the driver compensates for them rather
      than the car being given a different rack. */
   PVCAR=makeCar(pvGroup, AIDS);
+  PVCAR.infGrip=true;              // it turns as hard as it is asked to
 }
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
   pvBuild();
   PVCAR.aids=AIDS;                 // whatever T is set to right now
+  PVCAR.infGrip=true;
   const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
   PVCAR.st.speed=0; PVCAR.st.wx=a.x; PVCAR.st.wz=a.z;
   PVCAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
@@ -4111,7 +4113,9 @@ function makeCar(group, aids){
            steerIn:0, steerAng:0, lockF:1,
            groundY:0, carVY:0, carPitch:0, carRoll:0, slipAng:0,
            surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
-           aids: !!aids };
+           aids: !!aids,
+           // the yaw ceiling is off for the AI only -- see yawFor
+           infGrip: false };
 }
 let onLoose=false, looseFrac=0, looseSpray=0;
 let onGrass=false, grassFrac=0;
@@ -4301,9 +4305,18 @@ function applyPedals(st, thr, brk, surf, dt){
    rate alone would allow ~17 g at top speed, so it is capped at what the
    tyres could hold -- which is also what gives the car its understeer, and
    what makes a preview run wide when the throttle asked for the impossible. */
-function yawFor(speed, steerAng, surf){
+function yawFor(speed, steerAng, surf, unlimited){
   const dTyre=-steerAng/STEER_RATIO;                 // +ve = left
   let yawRate=speed*Math.tan(dTyre)/WHEELBASE;
+  /* Unlimited: the car goes exactly where the wheels point, with no tyre to
+     run out of. This is the AI's, deliberately. Understeer is what makes a
+     human's lap interesting and an AI's lap a mess -- it is the difference
+     between a car demonstrating the line and a car that washes out at the
+     first corner it arrives at too fast and spends the rest of the lap in the
+     gravel. Only the ceiling goes: it still steers through the same rack at
+     the same lock, and it still brakes and accelerates exactly as you do, so
+     everything you would feel from the pedals is unchanged. */
+  if(unlimited) return yawRate;
   const slick = surf.grass ? 1 - 0.465*surf.grassFrac : 1;
   const yawMax = speed>0.5 ? A_GRIP*turnBoost(speed*3.6)*slick/speed : 8;
   return clamp(yawRate,-yawMax,yawMax);
@@ -4476,7 +4489,7 @@ function stepCar(C, inp, dt){
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
   const v=st.speed;
-  const yawRate=yawFor(v, C.steerAng, C.surf);
+  const yawRate=yawFor(v, C.steerAng, C.surf, C.infGrip);
   surfaceDrag(st, C.surf, dt);
   st.hdg += yawRate*dt;
   st.wx  += Math.sin(st.hdg)*v*dt;
