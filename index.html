@@ -2998,7 +2998,17 @@ addEventListener('keydown',e=>{
   if(k==='o'){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v'){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
-  if(k==='l'){ if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
+  /* L is the racing line: on a track with a hand-drawn one that means editing
+     its shape, and on Pinewood -- which generates its own -- it still means
+     showing or hiding it, as it always did. */
+  if(k==='l'){ editRestore();          // L works without opening the editor first
+               if(linePath.length) pathShow(!pathEdit);
+               else if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
+  if(k==='n' && pathEdit){
+    const t=pathText();
+    console.log('racing line path (model coordinates) — paste over SPA_LINE:\n'+t);
+    if(navigator.clipboard) navigator.clipboard.writeText(t).catch(()=>{});
+  }
   if(k==='t'){ AIDS=!AIDS; updateStatus(); }
   if(k==='m'){ markMode=!markMode;
     if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
@@ -3028,7 +3038,9 @@ let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
-  document.getElementById('lname').textContent = (rlMesh&&rlMesh.visible)?'On':'Off';
+  document.getElementById('lname').textContent =
+    pathEdit ? 'Drag a point · click to add · N to copy'
+             : (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
 }
@@ -3361,8 +3373,97 @@ function lineRedraw(){
   });
 }
 function lineSetVisible(){
-  if(lineGroup) lineGroup.visible = gridMode && editTab==='line';
+  const on = (gridMode && editTab==='line') || pathEdit;
+  if(lineGroup) lineGroup.visible = on;
   if(!(gridMode && editTab==='line')) dotMenuClose();
+}
+
+/* ------------------------------------------------------- the path, editable
+   L puts the shape of the lap in your hands: every control point of the curve
+   comes up as a post you can drag along the ground, and a click anywhere else
+   on the track adds one. Nothing here deletes -- a point put somewhere daft
+   is dragged somewhere sensible, and a lap you can only add to cannot be
+   destroyed by a stray click.
+
+   A new point goes into the *segment it was clicked nearest*, never on the
+   end. Appending would run the lap out to wherever you clicked and back,
+   which is not what anyone means by adding a point to a line.
+
+   The pedal markers are measured in metres along the curve, so moving the
+   shape underneath them would slide them up and down the lap. They are
+   pinned to the ground instead: where each one stood is remembered before the
+   rebuild and it is put back at the nearest point of the new curve, so the
+   brake board for a corner stays with that corner. */
+let pathEdit=false, pathGroup=null, pathDots=[], pathDrag=-1, pathLastBuild=0;
+function pathRedraw(){
+  if(pathGroup){ scene.remove(pathGroup);
+    pathGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
+  pathDots=[]; pathGroup=null;
+  if(!pathEdit) return;
+  pathGroup=new THREE.Group(); scene.add(pathGroup);
+  const geo=new THREE.CylinderGeometry(0.55,0.55,3.0,10);
+  linePath.forEach((p,i)=>{
+    const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
+      color: i===pathDrag?0xffffff:0x33ddff, depthTest:false }));
+    m.position.set(p.x,p.y+1.6,p.z);
+    m.renderOrder=1000;
+    m.userData.pathIndex=i;
+    pathGroup.add(m); pathDots.push(m);
+  });
+}
+function pickPathDot(clientX,clientY){
+  if(!pathDots.length) return -1;
+  const r=canvas.getBoundingClientRect();
+  _markMouse.x=((clientX-r.left)/r.width)*2-1;
+  _markMouse.y=-((clientY-r.top)/r.height)*2+1;
+  _markRay.setFromCamera(_markMouse,camera);
+  const hit=_markRay.intersectObjects(pathDots,false);
+  return hit.length?hit[0].object.userData.pathIndex:-1;
+}
+/* Where on the curve a world point falls, to the nearest sample. */
+function lineNearestS(p){
+  let bd=Infinity, bs=0;
+  for(let i=0;i<lineSmooth.length;i++){
+    const dx=lineSmooth[i].x-p.x, dz=lineSmooth[i].z-p.z, d=dx*dx+dz*dz;
+    if(d<bd){ bd=d; bs=lineCum[i]; }
+  }
+  return bs;
+}
+/* Change the path, keeping every pedal marker over the piece of road it was
+   standing on rather than at the number of metres it happened to be at. */
+function pathEditing(change){
+  const held=pedalPts.map(q=>{ const a=lineAt(q.s); return {x:a.x,z:a.z}; });
+  change();
+  lineBuildCurve();
+  pedalPts.forEach((q,i)=>{ q.s=lineNearestS(held[i]); });
+  pedalSort();
+  lineRedraw(); pathRedraw(); lineSetVisible(); editSave();
+}
+/* Which pair of control points a click belongs between: the segment whose
+   closest approach to the click is nearest, the closing pair included, since
+   the lap joins up. */
+function pathInsertIndex(p){
+  const n=linePath.length, last=lineClosed?n:n-1;
+  let bd=Infinity, bi=n;
+  for(let i=0;i<last;i++){
+    const a=linePath[i], b=linePath[(i+1)%n];
+    const ax=b.x-a.x, az=b.z-a.z, L=ax*ax+az*az||1e-9;
+    const t=clamp(((p.x-a.x)*ax+(p.z-a.z)*az)/L,0,1);
+    const dx=a.x+ax*t-p.x, dz=a.z+az*t-p.z, d=dx*dx+dz*dz;
+    if(d<bd){ bd=d; bi=i+1; }
+  }
+  return bi;
+}
+function pathShow(on){
+  pathEdit=on; pathDrag=-1;
+  pathRedraw(); lineSetVisible(); updateStatus();
+}
+/* The path as it would be written in the file: model coordinates, the frame
+   spawnAt is in, so the numbers survive a reload. */
+function pathText(){
+  if(!trackRoot) return '';
+  return '['+linePath.map(v=>{ const m=gridToModel(v); return '['+m[0]+','+m[1]+']'; })
+                     .join(',\n ')+']';
 }
 /* A click lands on the line or it does nothing. The ribbon is the test: hit
    it, and the nearest sample to the hit gives the distance along the lap. */
@@ -3694,6 +3795,9 @@ function pvInputs(C,dt){
 function previewStep(dt,t){
   dotMenuTrack();
   if(!previewOn||lineSmooth.length<2||!PVCAR) return;
+  // the curve can be rebuilt underneath a running preview -- L, dragging a
+  // point -- and it comes back a different length, so never index off the end
+  if(pvIdx>=lineSmooth.length){ pvIdx=0; pvS=0; }
   const off=pvTrackProgress();
   // an open line runs out; a closed one is a lap, so it keeps going round
   if(!lineClosed && pvIdx>=lineSmooth.length-2){ previewReset(); return; }
@@ -3756,6 +3860,9 @@ function editSave(){
   try{
     localStorage.setItem(EDIT_KEY,JSON.stringify({
       grid: gridPts.map(gridToModel),
+      // the path is a constant in the file, but it is editable now, so an
+      // afternoon of moving points is not lost to a refresh either
+      path: linePath.map(gridToModel),
       pedals: pedalPts.map(q=>[Math.round(q.s),Math.round(q.thr),Math.round(q.brk)])
     }));
   }catch(e){}
@@ -3771,9 +3878,12 @@ function editRestore(){
   editRestored=true;
   // the path first: it is the thing everything else is measured along
   linePath=SPA_LINE.map(editModelToWorld);
-  lineBuildCurve();
   let d=null;
   try{ d=JSON.parse(localStorage.getItem(EDIT_KEY)||'null'); }catch(e){}
+  // a path that has been dragged about wins over the one in the file
+  if(d && Array.isArray(d.path) && d.path.length>=8)
+    linePath=d.path.map(editModelToWorld);
+  lineBuildCurve();
   if(d){
     if(Array.isArray(d.grid)) gridPts=d.grid.map(editModelToWorld);
     if(Array.isArray(d.pedals)) pedalPts=d.pedals.map(a=>({s:a[0],thr:a[1],brk:a[2]}));
@@ -3787,11 +3897,30 @@ function editRestore(){
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
   unlockAudio();
+  /* A point under the cursor is grabbed rather than orbited: the camera must
+     not swing about while you are placing a corner. */
+  if(pathEdit){
+    const i=pickPathDot(e.clientX,e.clientY);
+    if(i>=0){ pathDrag=i; pathRedraw(); canvas.setPointerCapture(e.pointerId); return; }
+  }
   dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointerup',e=>{
   dragging=false;
+  /* Let go of a point: rebuild properly this time, re-pin the markers and
+     save. The rebuilds during the drag are the cheap kind. */
+  if(pathDrag>=0){
+    const i=pathDrag; pathDrag=-1;
+    const p=markScreenToGround(e.clientX,e.clientY);
+    pathEditing(()=>{ if(p) linePath[i].copy(p); });
+    return;
+  }
+  if(moved<8 && pathEdit){
+    const p=markScreenToGround(e.clientX,e.clientY);
+    if(p) pathEditing(()=>{ linePath.splice(pathInsertIndex(p),0,p); });
+    return;
+  }
   if(moved<8 && gridMode && editTab==='grid'){
     if(gridPts.length<GRID_MAX){
       const p=markScreenToGround(e.clientX,e.clientY);
@@ -3826,6 +3955,19 @@ canvas.addEventListener('pointerup',e=>{
   }
 });
 canvas.addEventListener('pointermove',e=>{
+  /* Dragging a control point. The post follows the cursor every frame because
+     that is what makes it feel like a thing you are holding; the curve through
+     it is rebuilt a few times a second, which is enough to see the shape
+     change and cheap enough not to stutter on a 200-point lap. */
+  if(pathDrag>=0){
+    const p=markScreenToGround(e.clientX,e.clientY);
+    if(!p) return;
+    linePath[pathDrag].copy(p);
+    const d=pathDots[pathDrag]; if(d) d.position.set(p.x,p.y+1.6,p.z);
+    const now=performance.now();
+    if(now-pathLastBuild>90){ pathLastBuild=now; lineBuildCurve(); lineRedraw(); lineSetVisible(); }
+    return;
+  }
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY;
   moved+=Math.abs(dx)+Math.abs(dy);
