@@ -208,7 +208,6 @@
     <div class="row" style="margin-top:6px">
       <button id="linepreview">Preview</button>
       <button id="linereset">Reset</button>
-      <button id="lineflat" title="Ignore the markers and hold the throttle flat: the car's own acceleration, on your line">Flat out</button>
     </div>
     <div class="row" style="margin-top:6px">
       <button id="linerace" title="One lap, side by side off the line, against the AI">Race the AI</button>
@@ -3686,12 +3685,6 @@ let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
     pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
     pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0, pvDist=0,
     pvLapT=0, pvLastLap=0, pvGripHeld=false, pvQ={thr:0,brk:0};
-/* Flat out, on by default: the throttle stays on the floor for the whole line
-   and the markers are not consulted at all. It is the plain question -- what
-   does this car do on this line, driven the way you drive it -- and it is the
-   one you want answered first. Turn it off with the button and the markers
-   drive it again, which is what you want once the line is worth timing. */
-let pvFlat=true;
 const PV_PULSE=0.10;             // seconds: one feather of a part-pressed pedal
 
 /* The same node in the copy as in the original, found by its place in the
@@ -3766,23 +3759,6 @@ function previewReset(){ previewStop(); pvIdx=0; pvS=0; pvDist=0; pvLap=0;
                         pvLapT=0; if(PVCAR) PVCAR.st.speed=0; }
 document.getElementById('linepreview').onclick=()=>{ previewOn?previewStop():previewStart(); };
 document.getElementById('linereset').onclick=previewReset;
-/* Flat out ignores the markers entirely and holds the throttle down for the
-   whole line. It settles the only question that kept coming back: a car that
-   is quick like this and slow with your numbers is telling you the numbers
-   are what is slow, and a car that is slow even here is telling you the fault
-   is in the car or the ground under it, not in the authoring. */
-function pvFlatBtn(){
-  const b=document.getElementById('lineflat');
-  if(!b) return;
-  b.textContent=pvFlat?'Flat out ✓':'Use markers';
-  b.style.opacity=pvFlat?'1':'';
-}
-document.getElementById('lineflat').onclick=()=>{
-  pvFlat=!pvFlat; pvFlatBtn();
-  if(previewOn) previewStart();     // from the top, so the change is visible
-};
-pvFlatBtn();
-
 /* A pedal, worked by a pair of hands. Down or up -- never "some fraction of
    an engine". Flat out is held; anything less is feathered on and off within
    a tenth of a second, so 60% is the pedal down for 60% of the time and the
@@ -3796,7 +3772,7 @@ function pvPedal(pct){
    input any more -- the car is on the line rather than steered at it, so
    where it goes is the line's business and only how fast is the driver's. */
 function pvInputs(C,dt){
-  let q=pvFlat ? PEDAL_LAUNCH : pedalAt(pvS, pvLap>0);
+  let q=pedalAt(pvS, pvLap>0);
   /* A marker holds until the next one -- but a brake marker has nothing left
      to do once the car is stopped, and holding it is a deadlock: the car sits
      still, so its distance along the line never advances, so the marker in
@@ -4076,7 +4052,6 @@ function lineAutoPedals(){
   }
   if(!out.length) return 0;
   pedalPts=out; pedalSel=-1; pedalSort();
-  pvFlat=false; pvFlatBtn();     // the point of working them out is to use them
   dm('dotmenu').classList.remove('on');
   lineRedraw(); linePanel(); editSave();
   return out.length;
@@ -4126,7 +4101,6 @@ function raceStart(){
                    setTimeout(()=>goEl.classList.remove('show'),1600); return; }
   previewStop();                      // the preview camera must not steal the view
   pvBuild();
-  pvFlat=true; pvFlatBtn();
   // the AI on the line, stopped
   PVCAR.aids=AIDS; PVCAR.gripMul=AI_GRIP;
   PVCAR.st.speed=0; PVCAR.steerAng=0; PVCAR.slipAng=0;
