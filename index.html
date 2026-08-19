@@ -214,6 +214,9 @@
       <button id="linerace" title="One lap, side by side off the line, against the AI">Race the AI</button>
       <button id="linepace" title="How much of its grip the AI uses in a race. Lower is slower through corners, which is the only place it can beat you">Pace 75%</button>
     </div>
+    <div class="row" style="margin-top:6px">
+      <button id="lineauto" title="Work out the whole lap: every braking point, how hard, and where to get back on the throttle. Replaces the markers — then tweak them">Work out the pedals</button>
+    </div>
   </div>
 
   <div class="row" style="margin-top:6px"><button id="gridclose">Done</button></div>
@@ -3817,7 +3820,7 @@ function pvWrap(s){
    continuous heading, rather than the direction of whichever 2.5 m sample the
    car is standing on. This is the difference between a car that flows round
    Pouhon and one that shivers its way round. */
-const _lp=new THREE.Vector3(), _lt=new THREE.Vector3();
+const _lp=new THREE.Vector3(), _lp2=new THREE.Vector3(), _lt=new THREE.Vector3();
 function lineHdgAt(s){
   if(!lineCurve||!lineLen) return lineAt(s).hdg;
   lineCurve.getTangentAt(clamp(pvWrap(s)/lineLen,0,1),_lt);
@@ -3993,6 +3996,95 @@ function pvClock(sec){
   return m+':'+(s<10?'0':'')+s.toFixed(1);
 }
 
+/* ------------------------------------------------- the pedals, worked out
+   Where to brake, how hard, and where to get back on it -- for the whole lap,
+   from the shape of the line and the car's own numbers. Placing these by hand
+   is the slow, miserable part of authoring a lap, and it is slow for a reason:
+   a braking point is not a property of the corner you are at. It is set by the
+   corner *ahead*, by how fast you arrive, and by how hard this car stops, and
+   changing any one of those moves it. That is arithmetic, not judgement.
+
+   The standard three passes, on samples 2.5 m apart:
+
+   1. What each point of the lap allows on its own -- sqrt(a/k), the grip over
+      the curvature there, capped at the car's top speed.
+   2. Backwards round the lap, applying the brakes: no point may be quicker
+      than what it can still slow down from before the next one. This is what
+      pulls the braking point back up the straight, and pulls it further for a
+      slower corner, which is the whole thing you would otherwise be hunting
+      for by trial and error.
+   3. Forwards round the lap, applying the engine: no point may be quicker
+      than the engine can get it to from the last one, using the same
+      26*(1-v^2) curve the car itself uses. This is what puts the exit right.
+
+   Twice round, since it is a closed lap and the start of the first pass has
+   not seen the end of it yet.
+
+   Then the profile is turned back into pedals: what acceleration each stretch
+   needs, as a percentage of the 46 m/s2 the brakes give or of the engine at
+   that speed, with a coast where it needs neither. Markers are emitted only
+   where that materially changes, so you get a few dozen you can read and
+   argue with rather than three thousand.
+
+   It uses the pace setting, so "work out the pedals" at 65% gives a lap a
+   careful driver could hold, and at 100% the fastest the line allows. */
+function lineAutoPedals(){
+  if(!lineLen||lineSmooth.length<8) return 0;
+  const N=lineSmooth.length, ds=lineLen/N, BRK=46;
+  const v=new Float64Array(N);
+  for(let i=0;i<N;i++){
+    const k=Math.abs(lineCurv(i*ds));
+    v[i] = k<2e-4 ? MAXSPEED
+                  : Math.min(MAXSPEED, Math.sqrt(A_GRIP*AI_GRIP/k)*AI_PACE);
+  }
+  const eng=u=>26.0*(1-(u/MAXSPEED)*(u/MAXSPEED));
+  for(let pass=0;pass<2;pass++){
+    for(let n=N;n>0;n--){                       // brakes, backwards
+      const i=(n-1)%N, j=n%N;
+      const cap=Math.sqrt(v[j]*v[j]+2*BRK*ds);
+      if(v[i]>cap) v[i]=cap;
+    }
+    for(let n=0;n<N;n++){                       // engine, forwards
+      const i=n%N, j=(n+1)%N;
+      const cap=Math.sqrt(v[i]*v[i]+2*Math.max(eng(v[i]),0)*ds);
+      if(v[j]>cap) v[j]=cap;
+    }
+  }
+  /* pedals from the profile, then runs of the same pedal merged into one
+     marker at the point it starts */
+  const out=[];
+  let lastT=-99, lastB=-99;
+  for(let i=0;i<N;i++){
+    const j=(i+1)%N;
+    const a=(v[j]*v[j]-v[i]*v[i])/(2*ds);
+    let thr=0, brk=0;
+    if(a<-0.6)      brk=clamp(-a/BRK*100,0,100);
+    else if(a>0.6)  thr=clamp(a/Math.max(eng(v[i]),1e-3)*100,0,100);
+    else            thr=clamp((0.8+v[i]*0.028)/Math.max(eng(v[i]),1e-3)*100,0,100);
+    thr=Math.round(thr/5)*5; brk=Math.round(brk/5)*5;
+    const chg=Math.max(Math.abs(thr-lastT),Math.abs(brk-lastB));
+    // brakes ramp in over a few metres, which would otherwise leave a 90% and
+    // a 100% marker three metres apart and nothing to choose between them
+    const room = !out.length || (i*ds-out[out.length-1].s)>=12;
+    if(chg>=10 && (room||chg>=35)){
+      out.push({s:i*ds, thr, brk});
+      lastT=thr; lastB=brk;
+    }
+  }
+  if(!out.length) return 0;
+  pedalPts=out; pedalSel=-1; pedalSort();
+  pvFlat=false; pvFlatBtn();     // the point of working them out is to use them
+  dm('dotmenu').classList.remove('on');
+  lineRedraw(); linePanel(); editSave();
+  return out.length;
+}
+document.getElementById('lineauto').onclick=()=>{
+  const n=lineAutoPedals();
+  const b=document.getElementById('lineauto');
+  if(b){ b.textContent=n?n+' markers':'need a lap first';
+         setTimeout(()=>{ b.textContent='Work out the pedals'; },2200); }
+};
+
 /* --------------------------------------------------------------- the race
    One lap of the line, side by side off the start, 3-2-1-GO.
 
@@ -4042,14 +4134,26 @@ function raceStart(){
   PVCAR.groundY=_lp.y+RIDE;
   probeCar(PVCAR.st.wx,PVCAR.st.wz,PVCAR.st.hdg,PVCAR.groundY-RIDE,PVCAR.surf);
   pvGroup.visible=true;
-  // and you beside it, a car's width over, pointing the same way
+  /* You start behind it and off to one side, the way a grid is staggered --
+     not level with it. Level looked right on paper and was useless in the
+     car: from the cockpit, a car exactly beside you is at ninety degrees,
+     which is outside the field of view of any camera here, so the race began
+     with the thing you are racing invisible and it was never seen again. Ten
+     metres back puts it in front of you, where you can watch it brake. */
   const h=PVCAR.st.hdg, rx=Math.cos(h), rz=-Math.sin(h);     // right of the line
-  carState.speed=0; carState.wx=_lp.x+rx*4.4; carState.wz=_lp.z+rz*4.4;
-  carState.hdg=h;
+  linePosAt(pvWrap(-10),_lp2);
+  carState.speed=0;
+  carState.wx=_lp2.x+rx*4.4; carState.wz=_lp2.z+rz*4.4;
+  carState.hdg=lineHdgAt(pvWrap(-10));
   PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
   PLAYER.groundY=_lp.y+RIDE;
   clearDebris();
-  raceMyIdx=0; raceMyDist=0; raceMyLap=0; raceT=0; raceAiT=0; raceAiDone=false;
+  /* You are ten metres back, so you are ten metres short of the lap: your
+     count starts at -1 and the first crossing of the line, a second later,
+     makes it 0. Otherwise the flag falls ten metres early. */
+  raceMyIdx=Math.max(0,lineSmooth.length-Math.round(10/LINE_STEP));
+  raceMyDist=lineCum[raceMyIdx]; raceMyLap=-1;
+  raceT=0; raceAiT=0; raceAiDone=false;
   raceOn=true; raceCd=3.999;
   startPhase='hold'; startT=0; holdFor=1e9;   // you are pinned until GO
   lightsEl.classList.remove('show');
@@ -4095,7 +4199,7 @@ function raceUpdate(dt){
   const gapM=theirs-mine;
   const ref=Math.max(carState.speed, 12);          // metres to seconds
   const lapEl=document.getElementById('racelap');
-  if(lapEl) lapEl.textContent='LAP '+Math.min(raceLaps,raceMyLap+1)+' / '+raceLaps;
+  if(lapEl) lapEl.textContent='LAP '+clamp(raceMyLap+1,1,raceLaps)+' / '+raceLaps;
   const gEl=document.getElementById('racegap');
   if(gEl){
     const s=Math.abs(gapM)/ref;
