@@ -177,7 +177,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em><br>Under you <em id="uname">road</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em><br>Under you <em id="uname">road</em><br>Frames <em id="fname">60</em><br>Detail <em id="dname">Full</em></div>
 <button id="gridtoggle">Editor</button>
 <div id="gridpanel">
   <div class="row tabs">
@@ -248,7 +248,7 @@
   <div><kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera · <kbd>O</kbd> orbit · <kbd>V</kbd> free look</div>
   <div><kbd>↑</kbd><kbd>↓</kbd> seat height · <kbd>⇧</kbd> slide fore · aft · <kbd>X</kbd> recentre</div>
-  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights · <kbd>K</kbd> race the ai</div>
+  <div><kbd>P</kbd> editor · grid · line · <kbd>M</kbd> mark barrier · <kbd>N</kbd> export marks · <kbd>T</kbd> aids · <kbd>L</kbd> racing line · <kbd>R</kbd> back to track · <kbd>G</kbd> lights · <kbd>K</kbd> race the ai · <kbd>Q</kbd> detail</div>
   <div>drag look · tap to cycle · scroll zoom</div>
 </div>
 
@@ -3052,6 +3052,7 @@ addEventListener('keydown',e=>{
   if(k==='n'){ markExport(); }
   if(k==='p'){ gridShow(!gridMode); }
   if(k==='k'){ raceOn?raceStop():raceStart(); }
+  if(k==='q'){ detailFull=!detailFull; applyDetail(); }
   if(k==='r') resetToTrack();                        // back onto the road, stopped
   if(k==='g') armStart();                            // back to the grid, new sequence
   // the eye is moved in the frame loop, not here -- see EYE_RATE
@@ -3081,19 +3082,27 @@ function updateStatus(){
              : (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
+  const dt2=document.getElementById('dname'); if(dt2) dt2.textContent = detailFull?'Full':'Fast';
 }
-/* Full detail, always. There is no longer a quality toggle and nothing
-   downgrades it behind your back -- the old adaptive check could drop the
-   scene to Low a couple of seconds after load on a slow first frame and never
-   put it back. */
+/* Full detail by default, and nothing downgrades it behind your back -- the
+   old adaptive check dropped the scene to Low a couple of seconds after load
+   on one slow first frame and never put it back, which is why it went.
+
+   Q is the same lever, in your hand. Fast turns the shadows off and renders at
+   one device pixel, which is most of the cost of the heavy views -- the run
+   down to Eau Rouge with the grandstand, the trees and the whole of Kemmel in
+   frame. Worth knowing when to reach for it: the frame rate is in the status
+   panel, and under about 20 fps the world can no longer keep real time, so the
+   car starts to feel slow even though it is not. */
+let detailFull=true;
 function applyDetail(){
-  shadowsOn=true;
-  renderer.shadowMap.enabled=true;
-  shadowCasters.forEach(m=>{ m.castShadow = m.userData.casts!==false; });
+  shadowsOn=detailFull;
+  renderer.shadowMap.enabled=detailFull;
+  shadowCasters.forEach(m=>{ m.castShadow = detailFull && m.userData.casts!==false; });
   // this just overrode the per-cell tree gating in the frame loop, so make the
   // cull loop reapply it on the next frame rather than leaving distant cells casting
   treeCells.forEach(b=>{ b.cast=undefined; });
-  renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+  renderer.setPixelRatio(detailFull ? Math.min(devicePixelRatio,1.75) : 1);
   updateStatus();
 }
 
@@ -5067,6 +5076,37 @@ function drive(dt){
   kmhEl.textContent = Math.round(wSpd*3.6);
 }
 
+/* A window onto the running car, for driving this thing from outside -- a
+   headless browser can start a preview and read back what the car is doing
+   metre by metre, which is the only way to answer "why is it slow there"
+   without sitting in it. Read-only, a few getters, no cost when unused. */
+window.SIM={
+  get ready(){ return !!(HF.bins && carObj); },
+  get player(){ return {kph:carState.speed*3.6, x:carState.wx, z:carState.wz,
+                        hdg:carState.hdg, groundY:PLAYER.groundY,
+                        surf:{...PLAYER.surf, y:undefined}}; },
+  get ai(){ return PVCAR ? {kph:PVCAR.st.speed*3.6, s:pvDist, lap:pvLap,
+                            thr:pvQ.thr, brk:pvQ.brk, grip:pvGripHeld,
+                            surf:{...PVCAR.surf, y:undefined}} : null; },
+  get line(){ return {len:lineLen, closed:lineClosed, pts:linePath.length,
+                      markers:pedalPts.length}; },
+  probe(x,z,refY){ return {...probeCar(x,z,0,refY,{}), y:undefined}; },
+  restore(){ editRestore(); return this.line; },
+  preview(){ editRestore(); previewStart(); return this.line; },
+  seek(s){ pvDist=pvWrap(s); return pvDist; },
+  place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
+                  carState.speed=0; PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
+  hold(k,on){ keys[k]=!!on; },
+  speed(v){ carState.speed=v; },
+  get fps(){ return _simFps; },
+  get simT(){ return t; },
+  get steps(){ return _stepCount; },
+  get freeroam(){ return FREEROAM; },
+  get phase(){ return startPhase; },
+  at(s){ const p=new THREE.Vector3(); linePosAt(s,p);
+         return {x:p.x, y:p.y, z:p.z, hdg:lineHdgAt(s)}; }
+};
+
 /* ------------------------------------------------------------- main loop */
 const tmp=new THREE.Vector3();
 const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
@@ -5074,10 +5114,11 @@ const _fwd=new THREE.Vector3(), _carP=new THREE.Vector3();
 const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
 let last=performance.now(), t=0;
 
-function frame(now){
-  requestAnimationFrame(frame);
-  const dt=Math.min((now-last)/1000,0.05); last=now; t+=dt;
-
+/* One step of the world. Called at a fixed rate, however fast the picture is
+   being drawn -- see frame(). */
+let _stepCount=0;
+function stepWorld(dt){
+  t+=dt; _stepCount++;
   // seat trim: integrated against dt while held, so the travel is smooth and
   // frame-rate independent instead of stepping on key auto-repeat
   if(keys['arrowup'])   fUp=clamp(fUp+EYE_RATE*dt, F_UP_MIN, F_UP_MAX);
@@ -5089,11 +5130,49 @@ function frame(now){
     if(fFwd>=F_FWD_MAX){ fFwd=F_FWD_MAX; fwdDir=-1; }
     else if(fFwd<=F_FWD_MIN){ fFwd=F_FWD_MIN; fwdDir=1; }
   }
-
   updateStart(dt);
   raceUpdate(dt);
   drive(dt);
   previewStep(dt,t);        // before the camera, so the chase rig is not a frame behind
+}
+
+/* The clock the world runs on is not the clock the pictures arrive on.
+
+   It used to be: one step per frame, of however long the frame took, capped at
+   50 ms so a stall could not fire the car through a wall. That cap is a
+   slow-motion switch. Below 20 fps the frame takes longer than the step it is
+   allowed to advance, so the world runs at a fraction of real time -- the car
+   covers less ground per second while the speedometer, which reads a speed and
+   not a rate of progress, still says 300. Which is exactly what it looks like
+   coming down to Eau Rouge, the heaviest view on the circuit: measured here,
+   52 fps at the top and 26 at the bottom, and at 26 the sim is already losing
+   a fifth of its pace on a machine slower than this one.
+
+   Fixed steps instead. Time that has really passed is banked and spent in
+   1/60ths, as many as the frame earned, so the world advances at real time at
+   any frame rate. Eight is the ceiling -- past that a machine cannot keep up
+   and it is better to run slow than to spiral, spending longer simulating each
+   frame than the frame took -- and a quarter of a second is the most that can
+   arrive at once, so a tab left in the background does not come back and
+   fast-forward the lap. */
+const STEP=1/60, MAX_STEPS=15, LONG_STEP=0.1;
+let _acc=0, _simFps=60;
+function frame(now){
+  requestAnimationFrame(frame);
+  const raw=Math.min((now-last)/1000, 0.25); last=now;
+  if(raw>0) _simFps += (1/raw - _simFps)*0.2;
+  _acc+=raw;
+  let steps=0;
+  while(_acc>=STEP && steps<MAX_STEPS){ stepWorld(STEP); _acc-=STEP; steps++; }
+  /* Fifteen sixtieths is a quarter of a second of world per frame, so real
+     time holds down to about four frames a second. Below that, taking more
+     small steps costs more than it buys -- each one is work that makes the
+     next frame later still -- so what is left goes in as one long step, up to
+     a tenth of a second. Coarse, and coarse is the right trade: the car
+     integrates a little less exactly for one frame instead of the whole world
+     sliding into slow motion, which is the thing you actually notice. */
+  if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; }
+  const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
   windU.value=t;
 
   // place the car at (s, n) with its own heading. Matrices must be current
@@ -5130,6 +5209,14 @@ function frame(now){
        thing besides the brakes that can take speed off you, so when a car is
        slow and you cannot see why, this is the answer or it is not a surface
        problem at all. */
+    const fn=document.getElementById('fname');
+    if(fn){
+      /* Frame rate on screen, because a slow picture and a slow car look the
+         same from the driving seat and are not remotely the same problem. */
+      const f=Math.round(_simFps);
+      if(fn.textContent!==String(f)){ fn.textContent=f;
+        fn.style.color = f<24 ? '#ff5544' : f<40 ? 'var(--amber)' : ''; }
+    }
     const un=document.getElementById('uname');
     if(un){
       const txt = onLoose ? 'GRAVEL '+Math.round(looseFrac*100)+'%'
