@@ -4025,7 +4025,9 @@ function turnBoost(kph){
      is written as two points 10 kph apart and never lands on a single speed --
      the wheel angle must not multiply between one frame and the next while you
      are mid-corner. */
-  const P=[[0,4],[95,4],[105,2.5],[145,2.5],[155,3.5],[195,3.5],[205,2.8],[9999,2.8]];
+  // reverted the further 20% cut; 10% off the 150+ bands instead, from the
+  // -30% baseline: 3.5 -> 3.15, 2.8 -> 2.52, both x0.9. 145 and below unmoved.
+  const P=[[0,4],[95,4],[105,2.5],[145,2.5],[155,3.15],[195,3.15],[205,2.52],[9999,2.52]];
   for(let i=1;i<P.length;i++){
     if(kph<=P[i][0]){
       const a2=P[i-1][0], va=P[i-1][1], b2=P[i][0], vb=P[i][1];
