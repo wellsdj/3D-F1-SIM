@@ -109,10 +109,13 @@
   #lights .col.on b{
     background:radial-gradient(circle at 38% 33%,#fff4dc 5%,#ff6a24 40%,#e01c07 76%,#8b0f04 100%);
     box-shadow:0 0 clamp(9px,1.9vw,24px) rgba(255,72,20,.9), inset 0 0 8px rgba(255,214,170,.45)}
-  #golabel{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
-           font-family:var(--mono);font-size:clamp(20px,4vw,44px);font-weight:600;
-           letter-spacing:.3em;color:#37e06a;text-shadow:0 0 22px rgba(55,224,106,.75);
-           pointer-events:none;opacity:0;transition:opacity .45s ease;z-index:6}
+  /* The count sits in the middle of the screen, not at the top: at the top it
+     was behind the lap card and you could not see it at all. */
+  #golabel{position:fixed;left:50%;top:26vh;transform:translateX(-50%);
+           font-family:var(--mono);font-size:clamp(56px,11vw,132px);font-weight:600;
+           letter-spacing:.12em;color:#37e06a;text-shadow:0 0 46px rgba(55,224,106,.6);
+           font-variant-numeric:tabular-nums;line-height:1;
+           pointer-events:none;opacity:0;transition:opacity .3s ease;z-index:8}
   #golabel.show{opacity:1}
   /* ------------------------------------------------ settings, on the way in */
   #settings{margin:22px auto 0;max-width:430px;text-align:left}
@@ -140,6 +143,10 @@
       font-family:var(--mono);text-align:center;pointer-events:none;
       opacity:0;transition:opacity .35s ease}
   #tt.show{opacity:1}
+  /* Nothing over the drone shots. They are five seconds of the circuit and
+     they should be five seconds of the circuit. */
+  body.cinema .hud, body.cinema #tt{opacity:0!important}
+  body.cinema .hud, body.cinema #tt{transition:opacity .5s ease}
   #ttcard{background:linear-gradient(180deg,rgba(10,13,19,.72),rgba(10,13,19,.34));
           border:1px solid rgba(255,255,255,.10);border-radius:14px;
           padding:9px 26px 12px;backdrop-filter:blur(10px);
@@ -3259,7 +3266,11 @@ const TT_GATES=5, TT_HALF=16, TT_KEY='f1sim.tt.best.spa22';
    backwards. Watch the circuit, then count, then go. */
 const TT={ gates:[], hit:[], t:0, last:0, best:null, live:false, cd:0, drone:0,
            prevX:0, prevZ:0, group:null, armed:false, started:false, shown:-1 };
-const TT_DRONE=5.0, TT_COUNT=3.0;
+/* Two shots, then the count. The first is the whole circuit from above --
+   seven kilometres of it, which is a thing worth seeing before you are asked
+   to drive it -- and the second drops in behind the start line. Then three,
+   two, one. */
+const TT_WIDE=5.0, TT_NEAR=4.5, TT_DRONE=TT_WIDE+TT_NEAR, TT_COUNT=3.0;
 
 function ttFmt(sec){
   if(!(sec>0)) return '--:--.--';
@@ -3299,6 +3310,17 @@ function ttBuild(){
     ttGateMesh(TT.gates[i], i);
   }
   TT.hit=new Array(TT_GATES).fill(false);
+  /* Where the circuit is and how big it is, straight off the curve, so the
+     wide shot frames this track rather than a guess at one. */
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9,ys=0,n=0;
+  for(let u=0;u<1;u+=1/400){
+    curve.getPointAt(u,P);
+    if(P.x<x0)x0=P.x; if(P.x>x1)x1=P.x; if(P.z<z0)z0=P.z; if(P.z>z1)z1=P.z;
+    ys+=P.y; n++;
+  }
+  TT.cx=(x0+x1)/2; TT.cz=(z0+z1)/2; TT.cy=ys/Math.max(1,n);
+  TT.rad=Math.max(x1-x0,z1-z0)/2;
+  TT.ang0=Math.atan2(carState.wx-TT.cx, carState.wz-TT.cz);   // start over the grid
   tlMeasure(curve,L);
 }
 /* A gate you can see from a long way back and cannot mistake for scenery: a
@@ -3365,6 +3387,7 @@ function ttStart(){
   if(!TT.gates.length) return;
   try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b; }catch(e){}
   TT.live=true; TT.drone=TT_DRONE; TT.cd=TT_COUNT; TT.shown=-1; TT.armed=false;
+  document.body.classList.add('cinema');
   ttReset();
   TT.prevX=carState.wx; TT.prevZ=carState.wz;
   carState.speed=0;
@@ -3375,9 +3398,11 @@ function ttStart(){
 }
 function ttStep(dt){
   if(!TT.live) return;
-  if(TT.drone>0){                               // the shot, uninterrupted
+  if(TT.drone>0){                               // the shots, uninterrupted
+    document.body.classList.add('cinema');
     TT.drone-=dt;
-    if(TT.drone<=0) goEl.textContent='';
+    if(TT.drone<=0){ goEl.textContent=''; document.body.classList.remove('cinema');
+      if(scene.fog && TT._fog!==undefined){ scene.fog.density=TT._fog; TT._fog=undefined; } }
     return;
   }
   if(TT.cd>0){                                  // 3 - 2 - 1 - GO
@@ -3498,7 +3523,10 @@ function tlSet(tol){
    Where no line is found (the pit entry, a gap in the painting) the last good
    width carries over, which is better than declaring the track infinitely wide
    or infinitely narrow at that station. */
-const TL_STEP=8;
+const TL_STEP=4;          // metres between stations
+const TL_MIN=0.3;         // ignore paint under the car itself, nothing more
+const TL_REACH=26;        // how far out to look for an edge
+const TL_SIDE_MAX=12;     // no edge is further than this from the racing line
 let tlSt=[], tlIdx=0;
 function tlMeasure(curve,L){
   tlSt=[];
@@ -3510,28 +3538,91 @@ function tlMeasure(curve,L){
     if(ms.some(m=>m&&m.name&&/^line\b|^line\./i.test(m.name))) lineMesh=o;
   });
   const P=new THREE.Vector3(), T=new THREE.Vector3();
-  const rc=new THREE.Raycaster(); rc.far=34;
+  const rc=new THREE.Raycaster(); rc.far=TL_REACH;
   const dir=new THREE.Vector3(), org=new THREE.Vector3();
+
+  /* One side of one station. Two questions are asked and the answers are
+     crossed, because neither is reliable alone.
+
+     Where does the track stop being track? Walked outward in 25 cm steps: the
+     first kerb, grass or gravel underfoot is the edge of the racing surface.
+     That is exact where there is a kerb -- which at Spa is every corner -- and
+     it finds nothing where the run-off is bare asphalt.
+
+     And where are the white lines? Every crossing along the ray, not just the
+     first. The first is worse than useless: line.001 holds every white marking
+     on the circuit, so on the pit straight the first thing a ray meets is a
+     grid box, and the track was being measured as three metres wide.
+
+     The edge is the last white line before the surface gives out. Where there
+     is no line, the material boundary stands on its own; where there is
+     neither, the width carries over from the station before.
+
+     The floor is 30 cm rather than a metre and a half. A metre and a half was
+     wrong at every apex: the racing line touches the kerb there, so the edge
+     really is a few centimetres away and the floor was pushing it out into the
+     kerb. The paint on the road -- grooves, grid boxes -- is dealt with by
+     taking the outermost line inside the boundary rather than by refusing to
+     look near the car. */
+  const side=(px,py,pz,ux,uz,fallback)=>{
+    let matEdge=Infinity;
+    for(let r=TL_MIN; r<=TL_REACH; r+=0.25){
+      const g=groundAt(px+ux*r, pz+uz*r, py);
+      if(!g.hit) continue;
+      if(g.kerb||g.grass||g.loose){ matEdge=r; break; }
+    }
+    let best=NaN;
+    if(lineMesh){
+      org.set(px,py+0.35,pz); dir.set(ux,0,uz); rc.set(org,dir);
+      const hits=rc.intersectObject(lineMesh,false);
+      for(const h of hits){
+        if(h.distance<TL_MIN) continue;              // paint on the road itself
+        if(h.distance>matEdge+0.6) break;            // past the edge, not the edge
+        best=h.distance;                             // keep the outermost inside it
+      }
+    }
+    if(!isNaN(best)) return best;
+    if(isFinite(matEdge)) return matEdge;
+    return fallback;
+  };
+
   let lastR=7.5, lastL=7.5;
+  let lines=0, mats=0, carried=0;
   for(let d=0; d<L; d+=TL_STEP){
     const u=d/L;
     curve.getPointAt(u,P); curve.getTangentAt(u,T);
     const tl=Math.hypot(T.x,T.z)||1, dx=T.x/tl, dz=T.z/tl;
     const rx=dz, rz=-dx;
-    let dR=lastR, dL=lastL;
-    if(lineMesh){
-      org.set(P.x,P.y+0.35,P.z);
-      dir.set(rx,0,rz); rc.set(org,dir);
-      const hR=rc.intersectObject(lineMesh,false);
-      if(hR.length) dR=hR[0].distance;
-      dir.set(-rx,0,-rz); rc.set(org,dir);
-      const hL=rc.intersectObject(lineMesh,false);
-      if(hL.length) dL=hL[0].distance;
-    }
+    const dR=side(P.x,P.y,P.z, rx, rz, lastR);
+    const dL=side(P.x,P.y,P.z,-rx,-rz, lastL);
+    if(dR===lastR&&dL===lastL) carried++;
     lastR=dR; lastL=dL;
     tlSt.push({x:P.x,z:P.z,rx,rz,dR,dL});
   }
-  console.log('track limits: '+tlSt.length+' stations, '+(lineMesh?'white lines found':'NO LINE MESH — falling back to 7.5 m'));
+  /* And then a median filter, because a circuit does not change width by
+     fifteen metres between one station and the next four metres later. Where
+     the ray found no kerb it can latch onto a pit-lane line twenty metres
+     away, and that reads as a track wide enough to park in. Anything more
+     than three and a half metres off its neighbours is replaced by them. */
+  const med=(arr,i,half)=>{
+    const v=[];
+    for(let k=-half;k<=half;k++) v.push(arr[((i+k)%arr.length+arr.length)%arr.length]);
+    v.sort((a,b)=>a-b); return v[v.length>>1];
+  };
+  for(const key of ['dR','dL']){
+    // nothing sane is twelve metres from the racing line; that is the pit lane
+    // or a line painted across a run-off, and both of them are not the track
+    for(const st of tlSt) st[key]=Math.min(st[key],TL_SIDE_MAX);
+    const raw=tlSt.map(s=>s[key]);
+    for(let i=0;i<tlSt.length;i++){
+      const m=med(raw,i,6);
+      if(Math.abs(raw[i]-m)>3.5) tlSt[i][key]=m;
+    }
+  }
+  const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
+  console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
+    +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
+    +' m, max '+w[w.length-1].toFixed(1)+' m');
 }
 /* The station the car is at, searched around where it was so a hairpin's
    return leg cannot claim it. */
@@ -4340,7 +4431,7 @@ window.SIM={
   get player(){ return {kph:carState.speed*3.6, x:carState.wx, z:carState.wz,
                         hdg:carState.hdg, groundY:PLAYER.groundY,
                         surf:{...PLAYER.surf, y:undefined}}; },
-  get lap(){ return {t:TT.t, best:TT.best, last:TT.last, gates:TT.hit.slice(), started:TT.started, drone:TT.drone,
+  get lap(){ return {t:TT.t, best:TT.best, last:TT.last, gates:TT.hit.slice(), started:TT.started, drone:TT.drone, rad:TT.rad,
                      live:TT.live, cd:TT.cd, armed:TT.armed, n:TT.gates.length}; },
   gate(i){ const g=TT.gates[i]; return g?{x:g.x,y:g.y,z:g.z,hdg:Math.atan2(g.dx,g.dz)}:null; },
   place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
@@ -4360,6 +4451,22 @@ window.SIM={
       const nm=(Array.isArray(m)?m.map(x=>x&&x.name).join('+'):(m&&m.name))||'(none)';
       return nm+' @'+h.point.y.toFixed(1);
     });
+  },
+  edges(n){
+    // every station's edge, and what the ground is just inside and just outside it
+    const out=[];
+    const step=Math.max(1,Math.floor(tlSt.length/(n||40)));
+    for(let i=0;i<tlSt.length;i+=step){
+      const s=tlSt[i];
+      const probe=(sign,dist)=>{
+        const g=groundAt(s.x+sign*s.rx*dist, s.z+sign*s.rz*dist, 1e9);
+        return !g.hit?'air':g.kerb?'kerb':g.grass?'grass':g.loose?'gravel':'track';
+      };
+      out.push({ i, w:+(s.dR+s.dL).toFixed(1), dR:+s.dR.toFixed(1), dL:+s.dL.toFixed(1),
+                 inR:probe(1,Math.max(0,s.dR-0.6)), outR:probe(1,s.dR+1.2),
+                 inL:probe(-1,Math.max(0,s.dL-0.6)), outL:probe(-1,s.dL+1.2) });
+    }
+    return out;
   },
   tagAt(x,z,refY){ const g=groundAt(x,z,refY===undefined?1e9:refY);
     return {hit:g.hit,y:+g.y.toFixed(2),road:g.road,kerb:g.kerb,grass:g.grass,loose:g.loose}; },
@@ -4495,8 +4602,29 @@ function frame(now){
      that tells you where you are and what you are about to drive. It drifts
      in slowly, and hands the view to the car at GO, so the cut happens on the
      word rather than a second either side of it. */
+  /* The wide shot: high over the middle of the circuit, turning slowly, with
+     the haze wound back so the far side of the valley is actually there. It
+     begins above the grid so the move carries you from where you are out over
+     the whole lap. */
+  if(TT.live && TT.drone>TT_NEAR && TT.rad){
+    const k=clamp((TT_WIDE-(TT.drone-TT_NEAR))/TT_WIDE,0,1);
+    const ang=TT.ang0+0.55*k, R=TT.rad*(1.45-0.18*k);
+    if(scene.fog){ if(TT._fog===undefined) TT._fog=scene.fog.density;
+                   scene.fog.density=TT._fog*0.18; }
+    camera.position.set(TT.cx+Math.sin(ang)*R, TT.cy+TT.rad*(0.92-0.12*k),
+                        TT.cz+Math.cos(ang)*R);
+    camera.up.set(0,1,0);
+    camera.lookAt(TT.cx, TT.cy, TT.cz);
+    camera.fov=46;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    skyDome.position.copy(camera.position);
+    renderer.render(scene,camera);
+    return;
+  }
   if(TT.live && TT.drone>0){
-    const k=clamp((TT_DRONE-TT.drone)/TT_DRONE,0,1);
+    if(scene.fog && TT._fog!==undefined){ scene.fog.density=TT._fog; TT._fog=undefined; }
+    const k=clamp((TT_NEAR-TT.drone)/TT_NEAR,0,1);
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
     const out=150-k*38, up=54-k*17;
     const gx=carGroup.position.x, gz=carGroup.position.z;
