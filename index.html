@@ -3004,6 +3004,9 @@ addEventListener('keydown',e=>{
   if(k==='l'){ editRestore();          // L works without opening the editor first
                if(linePath.length) pathShow(!pathEdit);
                else if(rlMesh){ rlMesh.visible=!rlMesh.visible; updateStatus(); } }
+  if((k==='backspace'||k==='delete') && pathEdit && pathSel>=0){
+    e.preventDefault(); pathDelete();
+  }
   if(k==='n' && pathEdit){
     const t=pathText();
     console.log('racing line path (model coordinates) — paste over SPA_LINE:\n'+t);
@@ -3039,7 +3042,8 @@ function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   document.getElementById('lname').textContent =
-    pathEdit ? 'Drag a point · click to add · N to copy'
+    pathEdit ? (pathSel>=0 ? 'Point '+(pathSel+1)+' picked · Undo or ⌫ deletes it'
+                           : 'Drag to move · click track to add · click a point to pick')
              : (rlMesh&&rlMesh.visible)?'On':'Off';
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const mk=document.getElementById('mname'); if(mk) mk.textContent = markMode?'Click to place':'Off';
@@ -3394,7 +3398,20 @@ function lineSetVisible(){
    pinned to the ground instead: where each one stood is remembered before the
    rebuild and it is put back at the nearest point of the new curve, so the
    brake board for a corner stays with that corner. */
-let pathEdit=false, pathGroup=null, pathDots=[], pathDrag=-1, pathLastBuild=0;
+let pathEdit=false, pathGroup=null, pathDots=[], pathDrag=-1, pathLastBuild=0,
+    pathSel=-1, pathDownX=0, pathDownY=0;
+/* Deleting one is the exception to "moving is enough", so it is deliberate:
+   click a point to pick it -- it goes white and fat -- and then Undo, or
+   Backspace, takes that one out. A click is a pick and a drag is a move, told
+   apart by whether the cursor actually went anywhere, so picking one cannot
+   nudge it out of place. */
+const PATH_MIN=8;                // below this the lap can no longer be closed
+function pathDelete(){
+  if(!pathEdit||pathSel<0||pathSel>=linePath.length) return;
+  if(linePath.length<=PATH_MIN) return;
+  const i=pathSel; pathSel=-1;
+  pathEditing(()=>{ linePath.splice(i,1); });
+}
 function pathRedraw(){
   if(pathGroup){ scene.remove(pathGroup);
     pathGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
@@ -3403,10 +3420,12 @@ function pathRedraw(){
   pathGroup=new THREE.Group(); scene.add(pathGroup);
   const geo=new THREE.CylinderGeometry(0.55,0.55,3.0,10);
   linePath.forEach((p,i)=>{
+    const picked = (i===pathSel||i===pathDrag);
     const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
-      color: i===pathDrag?0xffffff:0x33ddff, depthTest:false }));
+      color: picked?0xffffff:0x33ddff, depthTest:false }));
     m.position.set(p.x,p.y+1.6,p.z);
     m.renderOrder=1000;
+    if(picked) m.scale.set(1.6,1.2,1.6);
     m.userData.pathIndex=i;
     pathGroup.add(m); pathDots.push(m);
   });
@@ -3437,7 +3456,7 @@ function pathEditing(change){
   lineBuildCurve();
   pedalPts.forEach((q,i)=>{ q.s=lineNearestS(held[i]); });
   pedalSort();
-  lineRedraw(); pathRedraw(); lineSetVisible(); editSave();
+  lineRedraw(); pathRedraw(); lineSetVisible(); updateStatus(); editSave();
 }
 /* Which pair of control points a click belongs between: the segment whose
    closest approach to the click is nearest, the closing pair included, since
@@ -3455,7 +3474,7 @@ function pathInsertIndex(p){
   return bi;
 }
 function pathShow(on){
-  pathEdit=on; pathDrag=-1;
+  pathEdit=on; pathDrag=-1; pathSel=-1;
   pathRedraw(); lineSetVisible(); updateStatus();
 }
 /* The path as it would be written in the file: model coordinates, the frame
@@ -3580,6 +3599,9 @@ function lineText(){
   }).join(',\n ')+']';
 }
 document.getElementById('lineundo').onclick=()=>{
+  // in L mode with a point picked, Undo takes that point out of the lap;
+  // otherwise it is what it always was, the last pedal marker placed
+  if(pathEdit && pathSel>=0){ pathDelete(); return; }
   pedalPts.pop(); pedalSel=-1; dm('dotmenu').classList.remove('on');
   lineRedraw(); linePanel(); editSave();
 };
@@ -3901,7 +3923,8 @@ canvas.addEventListener('pointerdown',e=>{
      not swing about while you are placing a corner. */
   if(pathEdit){
     const i=pickPathDot(e.clientX,e.clientY);
-    if(i>=0){ pathDrag=i; pathRedraw(); canvas.setPointerCapture(e.pointerId); return; }
+    if(i>=0){ pathDrag=i; pathDownX=e.clientX; pathDownY=e.clientY;
+              pathRedraw(); canvas.setPointerCapture(e.pointerId); return; }
   }
   dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
   canvas.setPointerCapture(e.pointerId);
@@ -3912,6 +3935,13 @@ canvas.addEventListener('pointerup',e=>{
      save. The rebuilds during the drag are the cheap kind. */
   if(pathDrag>=0){
     const i=pathDrag; pathDrag=-1;
+    const still = Math.abs(e.clientX-pathDownX)+Math.abs(e.clientY-pathDownY) < 8;
+    if(still){                       // a pick, not a move: nothing shifts
+      pathSel = (pathSel===i) ? -1 : i;
+      pathRedraw(); updateStatus();
+      return;
+    }
+    pathSel=i;
     const p=markScreenToGround(e.clientX,e.clientY);
     pathEditing(()=>{ if(p) linePath[i].copy(p); });
     return;
