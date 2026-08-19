@@ -159,6 +159,14 @@
            pointer-events:none;z-index:7;text-shadow:0 0 24px rgba(0,0,0,.9)}
   #raceend.show{opacity:1}
   #raceend small{display:block;font-size:12px;letter-spacing:.16em;opacity:.7;margin-top:10px}
+  /* where the other car is, whether or not it is on the screen */
+  #aimark{position:fixed;left:0;top:0;transform:translate(-50%,-50%);text-align:center;
+          font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:#37e06a;
+          text-shadow:0 2px 10px rgba(0,0,0,.9);pointer-events:none;z-index:6;
+          opacity:0;transition:opacity .2s ease}
+  #aimark.show{opacity:.95}
+  #aiarrow{display:block;font-size:17px;line-height:1}
+  #aimark.edge #aidist{display:block;margin-top:1px}
   @media (max-width:560px){ #keys{display:none} #map{width:120px;height:120px;top:74px}
                             #cmap{width:120px;height:138px;top:204px} }
   @media (max-height:620px){ #cmap{display:none} }
@@ -204,6 +212,7 @@
     </div>
     <div class="row" style="margin-top:6px">
       <button id="linerace" title="One lap, side by side off the line, against the AI">Race the AI</button>
+      <button id="linepace" title="How much of its grip the AI uses in a race. Lower is slower through corners, which is the only place it can beat you">Pace 75%</button>
     </div>
   </div>
 
@@ -251,6 +260,7 @@
 <div id="golabel">GO</div>
 <div id="racebox"><span id="racelap">LAP 1</span><span id="racegap">--</span></div>
 <div id="raceend"><span id="raceendmsg"></span><small id="raceendsub"></small></div>
+<div id="aimark"><span id="aiarrow">▲</span><span id="aidist">0 m</span></div>
 
 <div id="boot">
   <p id="bootmsg">Spa-Francorchamps</p>
@@ -3845,6 +3855,22 @@ function lineCurv(s,span){
    is worked out over the distance it would need to slow down, so it is off
    the throttle before the corner the way anybody would be. */
 const AI_GRIP=1.8;               // times the player's lateral grip
+/* How much of that it actually uses when it is racing you.
+
+   At everything it has, it is not an opponent, it is a rumour: it takes La
+   Source at 171 and is out of sight before the first corner is over, which is
+   not a race and is not even a thing to watch. A pace figure below 1 slows it
+   in the corners and nowhere else, which is exactly where the difference
+   between a car on a perfect line and a person driving one shows up -- both
+   cars have the same engine, so the straights were never going to separate
+   them. Previewing a line still uses everything, since there the question is
+   what the line is worth rather than whether you can take it. */
+let AI_PACE=0.75;
+const AI_PACES=[0.55,0.65,0.75,0.85,1.0];
+function paceBtn(){
+  const b=document.getElementById('linepace');
+  if(b) b.textContent='Pace '+Math.round(AI_PACE*100)+'%';
+}
 function pvCornerSpeed(s, v){
   let lim=Infinity;
   // how far ahead it needs to care about, from its own braking rate
@@ -3858,7 +3884,8 @@ function pvCornerSpeed(s, v){
        claims 36 g and the limit stops limiting anything: La Source at 271 kph.
        The honest figure is the lateral grip itself, and 1.8 times that is 9.2
        g, which is still a great deal more than you have. */
-    const vc=Math.sqrt(A_GRIP*AI_GRIP/k);                  // through that corner
+    const pace = raceOn ? AI_PACE : 1;
+    const vc=Math.sqrt(A_GRIP*AI_GRIP/k)*pace;             // through that corner
     // and the speed it may be doing here to still be down to vc by then
     const allow=Math.sqrt(vc*vc + 2*46*d);
     if(allow<lim) lim=allow;
@@ -4087,6 +4114,53 @@ function raceFinish(){
   setTimeout(()=>raceEndEl.classList.remove('show'),6000);
 }
 document.getElementById('linerace').onclick=()=>{ raceOn?raceStop():raceStart(); };
+document.getElementById('linepace').onclick=()=>{
+  const i=AI_PACES.indexOf(AI_PACE);
+  AI_PACE=AI_PACES[(i+1)%AI_PACES.length];
+  paceBtn();
+};
+paceBtn();
+
+/* Where the other car is, on the screen. It is a real car in the world and it
+   is drawn like one, but on a circuit this size "drawn" and "visible" are not
+   the same thing: over a crest, behind a tree, or four hundred metres up the
+   road at Kemmel, there is nothing to see and no way to tell whether you are
+   losing by a little or by a lot. So it is always marked -- a chevron over the
+   car when it is in front of you, and pinned to the edge of the screen with
+   the distance on it when it is not. */
+const _mk=new THREE.Vector3();
+function aiMarkUpdate(){
+  const el=document.getElementById('aimark');
+  if(!el) return;
+  if(!(raceOn && PVCAR && pvGroup && pvGroup.visible && raceCd<=0)){
+    el.classList.remove('show'); return;
+  }
+  _mk.set(PVCAR.st.wx, PVCAR.groundY+1.4, PVCAR.st.wz).project(camera);
+  const behind=_mk.z>1;
+  const w=innerWidth, h=innerHeight, pad=34;
+  let x=(_mk.x*0.5+0.5)*w, y=(-_mk.y*0.5+0.5)*h;
+  // a point behind the camera projects to the opposite side, so reflect it
+  // through the middle of the screen before clamping or the arrow points the
+  // wrong way exactly when you most want to know
+  if(behind){ x=w-x; y=h+pad; }
+  const off = behind || x<pad || x>w-pad || y<pad || y>h-pad;
+  const cx=clamp(x,pad,w-pad), cy=clamp(y,pad,h-pad);
+  el.style.left=cx+'px'; el.style.top=cy+'px';
+  el.classList.toggle('edge',off);
+  el.classList.add('show');
+  const ar=document.getElementById('aiarrow');
+  if(ar){
+    // pointing from the middle of the screen at where it really is when it is
+    // off the edge, and simply down at the car when it is on screen
+    const a=off ? Math.atan2(cy-h*0.5, cx-w*0.5)+Math.PI/2 : Math.PI;
+    ar.style.transform='rotate('+a+'rad)';
+  }
+  const ds=document.getElementById('aidist');
+  if(ds){
+    const dx=PVCAR.st.wx-carState.wx, dz=PVCAR.st.wz-carState.wz;
+    ds.textContent=Math.round(Math.hypot(dx,dz))+' m';
+  }
+}
 
 /* ------------------------------------------------------- save and restore
    The path is a constant in this file, so only the pedal points and the grid
@@ -5108,6 +5182,7 @@ function frame(now){
   // runs after this loop -- so derive it here or the cull tests a stale (on the
   // first frame, identity) view matrix.
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  aiMarkUpdate();          // needs the camera it is being projected through
   _pmv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   _frustum.setFromProjectionMatrix(_pmv);
   for(let i=0;i<treeCells.length;i++){
