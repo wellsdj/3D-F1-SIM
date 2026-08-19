@@ -3252,7 +3252,7 @@ let lineGroup=null, lineDots=[], lineRibbon=null;
    loops back on itself wherever two control points land close together, and
    clicks bunch up in the slow corners, which is exactly where a loop would
    be worst. Centripetal cannot self-intersect between control points. */
-let lineSmooth=[], lineCum=[], lineLen=0, lineClosed=false;
+let lineSmooth=[], lineCum=[], lineLen=0, lineClosed=false, lineCurve=null;
 const LINE_STEP=2.5;             // metres between samples along the curve
 function lineBuildCurve(){
   lineSmooth=[]; lineCum=[]; lineLen=0;
@@ -3268,6 +3268,16 @@ function lineBuildCurve(){
      to draw, not a lap, and closing those would loop the car back on itself. */
   lineClosed = linePath.length>=8;
   const curve=new THREE.CatmullRomCurve3(linePath.map(v=>v.clone()),lineClosed,'centripetal',0.5);
+  /* Kept, not just sampled. The samples are 2.5 m apart, so anything reading a
+     heading off them gets the direction of the segment it happens to be on --
+     a staircase, which is what made the AI jitter: at 300 kph it crosses a
+     segment every 30 ms and the whole car snapped round by a fraction of a
+     degree each time. The curve itself is continuous, so ask it. The
+     arc-length table is refined to about a point every two metres, or its own
+     lookup would put a ripple back in at a coarser wavelength. */
+  lineCurve=curve;
+  curve.arcLengthDivisions=Math.max(200,Math.ceil(curve.getLength()/2));
+  curve.updateArcLengths();
   const n=Math.max(2,Math.min(4000,Math.round(curve.getLength()/LINE_STEP)));
   lineSmooth=curve.getSpacedPoints(n);
   // sit every sample on the actual ground -- interpolating height between
@@ -3640,7 +3650,7 @@ document.getElementById('linecopy').onclick=e=>{
 let previewOn=false, PVCAR=null, pvGroup=null, pvObj=null, pvWheels=[],
     pvWingL=null, pvWingR=null, pvIdx=0, pvS=0, pvPhase=0, pvSpin=0,
     pvHeldT=0, pvHeldB=0, pvAcc=0, pvPrevSpd=0, pvLap=0, pvDist=0,
-    pvLapT=0, pvLastLap=0, pvQ={thr:0,brk:0};
+    pvLapT=0, pvLastLap=0, pvGripHeld=false, pvQ={thr:0,brk:0};
 /* Flat out, on by default: the throttle stays on the floor for the whole line
    and the markers are not consulted at all. It is the plain question -- what
    does this car do on this line, driven the way you drive it -- and it is the
@@ -3683,15 +3693,15 @@ function pvBuild(){
   /* Aids on if they are on for you. They shape a keyboard's all-or-nothing
      input, and this driver is working a keyboard, so it wants exactly what
      you have. Nothing steers it any more -- it is carried along the line
-     itself -- but the flag is what the other nine cars will want. */
+     itself -- but the grip figure is what the other nine will want. */
   PVCAR=makeCar(pvGroup, AIDS);
-  PVCAR.infGrip=true;              // it turns as hard as it is asked to
+  PVCAR.gripMul=AI_GRIP;
 }
 function previewStart(){
   if(lineSmooth.length<2||!carGroup) return;
   pvBuild();
   PVCAR.aids=AIDS;                 // whatever T is set to right now
-  PVCAR.infGrip=true;
+  PVCAR.gripMul=AI_GRIP;
   const a=lineSmooth[0], b=lineSmooth[Math.min(3,lineSmooth.length-1)];
   PVCAR.st.speed=0; PVCAR.st.wx=a.x; PVCAR.st.wz=a.z;
   PVCAR.st.hdg=Math.atan2(b.x-a.x,b.z-a.z);
@@ -3766,19 +3776,72 @@ function pvInputs(C,dt){
   pvHeldT=pvPedal(q.thr); pvHeldB=pvPedal(q.brk);
   return { thr:pvHeldT, brk:pvHeldB };
 }
-/* Curvature of the line at a distance along it, from the heading a few metres
-   either side. It is what the front wheels are turned to. */
-function lineCurv(s){
-  const h0=lineAt(pvWrap(s-2)).hdg, h1=lineAt(pvWrap(s+2)).hdg;
-  let d=h1-h0;
-  while(d> Math.PI) d-=2*Math.PI;
-  while(d<-Math.PI) d+=2*Math.PI;
-  return d/4;
-}
 function pvWrap(s){
   if(!lineLen) return 0;
   if(!lineClosed) return clamp(s,0,lineLen);
   s%=lineLen; return s<0?s+lineLen:s;
+}
+/* The curve itself, at a distance along it -- continuous position and
+   continuous heading, rather than the direction of whichever 2.5 m sample the
+   car is standing on. This is the difference between a car that flows round
+   Pouhon and one that shivers its way round. */
+const _lp=new THREE.Vector3(), _lt=new THREE.Vector3();
+function lineHdgAt(s){
+  if(!lineCurve||!lineLen) return lineAt(s).hdg;
+  lineCurve.getTangentAt(clamp(pvWrap(s)/lineLen,0,1),_lt);
+  return Math.atan2(_lt.x,_lt.z);
+}
+function linePosAt(s,out){
+  if(!lineCurve||!lineLen) { const a=lineAt(s); return out.set(a.x,a.y,a.z); }
+  return lineCurve.getPointAt(clamp(pvWrap(s)/lineLen,0,1),out);
+}
+/* Curvature: how much the heading turns per metre, over a baseline long
+   enough that the hand-clicked control points do not show through it. */
+function lineCurv(s,span){
+  const h=span||6;
+  let d=lineHdgAt(s+h*0.5)-lineHdgAt(s-h*0.5);
+  while(d> Math.PI) d-=2*Math.PI;
+  while(d<-Math.PI) d+=2*Math.PI;
+  return d/h;
+}
+/* Grip, for a car that is on the line rather than steered at it.
+
+   Infinite was the wrong answer and so was the old ceiling. A railed car
+   cannot understeer, so a yaw limit does nothing to it at all -- the number
+   has to show up somewhere else or it is not a number about anything. Where
+   it shows up is speed: the fastest a corner can be taken is sqrt(a/k), the
+   lateral grip over the curvature, and that is a limit this car can be held
+   to exactly because it always knows which corner it is in.
+
+   80% more than the player's, as asked. On this circuit that is barely felt
+   anywhere quick -- Eau Rouge would allow over 450 kph and the car only does
+   360 -- and it is the slow corners where it bites: about 170 through La
+   Source, 190 through the Bus Stop. Which is what stops "flat out" meaning
+   "takes the hairpin at 360 and looks ridiculous".
+
+   It brakes for them properly rather than braking when it arrives: the limit
+   is worked out over the distance it would need to slow down, so it is off
+   the throttle before the corner the way anybody would be. */
+const AI_GRIP=1.8;               // times the player's lateral grip
+function pvCornerSpeed(s, v){
+  let lim=Infinity;
+  // how far ahead it needs to care about, from its own braking rate
+  const look=Math.min(500, v*v/(2*46)+40);
+  for(let d=0; d<look; d+=6){
+    const k=Math.abs(lineCurv(pvWrap(s+d)));
+    if(k<2e-4) continue;                       // straight enough to ignore
+    /* A_GRIP alone, not A_GRIP*turnBoost. turnBoost is how much more the car
+       is allowed to rotate than the tyres would really give -- steering feel,
+       deliberately unphysical, up to 4x. Multiplying a cornering speed by it
+       claims 36 g and the limit stops limiting anything: La Source at 271 kph.
+       The honest figure is the lateral grip itself, and 1.8 times that is 9.2
+       g, which is still a great deal more than you have. */
+    const vc=Math.sqrt(A_GRIP*AI_GRIP/k);                  // through that corner
+    // and the speed it may be doing here to still be down to vc by then
+    const allow=Math.sqrt(vc*vc + 2*46*d);
+    if(allow<lim) lim=allow;
+  }
+  return lim;
 }
 function previewStep(dt,t){
   dotMenuTrack();
@@ -3803,6 +3866,10 @@ function previewStep(dt,t){
   const inp=pvInputs(PVCAR,dt);
   applyPedals(PVCAR.st, inp.thr, inp.brk, PVCAR.surf, dt);
   surfaceDrag(PVCAR.st, PVCAR.surf, dt);
+  // and it will not carry more speed into a corner than the corner will take
+  const vLim=pvCornerSpeed(pvDist, PVCAR.st.speed);
+  pvGripHeld = PVCAR.st.speed>vLim;
+  if(pvGripHeld) PVCAR.st.speed=Math.max(vLim, PVCAR.st.speed-46*dt);
 
   const prev=pvDist;
   pvDist=pvWrap(pvDist+PVCAR.st.speed*dt);
@@ -3812,14 +3879,18 @@ function previewStep(dt,t){
   if(pvDist<prev){ pvLap++; pvLastLap=pvLapT; pvLapT=0; }
   if(!lineClosed && pvDist>=lineLen-0.5){ previewReset(); return; }
 
-  const at=lineAt(pvDist);
-  PVCAR.st.wx=at.x; PVCAR.st.wz=at.z; PVCAR.st.hdg=at.hdg;
+  linePosAt(pvDist,_lp);
+  PVCAR.st.wx=_lp.x; PVCAR.st.wz=_lp.z; PVCAR.st.hdg=lineHdgAt(pvDist);
   pvS=pvDist;
   pvIdx=Math.min(lineSmooth.length-1, Math.round(pvDist/LINE_STEP));
-  // the front wheels point where the line is going, so it looks steered
-  // rather than slid: the angle a car of this wheelbase would need
-  PVCAR.steerAng=clamp(-STEER_RATIO*Math.atan(WHEELBASE*lineCurv(pvDist)),
-                       -STEER_LOCK, STEER_LOCK);
+  /* The front wheels point where the line is going: the angle a car of this
+     wheelbase would need for the curvature it is on. Eased, because curvature
+     is the second derivative of points somebody clicked by hand and it is
+     lumpy however smooth the path through them is -- the car's line is exact,
+     only the wheels are averaged, and a real rack has that lag anyway. */
+  const wantAng=clamp(-STEER_RATIO*Math.atan(WHEELBASE*lineCurv(pvDist)),
+                      -STEER_LOCK, STEER_LOCK);
+  PVCAR.steerAng += (wantAng-PVCAR.steerAng)*(1-Math.pow(0.0005,dt));
   placeCar(PVCAR, dt, t);
   // and its wheels turn, by the same v/r the player's do -- a car gliding on
   // frozen wheels reads as slow however fast the number says it is going
@@ -3846,7 +3917,7 @@ function previewStep(dt,t){
   const bk=document.getElementById('pvbrk');
   if(bk) bk.textContent=Math.round(pvQ.brk);
   const pd=document.getElementById('pvpedal');
-  if(pd) pd.textContent = inp.brk ? 'BRAKE' : inp.thr ? 'FLAT' : 'lift';
+  if(pd) pd.textContent = pvGripHeld ? 'GRIP' : inp.brk ? 'BRAKE' : inp.thr ? 'FLAT' : 'lift';
   const ac=document.getElementById('pvacc');
   if(ac){ ac.textContent=pvAcc.toFixed(1)+' / '+ideal.toFixed(1);
           ac.style.color = (inp.thr && pvAcc < ideal-3) ? '#ff5544' : ''; }
@@ -4111,8 +4182,8 @@ function makeCar(group, aids){
            groundY:0, carVY:0, carPitch:0, carRoll:0, slipAng:0,
            surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
            aids: !!aids,
-           // the yaw ceiling is off for the AI only -- see yawFor
-           infGrip: false };
+           // 1 is the player's grip; the AI's cars get more -- see yawFor
+           gripMul: 1 };
 }
 let onLoose=false, looseFrac=0, looseSpray=0;
 let onGrass=false, grassFrac=0;
@@ -4302,20 +4373,16 @@ function applyPedals(st, thr, brk, surf, dt){
    rate alone would allow ~17 g at top speed, so it is capped at what the
    tyres could hold -- which is also what gives the car its understeer, and
    what makes a preview run wide when the throttle asked for the impossible. */
-function yawFor(speed, steerAng, surf, unlimited){
+/* gripMul multiplies the ceiling. 1 is the player's car; the AI's cars get
+   more, because understeer is what makes a human's lap interesting and an
+   AI's lap a mess. Not infinite -- a car that cannot run out of front end at
+   all has stopped being a car -- just enough that it holds what it is asked
+   to hold. */
+function yawFor(speed, steerAng, surf, gripMul){
   const dTyre=-steerAng/STEER_RATIO;                 // +ve = left
   let yawRate=speed*Math.tan(dTyre)/WHEELBASE;
-  /* Unlimited: the car goes exactly where the wheels point, with no tyre to
-     run out of. This is the AI's, deliberately. Understeer is what makes a
-     human's lap interesting and an AI's lap a mess -- it is the difference
-     between a car demonstrating the line and a car that washes out at the
-     first corner it arrives at too fast and spends the rest of the lap in the
-     gravel. Only the ceiling goes: it still steers through the same rack at
-     the same lock, and it still brakes and accelerates exactly as you do, so
-     everything you would feel from the pedals is unchanged. */
-  if(unlimited) return yawRate;
   const slick = surf.grass ? 1 - 0.465*surf.grassFrac : 1;
-  const yawMax = speed>0.5 ? A_GRIP*turnBoost(speed*3.6)*slick/speed : 8;
+  const yawMax = speed>0.5 ? A_GRIP*turnBoost(speed*3.6)*slick*(gripMul||1)/speed : 8;
   return clamp(yawRate,-yawMax,yawMax);
 }
 /* What the surface takes off you for being on it. */
@@ -4486,7 +4553,7 @@ function stepCar(C, inp, dt){
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
   const v=st.speed;
-  const yawRate=yawFor(v, C.steerAng, C.surf, C.infGrip);
+  const yawRate=yawFor(v, C.steerAng, C.surf, C.gripMul);
   surfaceDrag(st, C.surf, dt);
   st.hdg += yawRate*dt;
   st.wx  += Math.sin(st.hdg)*v*dt;
