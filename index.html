@@ -3984,7 +3984,8 @@ function yawFor(speed, steerAng, surf){
 /* What the surface takes off you for being on it. */
 function surfaceDrag(st, surf, dt){
   if(surf.loose)      st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*surf.looseFrac*dt);
-  else if(surf.grass) st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*0.25*surf.grassFrac*dt);
+  // half of what it was: 0.25 -> 0.125, so grass now costs a quarter of gravel's speed
+  else if(surf.grass) st.speed=Math.max(0,st.speed-(2.5+st.speed*1.6)*0.125*surf.grassFrac*dt);
 }
 
 /* The steering rack, shared. Takes a stick position -1..1 -- which is what a
