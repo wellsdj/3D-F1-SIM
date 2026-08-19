@@ -3857,11 +3857,10 @@ function lineCurv(s,span){
    It brakes for them properly rather than braking when it arrives: the limit
    is worked out over the distance it would need to slow down, so it is off
    the throttle before the corner the way anybody would be. */
-/* Your grip, and a bit: A_GRIP is the car's lateral figure, 50 m/s2, and the
-   AI gets 1.3 times it. Not perfect, just grippier -- enough that it holds
-   what it aims at without turning into something that corners in a way you
-   could never match and cannot learn anything from. */
-const AI_GRIP=1.3;               // times the player's own lateral grip
+/* Your grip. A_GRIP is the car's lateral figure, 50 m/s2, and the AI gets
+   exactly that -- same tyres, same 5.1 g. Any corner it takes is a corner you
+   can take. */
+const AI_GRIP=1;                 // times the player's own lateral grip
 /* How much of that it actually uses when it is racing you.
 
    At everything it has, it is not an opponent, it is a rumour: it is out of
@@ -3889,8 +3888,8 @@ function pvCornerSpeed(s, v){
        is allowed to rotate than the tyres would really give -- steering feel,
        deliberately unphysical, up to 4x. Multiplying a cornering speed by it
        claims 36 g and the limit stops limiting anything: La Source at 271 kph.
-       The honest figure is the lateral grip itself -- yours -- and the AI runs
-       1.3 times it, 6.6 g against your 5.1. */
+       The honest figure is the lateral grip itself, and the AI runs the same
+       one you do. */
     const pace = raceOn ? AI_PACE : 1;
     const vc=Math.sqrt(A_GRIP*AI_GRIP/k)*pace;             // through that corner
     // and the speed it may be doing here to still be down to vc by then
