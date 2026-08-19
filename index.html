@@ -177,7 +177,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em></div>
+<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Line <em id="lname">Off</em><br>Aids <em id="aname">On</em><br>Mark <em id="mname">Off</em><br>Under you <em id="uname">road</em></div>
 <button id="gridtoggle">Editor</button>
 <div id="gridpanel">
   <div class="row tabs">
@@ -3858,7 +3858,14 @@ function pvCornerSpeed(s, v){
   // how far ahead it needs to care about, from its own braking rate
   const look=Math.min(500, v*v/(2*46)+40);
   for(let d=0; d<look; d+=6){
-    const k=Math.abs(lineCurv(pvWrap(s+d)));
+    /* Over fifteen metres, not six. Curvature is the second derivative of
+       points clicked by hand, so a short baseline finds corners that are not
+       there -- and it finds most of them in a fast sequence of kinks, which is
+       exactly what Eau Rouge is. Fifteen metres is still far shorter than any
+       real corner here, so a genuine one reads at full strength: over an arc
+       of constant radius this is exact, and it only rounds off the entry and
+       exit of one. */
+    const k=Math.abs(lineCurv(pvWrap(s+d),15));
     if(k<2e-4) continue;                       // straight enough to ignore
     /* A_GRIP alone, not A_GRIP*turnBoost. turnBoost is how much more the car
        is allowed to rotate than the tyres would really give -- steering feel,
@@ -4012,7 +4019,7 @@ function lineAutoPedals(){
   const N=lineSmooth.length, ds=lineLen/N, BRK=46;
   const v=new Float64Array(N);
   for(let i=0;i<N;i++){
-    const k=Math.abs(lineCurv(i*ds));
+    const k=Math.abs(lineCurv(i*ds,15));      // see pvCornerSpeed for the 15
     v[i] = k<2e-4 ? MAXSPEED
                   : Math.min(MAXSPEED, Math.sqrt(A_GRIP*AI_GRIP/k)*AI_PACE);
   }
@@ -4775,12 +4782,13 @@ const LAYER=1.5;                 // metres: past this, it is not our surface
 function probeCar(wx,wz,hdg,refY,out){
   const fx=Math.sin(hdg), fz=Math.cos(hdg);
   const fresh=!(refY<1e8);       // "no history, give me the topmost" -- no band
-  let looseHits=0, grassHits=0, groundHits=0, banded=true;
+  let looseHits=0, grassHits=0, tried=0, banded=true;
   const probe1=(lx,lz)=>{
+    tried++;
     const g=groundAt(wx + lx*fz + lz*fx, wz - lx*fx + lz*fz, refY);
     if(!g.hit) return null;
     if(banded && !fresh && Math.abs(g.y-refY)>LAYER) return null;   // another layer
-    groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++;
+    if(g.loose) looseHits++; else if(g.grass) grassHits++;
     return g.y;
   };
   /* Each wheel reads the mean of a patch, not a point. The road is 1683
@@ -4794,7 +4802,7 @@ function probeCar(wx,wz,hdg,refY,out){
     return n?sum/n:null;
   };
   const sweep=()=>{
-    looseHits=0; grassHits=0; groundHits=0;
+    looseHits=0; grassHits=0; tried=0;
     let n=0;
     for(let i=0;i<4;i++){ _PROBE_Y[i]=probe(CARPTS[i].x,CARPTS[i].z);
                           if(_PROBE_Y[i]!==null) n++; }
@@ -4811,9 +4819,19 @@ function probeCar(wx,wz,hdg,refY,out){
      meant a car straddling the edge of a trap felt nothing at all, and since
      the probes cover a patch around each wheel that edge is metres wide.
      Floor at 0.15 and saturating by 0.40: brushing the edging is nothing,
-     being in a trap reads as being in it. */
-  const raw  = groundHits>0 ? looseHits/groundHits : 0;
-  const rawG = groundHits>0 ? grassHits/groundHits : 0;
+     being in a trap reads as being in it.
+
+     Out of every probe taken, not every probe that answered. Those are the
+     same number on flat ground and wildly different where the ground moves
+     fast under the car: a probe rejected for being on another layer used to
+     vanish from the vote entirely, so at Eau Rouge -- the steepest, most
+     compressed piece of the circuit, where the most probes fall outside the
+     band -- a couple of hits on the verge could be four surviving probes out
+     of forty and read as half the car being on grass. Twenty m/s2 of drag,
+     flat out, on the one corner where you notice it most. A rejected probe
+     now counts as what it is: not evidence of grass. */
+  const raw  = tried>0 ? looseHits/tried : 0;
+  const rawG = tried>0 ? grassHits/tried : 0;
   out.looseFrac = clamp((raw -0.15)/0.25, 0, 1);
   out.loose     = out.looseFrac > 0;
   out.grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
@@ -5108,6 +5126,17 @@ function frame(now){
     placeCar(PLAYER, dt, t);
     looseFrac=PLAYER.surf.looseFrac; onLoose=PLAYER.surf.loose;
     grassFrac=PLAYER.surf.grassFrac; onGrass=PLAYER.surf.grass;
+    /* What the car thinks it is standing on, on screen. Surface is the only
+       thing besides the brakes that can take speed off you, so when a car is
+       slow and you cannot see why, this is the answer or it is not a surface
+       problem at all. */
+    const un=document.getElementById('uname');
+    if(un){
+      const txt = onLoose ? 'GRAVEL '+Math.round(looseFrac*100)+'%'
+                : onGrass ? 'GRASS '+Math.round(grassFrac*100)+'%' : 'road';
+      if(un.textContent!==txt){ un.textContent=txt;
+        un.style.color = (onLoose||onGrass) ? '#ff5544' : ''; }
+    }
   }else{
     trackPos(carState.s,carState.n,0.125,_carP);
     trackDir(carState.s,_d2);
