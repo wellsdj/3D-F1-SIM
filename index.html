@@ -3549,7 +3549,17 @@ function pvTrackProgress(){
    it is going, and ask for the arc that reaches it, as a fraction of the lock
    actually available at this speed. */
 function aiInputs(C){
-  const q=pedalAt(pvS);
+  let q=pedalAt(pvS);
+  /* A marker holds until the next one -- but a brake marker has nothing left
+     to do once the car is stopped, and holding it is a deadlock: the car sits
+     still, so its distance along the line never advances, so the marker in
+     force never changes, so it sits still. It brakes perfectly and then never
+     drives again, which is not a fault in the numbers and should not look
+     like one. Stopped with nothing on the throttle, it takes the next
+     marker's instruction, the way a driver who had stopped would. */
+  if(C.st.speed<0.5 && q.thr<=0){
+    for(const n of pedalPts){ if(n.s>pvS){ q=n; break; } }
+  }
   const look=clamp(7+C.st.speed*0.62,9,55);
   const ti=Math.min(lineSmooth.length-1, pvIdx+Math.round(look/LINE_STEP));
   const T=lineSmooth[ti];
@@ -4037,15 +4047,43 @@ function steerRack(C, want, kph, dt, aids){
    track catches a probe or two everywhere, so anything under 15% is not a
    surface the car is on. Read at full strength off a single point, as the
    preview was doing, the road itself came back as grass and the car dragged
-   round the lap at a third of its pace. */
+   round the lap at a third of its pace.
+
+   And the third thing, which is what was strangling the preview car: a probe
+   that lands on a *different layer* is thrown away rather than averaged in.
+
+   The reference height is the mean of the probes from last frame, so a probe
+   that answers for another layer does not just report the wrong surface once
+   -- it drags the reference toward that layer, which makes the next frame's
+   probes prefer it too. That runs away. A wheel over the kerb at Pouhon
+   catching the terrain slab beneath the circuit is enough to start it, and
+   two or three frames later every probe is on the slab, the car is tagged as
+   permanently on grass, and it can never climb back out because the road is
+   no longer the nearest surface to where it thinks it is standing. The effect
+   is exactly what it looked like: brakes normal -- braking has no surface
+   term -- while the engine is bogged and grass drag eats the rest, so the
+   thing accelerates like it is towing an anchor and tops out at a third of
+   its speed. The player rarely triggers it because it drives down the middle
+   of the road; the preview triggers it because a racing line is *supposed* to
+   put its wheels on the kerbs.
+
+   A metre and a half is far more than any kerb, ripple strip or camber change
+   and far less than the gap to another layer, so the test is unambiguous. If
+   a car genuinely is somewhere with nothing in band -- dropped in, or off the
+   edge of the world -- the sweep is redone without the band rather than
+   leaving it with no ground at all. */
 const _PROBE_Y=[0,0,0,0];
+const LAYER=1.5;                 // metres: past this, it is not our surface
 function probeCar(wx,wz,hdg,refY,out){
   const fx=Math.sin(hdg), fz=Math.cos(hdg);
-  let looseHits=0, grassHits=0, groundHits=0;
+  const fresh=!(refY<1e8);       // "no history, give me the topmost" -- no band
+  let looseHits=0, grassHits=0, groundHits=0, banded=true;
   const probe1=(lx,lz)=>{
     const g=groundAt(wx + lx*fz + lz*fx, wz - lx*fx + lz*fz, refY);
-    if(g.hit){ groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++; }
-    return g.hit?g.y:null;
+    if(!g.hit) return null;
+    if(banded && !fresh && Math.abs(g.y-refY)>LAYER) return null;   // another layer
+    groundHits++; if(g.loose) looseHits++; else if(g.grass) grassHits++;
+    return g.y;
   };
   /* Each wheel reads the mean of a patch, not a point. The road is 1683
      triangles over 7 km, so a single probe steps at every facet edge. */
@@ -4057,11 +4095,17 @@ function probeCar(wx,wz,hdg,refY,out){
     }
     return n?sum/n:null;
   };
-  out.ok=false;
-  if(CARPTS.length===4){
+  const sweep=()=>{
+    looseHits=0; grassHits=0; groundHits=0;
     let n=0;
     for(let i=0;i<4;i++){ _PROBE_Y[i]=probe(CARPTS[i].x,CARPTS[i].z);
                           if(_PROBE_Y[i]!==null) n++; }
+    return n;
+  };
+  out.ok=false;
+  if(CARPTS.length===4){
+    let n=sweep();
+    if(n===0){ banded=false; n=sweep(); }   // nothing in band: take what there is
     out.ok = n===4;
     out.y=_PROBE_Y;
   }
