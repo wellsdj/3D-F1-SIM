@@ -312,6 +312,23 @@
   #boot #bar{position:relative;z-index:1;margin-top:18px;width:min(100%,500px);height:2px;background:rgba(236,234,228,.17)}
   #boot #bar i{background:linear-gradient(90deg,#ffb020,#ff5b28);box-shadow:0 0 14px rgba(255,176,32,.6)}
 
+  /* Qualifying transition. The centre of the ring stays empty: only the
+     outer stroke moves, so it reads as a calm, deliberate loading mark. */
+  #qualifying-load{position:fixed;inset:0;z-index:20;display:grid;place-items:center;overflow:hidden;
+                   visibility:hidden;opacity:0;pointer-events:none;background:#050a10;transition:opacity .5s ease,visibility .5s ease}
+  #qualifying-load.active{visibility:visible;opacity:1;pointer-events:auto}
+  #qualifying-load-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+                         background:url('home-hero.png') center/cover no-repeat;filter:brightness(.42) saturate(.78);transform:scale(1.03)}
+  #qualifying-load .load-shade{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,rgba(10,19,29,.12),rgba(3,7,12,.78) 72%),linear-gradient(180deg,rgba(3,7,12,.16),rgba(3,7,12,.55))}
+  #qualifying-load .load-content{position:relative;z-index:1;display:grid;justify-items:center;gap:18px;text-align:center;color:var(--paper);font-family:var(--mono);text-transform:uppercase}
+  #qualifying-load .load-kicker{font-size:9px;letter-spacing:.34em;color:#ffb020;opacity:.88}
+  #qualifying-load .load-ring{width:84px;height:84px;border-radius:50%;border:1px solid rgba(244,247,251,.2);
+                              border-top-color:#ffb020;border-right-color:rgba(255,91,40,.82);box-shadow:0 0 32px rgba(255,176,32,.18);
+                              animation:qualifying-spin 1.35s linear infinite}
+  #qualifying-load .load-word{font-size:11px;letter-spacing:.48em;margin-left:.48em}
+  #qualifying-load .load-status{font-size:9px;letter-spacing:.18em;opacity:.48}
+  @keyframes qualifying-spin{to{transform:rotate(360deg)}}
+
   /* ----------------------------------------------------------- home actions */
   #home-actions{position:relative;z-index:1;display:flex;flex-direction:column;gap:11px;width:min(100%,500px)}
   #bestlapsbtn{position:relative;overflow:hidden;width:100%;font:inherit;font-size:11px;letter-spacing:.16em;
@@ -622,6 +639,17 @@
   <div id="bar"><i></i></div>
 </div>
 
+<div id="qualifying-load" aria-hidden="true">
+  <video id="qualifying-load-video" data-video-src="qualifying-intro.mp4" muted loop playsinline preload="metadata" poster="home-hero.png" aria-hidden="true"></video>
+  <div class="load-shade"></div>
+  <div class="load-content">
+    <div class="load-kicker">Qualifying · Spa 2022</div>
+    <div class="load-ring" aria-hidden="true"></div>
+    <div class="load-word">Loading</div>
+    <div class="load-status" id="qualifying-load-status">Preparing the circuit</div>
+  </div>
+</div>
+
 <section id="lapbook" aria-hidden="true">
   <button class="overlay-close" id="lapbook-close" aria-label="Close best laps">×</button>
   <div class="overlay-kicker">Driver archive · Spa 2022</div>
@@ -642,12 +670,12 @@
   <div class="custom-copy">
     <div class="overlay-kicker">Garage 01 · Live spec</div>
     <h2>Build your <em>line.</em></h2>
-    <p class="custom-intro">Turn the car slowly. Set the body, halo / roll hoop, rear wing, and wheel finishes before qualifying.</p>
+    <p class="custom-intro">Turn the car slowly. Set the body, halo / roll hoop, wing core, and wheel finishes before qualifying.</p>
   </div>
   <div class="custom-controls">
     <div class="style-group"><label>Body <span id="style-body-value">Obsidian</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#111418"></div></div>
     <div class="style-group"><label>Halo / roll hoop <span id="style-ring-value">Black</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#15171b"></div></div>
-    <div class="style-group"><label>Rear wing <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
+    <div class="style-group"><label>Wing core / carbon <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
     <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
     <p class="custom-note">Changes save automatically and carry into your next run.</p>
   </div>
@@ -3429,8 +3457,8 @@ function paintSave(){
 /* --------------------------------------------------------- garage finishes
    The body stays on the texture-aware paint path above. The three smaller
    finish groups use their real glTF materials, so the colour controls remain
-   independent: halo/ring, rear wing and wheel rims can all be changed without
-   washing a colour over the rest of the car. */
+   independent: halo/ring, the central carbon wing core and wheel rims can all
+   be changed without washing a colour over the rest of the car. */
 const STYLE_KEY='f1sim.car.style';
 const STYLE_SWATCHES={
   body:['#111418','#d72638','#1596d1','#f2c94c','#e9eef2'],
@@ -3460,21 +3488,34 @@ function styleAddTarget(kind,mat){
 function stylePrepare(root){
   styleTargets={body:[],ring:[],wing:[],rims:[]};
   root.updateMatrixWorld(true);
-  const addByMaterial=(o,ms)=>ms.forEach(m=>{
+  const addByMaterial=(o,ms,bodyish)=>ms.forEach(m=>{
     const n=(m&&m.name||'').toLowerCase();
     if(/paint/.test(n)) styleAddTarget('body',m);
     if(/halo|ring/.test(n)) styleAddTarget('ring',m);
     if(/mcl39_wheels|discs|chrome/.test(n)) styleAddTarget('rims',m);
+    if(bodyish&&/mcl39_carbon1|mcl39_carbon2/.test(n)) styleAddTarget('wing',m);
   });
   root.traverse(o=>{
     if(!o.isMesh||!o.material) return;
-    const ms=Array.isArray(o.material)?o.material:[o.material];
-    addByMaterial(o,ms);
+    const bodyish=o.parent&&/body/i.test(o.parent.name||'');
+    let ms=Array.isArray(o.material)?o.material:[o.material];
+    /* The black centre section is part of the single Body mesh and uses the
+       shared carbon materials. Clone those slots before styling them so the
+       wing-core picker changes only the body section, not the front wing's
+       shared material as a side effect. */
+    if(bodyish){
+      ms=ms.map(m=>{
+        const n=(m&&m.name||'').toLowerCase();
+        if(!/mcl39_carbon1|mcl39_carbon2/.test(n)) return m;
+        const clone=m.clone(); styleAddTarget('wing',clone); return clone;
+      });
+      o.material=Array.isArray(o.material)?ms:ms[0];
+    }
+    addByMaterial(o,ms,bodyish);
     if(/rear.?wing|wing.?rear/i.test(o.name||'')) ms.forEach(m=>styleAddTarget('wing',m));
     if(!o.geometry||!o.geometry.groups||!o.geometry.attributes.position||!o.geometry.groups.length) return;
     /* The body is one glTF mesh with material groups. Split its rear-most
        groups into cloned materials so the rear wing can have its own finish. */
-    const bodyish=o.parent&&/body/i.test(o.parent.name||'');
     if(!bodyish) return;
     const p=o.geometry.attributes.position, idx=o.geometry.index;
     let minZ=Infinity,maxZ=-Infinity,minY=Infinity,maxY=-Infinity;
@@ -4503,6 +4544,7 @@ function ttSaveBest(){
   TT.bestSplits=TT.splits.slice();
 }
 function ttStart(cinematic=true){
+  qualifyingLoadHide();
   ttBuild();
   if(!TT.gates.length) return false;
   /* Always from the same place. The opening shot frames the car, so without
@@ -4749,6 +4791,7 @@ function replayStop(){
 /* And going back in from the home screen with the circuit already loaded: no
    reloading, no second startTrack, just the lights again. */
 function enterCircuit(){
+  qualifyingLoadShow('Preparing '+(TRACK&&TRACK.name||'the circuit'));
   const b=document.getElementById('boot');
   if(b) b.classList.add('gone');
   if(TTREC.playing) return;
@@ -7161,6 +7204,57 @@ function ready(){ assetsDone=true; maybeStart(); }
 const bootEl=document.getElementById('boot');
 const pickEl=document.getElementById('pick');
 const bootMsg=document.getElementById('bootmsg');
+const qualifyingLoadEl=document.getElementById('qualifying-load');
+const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
+const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
+const QUALIFYING_LOAD_MIN_MS=10000;
+let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
+function qualifyingLoadSetStatus(text){
+  if(qualifyingLoadStatusEl) qualifyingLoadStatusEl.textContent=text;
+}
+function qualifyingLoadShow(text){
+  if(!qualifyingLoadEl) return;
+  clearTimeout(qualifyingLoadTimer);
+  qualifyingLoadSince=performance.now();
+  qualifyingLoadSetStatus(text||'Preparing the circuit');
+  qualifyingLoadEl.classList.add('active');
+  qualifyingLoadEl.setAttribute('aria-hidden','false');
+  document.body.classList.add('qualifying-loading');
+  bootEl.classList.add('gone');
+  /* The supplied intro clip can be dropped in as qualifying-intro.mp4. A
+     quiet HEAD check keeps the poster fallback clean until that asset exists. */
+  if(qualifyingLoadVideo&&!qualifyingVideoChecked){
+    qualifyingVideoChecked=true;
+    const src=qualifyingLoadVideo.dataset.videoSrc;
+    if(src) fetch(src,{method:'HEAD',cache:'no-store'}).then(r=>{
+      if(!r.ok) return;
+      qualifyingLoadVideo.src=src; qualifyingLoadVideo.load();
+      if(qualifyingLoadEl.classList.contains('active')) qualifyingLoadVideo.play().catch(()=>{});
+    }).catch(()=>{});
+  }else if(qualifyingLoadVideo&&qualifyingLoadVideo.src){
+    qualifyingLoadVideo.play().catch(()=>{});
+  }
+}
+function qualifyingLoadHide(immediate=false){
+  if(!qualifyingLoadEl) return;
+  clearTimeout(qualifyingLoadTimer);
+  const wait=immediate?0:Math.max(0,QUALIFYING_LOAD_MIN_MS-(performance.now()-qualifyingLoadSince));
+  const finish=()=>{
+    qualifyingLoadEl.classList.remove('active');
+    qualifyingLoadEl.setAttribute('aria-hidden','true');
+    document.body.classList.remove('qualifying-loading');
+    if(qualifyingLoadVideo) qualifyingLoadVideo.pause();
+  };
+  if(wait) qualifyingLoadTimer=setTimeout(finish,wait); else finish();
+}
+function qualifyingLoadFail(text){
+  qualifyingLoadSetStatus(text||'Track failed to load');
+  setTimeout(()=>{
+    qualifyingLoadHide(true);
+    pickEl.style.display='';
+    bootEl.classList.remove('gone');
+  },1400);
+}
 
 function lapBookRefresh(){
   recLoad();
@@ -7282,20 +7376,24 @@ document.getElementById('lapbook-replay').onclick=()=>{
 
 function startTrack(id){
   const t=TRACKS[id];
+  qualifyingLoadShow('Preparing '+(t&&t.name||'the circuit'));
   pickEl.style.display='none';
   applyTrackConstants(t);
   if(t.procedural){
     bootMsg.textContent='Building '+t.name;
+    qualifyingLoadSetStatus('Building '+t.name);
     buildTrack(null,true);
     buildWorld();
     return;
   }
   bootMsg.textContent='Loading '+t.name;
+  qualifyingLoadSetStatus('Loading '+t.name);
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
   loader.load(t.glb, gltf=>{
     const root=gltf.scene;
     bootMsg.textContent='Reading the circuit';
+    qualifyingLoadSetStatus('Reading the circuit');
     root.updateWorldMatrix(true,true);
 
     /* Nothing below is hand-derived per track: the road, the units and the
@@ -7317,6 +7415,7 @@ function startTrack(id){
     } else console.log('model is already 1 unit = 1 metre');
 
     bootMsg.textContent='Finding the grid';
+    qualifyingLoadSetStatus('Finding the grid');
     /* An explicit spawn beats anything derived, so it is checked first and
        short-circuits the rest. */
     if(t.spawnAt){
@@ -7422,11 +7521,15 @@ function startTrack(id){
     scene.fog.density=0.00035;         // a real valley circuit, long sightlines
     buildWorld();
   }, ev=>{
-    if(ev.lengthComputable)
-      bootMsg.textContent='Loading '+t.name+' '+Math.round(ev.loaded/ev.total*100)+'%';
+    if(ev.lengthComputable){
+      const pct=Math.round(ev.loaded/ev.total*100);
+      bootMsg.textContent='Loading '+t.name+' '+pct+'%';
+      qualifyingLoadSetStatus('Loading '+t.name+' '+pct+'%');
+    }
   }, err=>{
     console.error('track load failed',err);
     bootMsg.textContent='Track failed to load';
+    qualifyingLoadFail('Track failed to load');
   });
 }
 
