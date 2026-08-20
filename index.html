@@ -4263,7 +4263,12 @@ function tlCheck(){
   if(on>0){ _tlFrames=0; return; }
   if(++_tlFrames<2) return;                      // one frame is noise, not a lap
   _tlFrames=0;
-  if(!TT.started) return;                        // nothing to delete yet
+  /* TT.started means "a checkpoint gate has been reached", not "the timed
+     run is under way". The first gate is beyond Eau Rouge, so using it here
+     made the entire opening section immune to track limits. TT.live plus the
+     countdown guard above already says the run has begun; if this happens
+     before the initial start-line crossing, ttLine's first-cross reset safely
+     clears it. */
   ttVoid('track limits');
 }
 /* A lap that is gone. The clock is not wiped and no banner is thrown across
