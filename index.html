@@ -217,7 +217,7 @@
                    font-size:9px;letter-spacing:.16em;opacity:.55;text-transform:uppercase}
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
-  #boot.gone{opacity:0;pointer-events:none}
+  #boot.gone{opacity:0!important;pointer-events:none!important}
   #pick{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;width:min(100%,500px)}
   #pick button{position:relative;overflow:hidden;width:100%;font-family:var(--mono);cursor:pointer;color:var(--paper);
         background:linear-gradient(105deg,rgba(11,18,27,.88),rgba(17,25,37,.48));border:1px solid rgba(236,234,228,.25);
@@ -319,7 +319,7 @@
      outer stroke moves, so it reads as a calm, deliberate loading mark. */
   #qualifying-load{position:fixed;inset:0;z-index:20;display:grid;place-items:center;overflow:hidden;
                    visibility:hidden;opacity:0;pointer-events:none;background:#050a10;transition:opacity .5s ease,visibility .5s ease}
-  #qualifying-load.active{visibility:visible;opacity:1;pointer-events:auto}
+  #qualifying-load.active{visibility:visible!important;opacity:1!important;pointer-events:auto!important}
   #qualifying-load-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
                          background:url('home-hero.png') center/cover no-repeat;filter:brightness(.42) saturate(.78);transform:scale(1.03)}
   #qualifying-load .load-shade{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,rgba(10,19,29,.12),rgba(3,7,12,.78) 72%),linear-gradient(180deg,rgba(3,7,12,.16),rgba(3,7,12,.55))}
