@@ -2516,6 +2516,7 @@ const WHEELBASE=3.60;
     const b1=new THREE.Box3().setFromObject(car);
     car.position.y=-b1.min.y;           // drop the tyres onto the deck
     carGroup.add(car); carObj=car;
+    stripSponsors(car);
     paintPrepare(car);
     paintLoad();
     if(carPaint) paintCar(carPaint);
@@ -2656,6 +2657,26 @@ function carPoint(x,y,z){ return pointOn(carObj,carGroup,x,y,z); }
    The original pixels are kept, so changing colour again works from the paint
    as it shipped instead of compounding one shift on top of another and
    sliding the car around the colour wheel. */
+/* The sponsors come off. This is a real team's real livery and the logos on
+   it belong to people with lawyers, so every decal material is switched off:
+   the stickers, the second decal sheet, the steering-wheel markings and the
+   number. What is left is the paint, the carbon and the shape of the car,
+   none of which is anybody's trademark.
+
+   The badges baked into the paint texture itself cannot go this way -- they
+   are the same pixels as the bodywork -- which is one more reason the second
+   car exists. */
+const DECAL_RE=/decal|number|sponsor/i;
+function stripSponsors(root){
+  let n=0;
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    for(const m of ms) if(m&&m.name&&DECAL_RE.test(m.name)){ m.visible=false; n++; }
+  });
+  if(n) console.log('livery: '+n+' decal material(s) switched off');
+  return n;
+}
 const PAINT_KEY='f1sim.car.paint';
 const PAINT_RE=/paint/i;                 // mcl39_paints, mcl39_halo_paint
 let paintJobs=[], paintHue=null, carPaint=null;
