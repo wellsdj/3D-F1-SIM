@@ -206,6 +206,14 @@
                       font-size:9.5px}
   #paintnote{}
   /* ------------------------------------------------ customise your car */
+  #homereplay{width:100%;font:inherit;font-family:var(--mono);font-size:11px;
+              letter-spacing:.14em;text-transform:uppercase;color:#dfe7f1;cursor:pointer;
+              background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);
+              border-radius:10px;padding:13px 12px;text-align:left;
+              transition:background .15s ease,border-color .15s ease}
+  #homereplay:hover:not(:disabled){background:rgba(255,176,32,.14);
+              border-color:rgba(255,176,32,.5)}
+  #homereplay:disabled{opacity:.4;cursor:default}
   #paintrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   #paintsw{display:flex;gap:7px;flex-wrap:wrap}
   #paintsw button{width:28px;height:28px;border-radius:3px;cursor:pointer;padding:0;
@@ -383,6 +391,12 @@
     </div>
     <p class="note">Two wheels over is fine. Three is fine. A lap is only deleted
        when all four are past the line — and when you miss one of the five gates.</p>
+  </div>
+  <div id="settings" style="margin-top:26px">
+    <h5>Your best lap</h5>
+    <button id="homereplay" disabled>No lap yet — drive one first</button>
+    <p class="note">Every lap is recorded and the fastest is kept. Watch it back from
+       any camera, including the TV director.</p>
   </div>
   <div id="settings" style="margin-top:26px">
     <h5>Customise your car</h5>
@@ -1242,6 +1256,13 @@ function chunkTrack(root){
   let cut=0, made=0, tris=0;
   const _v=new THREE.Vector3();
   for(const o of jobs){
+    /* The white lines are left whole. Track limits raycasts against that mesh
+       to find the edge of the circuit, and a raycast can only be aimed at one
+       object -- chunk it and every ray past the first cell finds nothing, which
+       is exactly what happened: the measured edge went blind the moment the
+       circuit was chunked. 18k triangles is a cheap exception. */
+    const mm=(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean);
+    if(mm.some(m=>m.name&&/^line\b|^line\./i.test(m.name))) continue;
     const g=o.geometry, pos=g.attributes.position, idx=g.index;
     const nTri=(idx?idx.count:pos.count)/3;
     if(nTri<CHUNK_MIN_TRIS) continue;
@@ -2754,6 +2775,7 @@ const WHEELBASE=3.60;
     paintLoad();
     if(carPaint) paintCar(carPaint);
     paintUI();
+    homeReplayUI();
 
     for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
       const w=car.getObjectByName(n);
@@ -3012,6 +3034,24 @@ function paintCar(hex){
    the time you are on the circuit. */
 const PAINT_SWATCHES=['#ff8000','#e2001a','#00a3e0','#00352f','#0600ef',
                       '#b6babd','#111418','#f6d200','#ff87bc','#6cd3bf'];
+/* The home screen asks the same question the in-game button does, before any
+   circuit is loaded: the best lap lives in storage, so it can be read straight
+   from there. The button is always on the page -- greyed when there is nothing
+   to watch, which tells you the feature exists and what to do about it. */
+function homeReplayUI(){
+  const b=document.getElementById('homereplay');
+  if(!b) return;
+  let best=null;
+  try{ const d=JSON.parse(localStorage.getItem(REPLAY_KEY)||'null');
+       if(d&&Array.isArray(d.f)&&d.f.length>4) best=d.t; }catch(e){}
+  b.disabled=!best;
+  b.textContent = best ? ('Watch your best lap · '+ttFmt(best)) : 'No lap yet — drive one first';
+  b.onclick=()=>{ if(!best) return;
+    window._autoReplay=true;
+    const go=document.querySelector('#pick button[data-track]');
+    if(go) go.click();
+  };
+}
 function paintUI(){
   const wrap=document.getElementById('paintsw');
   if(!wrap||wrap.childElementCount) return;
@@ -4494,15 +4534,12 @@ function tlMeasure(curve,L){
      drivable. */
   if(tleLines[0].length>=8 || tleLines[1].length>=8){
     let used=0;
-    for(const st of tlSt){
-      /* Each side takes the marked line that is nearest to it on that side.
-         Sides are handled one at a time rather than as a pair, so a station
-         where only one line is close still gets the benefit of it -- which
-         matters through a hairpin, where a line clicked every eighty metres
-         cuts the corner and lands well away on the inside. */
+    const walks=tleLines.map(l=>l.length>=8?tleWalk(l,tlSt):null);
+    for(let k=0;k<tlSt.length;k++){
+      const st=tlSt[k];
       let bR=null, bL=null;
-      for(const line of tleLines){
-        const o=tleOffset(line,st.x,st.z,st.rx,st.rz);
+      for(const w of walks){
+        const o=w&&w[k];
         if(!o||o.dist>40) continue;
         if(o.off>0.5){ if(!bR||o.dist<bR.dist) bR=o; }
         else if(o.off<-0.5){ if(!bL||o.dist<bL.dist) bL=o; }
@@ -4512,6 +4549,34 @@ function tlMeasure(curve,L){
     }
     console.log('track limits: '+used+' of '+(tlSt.length*2)+' station edges taken from the marked lines');
   }
+  /* The kerb counts as track.
+
+     The white line is painted on the inside of the kerb, so measured against
+     the paint the exit of La Source is 0.3 m wide on the right -- the racing
+     line runs along the kerb there, and running wide by a wheel's width put
+     all four over the line while the car was still on the circuit as any
+     driver understands it. That is the complaint, and it was not a measuring
+     error: the surface really does change at 0.3 m.
+
+     So each edge is walked outward across its kerb and set down on the far
+     side of it. Past that is grass, gravel or run-off, and past that you have
+     genuinely left. Where the edge does not sit on a kerb at all, nothing
+     moves, and the strict-or-relaxed tolerance still applies on top. */
+  let kerbed=0;
+  for(const st of tlSt){
+    const g0=groundAt(st.x,st.z,1e9), ref=g0.hit?g0.y:0;
+    for(const side of [1,-1]){
+      const d0=side>0?st.dR:st.dL;
+      let r=d0, on=false;
+      for(let k=0;k<24;k++){                 // at most 6 m of kerb
+        const g=groundAt(st.x+side*st.rx*(r+0.25), st.z+side*st.rz*(r+0.25), ref);
+        if(!(g.hit&&g.kerb)) break;
+        r+=0.25; on=true;
+      }
+      if(on){ if(side>0) st.dR=r; else st.dL=r; kerbed++; }
+    }
+  }
+  if(kerbed) console.log('track limits: '+kerbed+' edges walked out across their kerb');
   const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
   console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
     +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
@@ -4602,22 +4667,53 @@ function tleClick(clientX,clientY){
 function tleText(){
   return JSON.stringify(tleLines.map(l=>l.map(tleModel)));
 }
-/* Nearest point on a marked line, as an offset along the station's own across
-   direction: positive to the right of the racing line, negative to the left. */
-function tleOffset(pts, x, z, rx, rz){
-  let best=Infinity, bx=0, bz=0;
-  // <=length, and the last one wraps: a circuit edge is a loop, and without
-  // the joining segment the start line sits in a gap of its own making
-  for(let i=1;i<=pts.length;i++){
-    const a=pts[i-1], b=pts[i%pts.length];
-    const ux=b.x-a.x, uz=b.z-a.z, L=ux*ux+uz*uz||1e-9;
-    const t=clamp(((x-a.x)*ux+(z-a.z)*uz)/L,0,1);
-    const px=a.x+ux*t, pz=a.z+uz*t;
-    const d=(px-x)**2+(pz-z)**2;
-    if(d<best){ best=d; bx=px; bz=pz; }
+/* Matching a marked edge to the circuit, walked rather than searched.
+
+   The first version asked "what is the nearest point on this line", and that
+   is wrong on a race track. At La Source -- a hairpin twenty metres across --
+   the entry and the exit of the same edge are a car's length apart on the
+   ground and pointing opposite ways, so the nearest point was routinely on the
+   wrong side of the corner. The exit of Turn 1 came back with its outside edge
+   0.3 m from the racing line, so a car running wide and perfectly on the road
+   had all four wheels judged over it. Twelve stretches round the lap were doing
+   the same thing.
+
+   Both lines go round the same circuit the same way, so they are walked
+   together instead. A pointer into the marked line advances with the stations
+   and never goes backwards, searching only a window ahead of where it already
+   was. The far side of a hairpin is thousands of points away along the line
+   even when it is metres away through the air, so it can no longer be picked.
+   The pointer starts wherever the first station's true nearest point is, so it
+   does not matter where the line was started or which direction it was drawn. */
+function tleSegOffset(a, b, x, z, rx, rz){
+  const ux=b.x-a.x, uz=b.z-a.z, L=ux*ux+uz*uz||1e-9;
+  const t=clamp(((x-a.x)*ux+(z-a.z)*uz)/L,0,1);
+  const px=a.x+ux*t, pz=a.z+uz*t;
+  return { off:(px-x)*rx+(pz-z)*rz, d2:(px-x)*(px-x)+(pz-z)*(pz-z) };
+}
+function tleWalk(pts, stations){
+  const n=pts.length, out=new Array(stations.length).fill(null);
+  if(n<8) return out;
+  // where to start: the one place a global search is the right question
+  let ptr=0, bd=Infinity;
+  const s0=stations[0];
+  for(let i=0;i<n;i++){
+    const r=tleSegOffset(pts[i], pts[(i+1)%n], s0.x, s0.z, s0.rx, s0.rz);
+    if(r.d2<bd){ bd=r.d2; ptr=i; }
   }
-  if(!isFinite(best)) return null;
-  return { off:(bx-x)*rx+(bz-z)*rz, dist:Math.sqrt(best) };
+  const WIN=Math.max(24, Math.round(n*0.04));
+  for(let k=0;k<stations.length;k++){
+    const st=stations[k];
+    let best=null, bi=ptr, bdd=Infinity;
+    for(let w=0;w<WIN;w++){
+      const i=(ptr+w)%n;
+      const r=tleSegOffset(pts[i], pts[(i+1)%n], st.x, st.z, st.rx, st.rz);
+      if(r.d2<bdd){ bdd=r.d2; best=r; bi=i; }
+    }
+    ptr=bi;                                  // forward only, all the way round
+    out[k]=best?{ off:best.off, dist:Math.sqrt(best.d2) }:null;
+  }
+  return out;
 }
 
 /* The station the car is at, searched around where it was so a hairpin's
@@ -5485,6 +5581,63 @@ window.SIM={
   toModel(x,z){ return gridToModel(new THREE.Vector3(x,0,z)); },
   get marked(){ return [tleLines[0].length, tleLines[1].length]; },
   station2(x,z){ const st=tlStation(x,z); return st?{dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2)}:null; },
+  scan(s0,s1){
+    // walk out from the racing line and report where the surface changes
+    const out=[];
+    for(let i=0;i<tlSt.length;i++){
+      const st=tlSt[i], s=i*TL_STEP;
+      if(s<s0||s>s1) continue;
+      const g0=groundAt(st.x,st.z,1e9); const ref=g0.hit?g0.y:0;
+      const march=(sign)=>{
+        let last='track';
+        for(let r=0.25;r<=26;r+=0.25){
+          const g=groundAt(st.x+sign*st.rx*r, st.z+sign*st.rz*r, ref);
+          const k=!g.hit?'air':g.kerb?'kerb':g.grass?'grass':g.loose?'gravel':'track';
+          if(k!==last) return {at:+r.toFixed(1), to:k};
+          last=k;
+        }
+        return {at:null,to:'track'};
+      };
+      const R=march(1), L=march(-1);
+      out.push({s:Math.round(s), dR:+st.dR.toFixed(1), dL:+st.dL.toFixed(1),
+                realR:R.at, toR:R.to, realL:L.at, toL:L.to});
+    }
+    return out;
+  },
+  badEdges(){
+    // every station where an edge sits implausibly close to the racing line
+    const out=[];
+    for(let i=0;i<tlSt.length;i++){
+      const st=tlSt[i];
+      if(st.dR<2.2||st.dL<2.2) out.push({s:Math.round(i*TL_STEP), dR:+st.dR.toFixed(1), dL:+st.dL.toFixed(1)});
+    }
+    return out;
+  },
+  edgeDebug(s0,s1){
+    // what each station thinks its edges are, next to where the white line
+    // really is and where the marked lines fall
+    const out=[];
+    let lineMesh=null;
+    trackRoot.traverse(o=>{ if(lineMesh||!o.isMesh||!o.material) return;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      if(ms.some(m=>m&&m.name&&/^line\b|^line\./i.test(m.name))) lineMesh=o; });
+    const rc=new THREE.Raycaster(); rc.far=40;
+    const org=new THREE.Vector3(), dir=new THREE.Vector3();
+    for(let i=0;i<tlSt.length;i++){
+      const st=tlSt[i], s=i*TL_STEP;
+      if(s<s0||s>s1) continue;
+      const g=groundAt(st.x,st.z,1e9);
+      const y=(g.hit?g.y:0)+0.35;
+      const ray=(sx,sz)=>{ org.set(st.x,y,st.z); dir.set(sx,0,sz); rc.set(org,dir);
+        const hs=lineMesh?rc.intersectObject(lineMesh,false):[];
+        return hs.length?+hs[hs.length-1].distance.toFixed(1):null; };
+      const mk=l=>{ if(l.length<8) return null; const w=tleWalk(l,[st]); return w[0]?+w[0].off.toFixed(1):null; };
+      out.push({ s:Math.round(s), dR:+st.dR.toFixed(1), dL:+st.dL.toFixed(1),
+                 lineR:ray(st.rx,st.rz), lineL:ray(-st.rx,-st.rz),
+                 markIn:mk(tleLines[0]), markOut:mk(tleLines[1]) });
+    }
+    return out;
+  },
   edgeAt(i){ const st=tlSt[i]; return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:+st.dR.toFixed(2),dL:+st.dL.toFixed(2)}:null; },
   seedBest(perStation){    // a synthetic best lap, for testing the delta
     TT.bestSplits=tlSt.map((_,i)=>i*perStation); TT.best=tlSt.length*perStation; return TT.bestSplits.length; },
@@ -6031,6 +6184,7 @@ function startTrack(id){
       editRestore();          // gate positions come off the hand-clicked lap
       tleLoad();
       recLoad();
+      if(window._autoReplay){ window._autoReplay=false; setTimeout(()=>{ if(TTREC.best) replayStart(); }, 400); }
       ttStart();
       return;
     }
