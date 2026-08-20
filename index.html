@@ -4705,6 +4705,13 @@ function replayStep(dt){
   while(turned<-Math.PI) turned+=2*Math.PI;
   carState.speed=cr(p0[4],a[4],b[4],p3[4],k);
   PLAYER.steerAng=cr(p0[5],a[5],b[5],p3[5],k);
+  /* Keep the station pointer moving. Track limits advances it every frame
+     while you are driving and the TV director reads it to know which camera
+     the car has reached -- so during a replay, with the trial stood down,
+     nothing moved it and the director sat on its first shot for the whole lap.
+     This line was here, and I deleted it myself rewriting the interpolation
+     above; hence the test below, which now watches the camera actually change. */
+  tlStation(carState.wx, carState.wz);
   const el=document.getElementById('replayt');
   if(el) el.textContent=ttFmt(TTREC.pt);
   // the car is presented exactly as when it was driven: wheels, body, sound
