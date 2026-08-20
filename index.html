@@ -63,8 +63,7 @@
   /* --------------------------------------------- track limits, by hand */
 
   /* ------------------------------------------ track limits, seen from above */
-  #m2wrap{position:fixed;inset:0;z-index:30;display:none;background:rgba(4,6,10,.94);
-          backdrop-filter:blur(6px)}
+  #m2wrap{position:fixed;inset:0;z-index:30;display:none}
   #m2wrap.on{display:block}
   #m2canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;
             touch-action:none}
@@ -4575,11 +4574,37 @@ let m2Vis=[];
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
 const m2El=()=>document.getElementById('m2canvas');
 
+const m2Cam=new THREE.OrthographicCamera(-100,100,100,-100,1,20000);
+/* The overhead camera is set from the same numbers the overlay draws with, so
+   a point drawn at a screen position is over the piece of track at that screen
+   position. Orthographic, so there is no perspective to correct for and world
+   x/z map to screen x/y linearly whatever the elevation underneath. */
+function m2Sync(){
+  const c=m2El(); if(!c) return;
+  const w=c.width, h=c.height;
+  const wx0=(0-m2X)/m2Sc, wx1=(w-m2X)/m2Sc;
+  const wz0=(0-m2Y)/m2Sc, wz1=(h-m2Y)/m2Sc;
+  const cx=(wx0+wx1)/2, cz=(wz0+wz1)/2;
+  m2Cam.left=-(wx1-wx0)/2; m2Cam.right=(wx1-wx0)/2;
+  m2Cam.top=(wz1-wz0)/2;   m2Cam.bottom=-(wz1-wz0)/2;
+  m2Cam.near=1; m2Cam.far=12000;
+  m2Cam.position.set(cx, 4000, cz);
+  m2Cam.up.set(0,0,-1);
+  m2Cam.lookAt(cx,0,cz);
+  m2Cam.updateProjectionMatrix();
+  m2Cam.updateMatrixWorld();
+}
 function m2Show(on){
   m2On=on;
   const w=document.getElementById('m2wrap');
   if(w) w.classList.toggle('on',on);
-  if(on){ m2Fit(); m2Draw(); }
+  if(on){
+    // the overlay matches the window, so the mapping is one canvas pixel to one
+    const c=m2El();
+    if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
+           c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
+    m2Fit(); m2Draw();
+  }
 }
 function m2Fit(){
   const pts=tleLines[m2Edge].length?tleLines[m2Edge]:tleLines[0];
@@ -4597,9 +4622,12 @@ const m2wx=sx=>(sx-m2X)/m2Sc, m2wz=sy=>(sy-m2Y)/m2Sc;
 
 function m2Draw(){
   const c=m2El(); if(!c) return;
+  m2Sync();
   const g=c.getContext('2d');
+  /* Transparent: what is behind this canvas is the circuit itself, rendered
+     from directly overhead by the same renderer that draws the game. The line
+     is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
-  g.fillStyle='#0b0e14'; g.fillRect(0,0,c.width,c.height);
 
   // the racing line, faint, so you can see which way round the circuit goes
   if(TT.curve){
@@ -6041,6 +6069,11 @@ window.SIM={
   toModel(x,z){ return gridToModel(new THREE.Vector3(x,0,z)); },
   get marked(){ return [tleLines[0].length, tleLines[1].length]; },
   station2(x,z){ const st=tlStation(x,z); return st?{dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2)}:null; },
+  mapView(x,z,sc){    // centre the map on a spot, for testing and for jumping about
+    const c=m2El(); if(!c) return null;
+    m2Sc=sc; m2X=c.width/2-x*sc; m2Y=c.height/2-z*sc; m2Draw();
+    return {sc:m2Sc};
+  },
   map2d(){ const c=m2El(); const pts=tleLines[m2Edge];
     return { open:m2On, edge:m2Edge, points:pts.length, sc:m2Sc, drag:m2Drag, lastDrag:(window._m2last===undefined?-1:window._m2last), pan:m2Pan, downs:window._m2downs||0,
              cw:c?c.width:0, ch:c?c.height:0 }; },
@@ -6359,6 +6392,14 @@ function frame(now){
      that tells you where you are and what you are about to drive. It drifts
      in slowly, and hands the view to the car at GO, so the cut happens on the
      word rather than a second either side of it. */
+  /* Editing the limits: the circuit from straight above, through the same
+     renderer, with the line drawn over it on the overlay canvas. */
+  if(m2On){
+    m2Sync();
+    skyDome.position.set(m2Cam.position.x, 0, m2Cam.position.z);
+    renderer.render(scene, m2Cam);
+    return;
+  }
   /* The wide shot: high over the middle of the circuit, turning slowly, with
      the haze wound back so the far side of the valley is actually there. It
      begins above the grid so the move carries you from where you are out over
