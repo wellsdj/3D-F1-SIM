@@ -124,7 +124,9 @@
                  color:var(--paper);cursor:pointer;background:rgba(255,255,255,.08);
                  border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:6px 10px}
   body.cinema #netbtn,body.cinema #netwrap{opacity:0;pointer-events:none;transition:opacity .4s}
-  #homebtn{position:fixed;right:18px;top:18px;z-index:9;display:none;
+  /* Below the status readout, not across it -- camera, aids, detail and frames
+     are worth reading while you drive. */
+  #homebtn{position:fixed;right:18px;top:118px;z-index:9;display:none;
            font-family:var(--mono);font-size:10px;letter-spacing:.14em;
            text-transform:uppercase;color:var(--paper);cursor:pointer;
            background:rgba(10,13,19,.68);border:1px solid rgba(255,255,255,.16);
@@ -411,7 +413,9 @@
               background:linear-gradient(90deg,rgba(3,7,12,.64) 0%,rgba(3,7,12,.28) 34%,rgba(3,7,12,.05) 72%,rgba(3,7,12,.18) 100%)}
   #customizer.open{display:block}
   body.customizer-open .hud,body.customizer-open #lights,body.customizer-open #golabel,body.customizer-open #tt,
-  body.customizer-open #tlbtn,body.customizer-open #replaybtn,body.customizer-open #replaybar,body.customizer-open #map,body.customizer-open #cmap{opacity:0!important;pointer-events:none}
+  body.customizer-open #tlbtn,body.customizer-open #replaybtn,body.customizer-open #replaybar,body.customizer-open #map,body.customizer-open #cmap,
+  body.customizer-open #homebtn,body.customizer-open #netbtn,body.customizer-open #netwrap,
+  body.customizer-open #netpanel{opacity:0!important;pointer-events:none}
   #customizer .custom-copy{position:relative;z-index:1;padding:clamp(30px,6vw,88px) 0 0 clamp(24px,8vw,132px)}
   #customizer .custom-intro{position:relative;z-index:1;max-width:310px;font-size:10px;line-height:1.8;letter-spacing:.08em;text-transform:uppercase;opacity:.55}
   #customizer .custom-controls{position:absolute;z-index:2;left:clamp(24px,8vw,132px);bottom:clamp(28px,6vw,82px);width:min(100% - 48px,360px);
@@ -3048,6 +3052,7 @@ const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
 let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
+const CUSTOM_BG=new THREE.Color(0x05070b);   // the garage's own black
 const customizerStage=new THREE.Group();
 customizerStage.visible=false;
 scene.add(customizerStage);
@@ -4641,8 +4646,13 @@ function ttLine(){
   TT.last=TT.t;
   recHistory(TT.t);
   const rec = TT.best===null || TT.t<TT.best;
-  if(rec){
-    TT.best=TT.t;
+  /* Also when there is nothing recorded yet, not only when the lap is quicker.
+     A time set before laps were being recorded -- or kept after a recording was
+     deleted -- sat there as a target nobody could beat, so no lap was ever
+     recorded and the best-lap button never came alive. That is why you could
+     never watch one. */
+  if(rec || !TTREC.best){
+    if(rec) TT.best=TT.t;
     ttSaveBest();
     recKeep(TT.t);
     ttFlash('rec','NEW BEST',ttFmt(TT.t));
@@ -4746,7 +4756,8 @@ function lapDelete(){
   TT.best=null; TT.bestSplits=null; TT.last=0;
   TTREC.best=null; TTREC.history=[];
   try{ localStorage.removeItem(TT_KEY); localStorage.removeItem(TT_SPLITS_KEY);
-       localStorage.removeItem(REPLAY_KEY); }catch(e){}
+       localStorage.removeItem(REPLAY_KEY);
+       localStorage.removeItem(LAPS_KEY); }catch(e){}   // the list itself lives here
   ttHUD(); replayBtn(); homeReplayUI();
   if(typeof lapBookRefresh==='function') lapBookRefresh();
 }
@@ -6875,9 +6886,24 @@ function frame(now){
     raceHemi.visible=false; sun.visible=false;
     const _shadowState=renderer.shadowMap.enabled;
     renderer.shadowMap.enabled=false;
+    /* The garage is a garage, not a spot on the circuit. Rendering the whole
+       scene meant whatever the world holds around the origin -- the pit
+       straight, the grandstands, a stretch of Spa -- stood behind the car, and
+       which piece of it depended on where you happened to be when you opened
+       the page. The circuit, the sky and the haze are put away for the shot,
+       so the stage lighting is the only thing on it and the background is
+       black. All three come back on the next frame. */
+    const _trackVis=trackRoot?trackRoot.visible:false;
+    const _skyVis=skyDome.visible, _fog=scene.fog, _bg=scene.background;
+    if(trackRoot) trackRoot.visible=false;
+    skyDome.visible=false;
+    scene.fog=null;
+    scene.background=CUSTOM_BG;
     const _dg=performance.now(); renderer.render(scene,camera); PROF.draw+=performance.now()-_dg;
     renderer.shadowMap.enabled=_shadowState;
     raceHemi.visible=_hemiState; sun.visible=_sunState;
+    if(trackRoot) trackRoot.visible=_trackVis;
+    skyDome.visible=_skyVis; scene.fog=_fog; scene.background=_bg;
     return;
   }
   customizerStage.visible=false;
@@ -7280,7 +7306,10 @@ function qualifyingLoadFail(text){
 }
 
 function lapBookRefresh(){
-  recLoad();
+  /* Only read from storage if there is nothing in hand. recLoad() used to run
+     unconditionally, so deleting cleared everything and then immediately read
+     the deleted laps back off the disk. */
+  if(!TTREC.best && !(TTREC.history&&TTREC.history.length)) recLoad();
   const list=document.getElementById('lapbook-list'), empty=document.getElementById('lapbook-empty'), play=document.getElementById('lapbook-replay');
   const laps=(TTREC.history&&TTREC.history.length?TTREC.history:(TTREC.best?[{t:TTREC.best.t,at:0}]:[])).slice(0,8);
   if(!list||!empty) return;
@@ -7381,14 +7410,13 @@ document.getElementById('customize-home').onclick=openCustomizer;
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
+/* One press. The confirmation step read as a second delete button sitting
+   there, and the worst case is driving another lap. */
 document.getElementById('lapbook-delete').onclick=e=>{
+  lapDelete();
   const b=e.currentTarget;
-  /* Two presses, because there is no getting it back. The second press is the
-     confirmation, and it goes away again if you leave it alone. */
-  if(b.dataset.armed){ b.dataset.armed=''; lapDelete(); b.textContent='Deleted'; 
-    setTimeout(()=>{ b.textContent='Delete lap'; }, 1600); return; }
-  b.dataset.armed='1'; b.textContent='Sure? Press again';
-  setTimeout(()=>{ if(b.dataset.armed){ b.dataset.armed=''; b.textContent='Delete lap'; } }, 3200);
+  b.textContent='Deleted';
+  setTimeout(()=>{ b.textContent='Delete lap'; }, 1400);
 };
 document.getElementById('lapbook-replay').onclick=()=>{
   if(!TTREC.best) return;
