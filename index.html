@@ -330,7 +330,7 @@
 
   /* -------------------------------------------------------- car customiser */
   #customizer{position:fixed;inset:0;z-index:14;display:none;overflow:hidden;color:var(--paper);font-family:var(--mono);
-              background:linear-gradient(90deg,rgba(3,7,12,.99) 0%,rgba(3,7,12,.9) 34%,rgba(3,7,12,.44) 72%,rgba(3,7,12,.58) 100%)}
+              background:linear-gradient(90deg,rgba(3,7,12,.64) 0%,rgba(3,7,12,.28) 34%,rgba(3,7,12,.05) 72%,rgba(3,7,12,.18) 100%)}
   #customizer.open{display:block}
   body.customizer-open .hud,body.customizer-open #lights,body.customizer-open #golabel,body.customizer-open #tt,
   body.customizer-open #tlbtn,body.customizer-open #replaybtn,body.customizer-open #replaybar,body.customizer-open #map,body.customizer-open #cmap{opacity:0!important;pointer-events:none}
@@ -349,7 +349,7 @@
   .style-row input[type=color]{width:34px;height:24px;padding:0;border:1px solid rgba(255,255,255,.2);border-radius:4px;background:transparent;cursor:pointer}
   #customizer .custom-note{margin:12px 0 0;font-size:8px;line-height:1.6;letter-spacing:.06em;opacity:.38}
   #customizer .custom-tag{position:absolute;z-index:1;right:clamp(24px,5vw,80px);bottom:clamp(28px,6vw,82px);font-size:9px;letter-spacing:.24em;text-transform:uppercase;opacity:.45}
-  #customizer-stage{position:absolute;z-index:0;inset:0;pointer-events:none;background:radial-gradient(ellipse at 72% 55%,rgba(255,176,32,.12),transparent 33%),radial-gradient(ellipse at 72% 62%,rgba(21,95,150,.2),transparent 42%)}
+  #customizer-stage{position:absolute;z-index:0;inset:0;pointer-events:none;background:radial-gradient(ellipse at 72% 55%,rgba(255,176,32,.08),transparent 33%),radial-gradient(ellipse at 72% 62%,rgba(21,95,150,.12),transparent 42%)}
 
   @media (max-width:700px){#boot{padding:26px 22px 30px;justify-content:flex-end;background:linear-gradient(180deg,rgba(3,7,12,.18) 0%,rgba(3,7,12,.52) 33%,rgba(3,7,12,.97) 76%),url('home-hero.png') 64% center/cover}
     #homecopy{margin-bottom:18px}#homecopy h1{font-size:clamp(38px,13vw,66px)}#homecopy p{font-size:9px}
@@ -561,8 +561,8 @@
     <p class="custom-intro">Turn the car slowly, tune every visible finish, and take this exact spec into qualifying.</p>
   </div>
   <div class="custom-controls">
-    <div class="style-group"><label>Body <span id="style-body-value">Papaya</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#ff8000"></div></div>
-    <div class="style-group"><label>Ring <span id="style-ring-value">Gold</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#f2a20c"></div></div>
+    <div class="style-group"><label>Body <span id="style-body-value">Obsidian</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#111418"></div></div>
+    <div class="style-group"><label>Ring <span id="style-ring-value">Black</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#15171b"></div></div>
     <div class="style-group"><label>Rear wing <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
     <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
     <p class="custom-note">Changes save automatically and carry into your next run.</p>
@@ -583,6 +583,7 @@ const ASSETS = {
   road:  "road.jpg",
   rock:  "rock.jpg",
   car:   "car.glb",
+  podium:"podium_art.glb",
   snd:   { accel:"accel.mp3", idle:"idle.mp3",
            brake:"brake.mp3", coast:"coast.mp3" }
 };
@@ -2903,16 +2904,64 @@ function buildMountains(){
 const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
-let customizerOn=false, customizerAngle=0, pendingReplay=false;
+let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
 const customizerStage=new THREE.Group();
 customizerStage.visible=false;
 scene.add(customizerStage);
-const customFloor=new THREE.Mesh(new THREE.CircleGeometry(7.8,64),new THREE.MeshStandardMaterial({color:0x101923,metalness:.35,roughness:.42}));
-customFloor.rotation.x=-Math.PI/2; customFloor.position.y=-0.02; customFloor.receiveShadow=true; customizerStage.add(customFloor);
-const customRing=new THREE.Mesh(new THREE.TorusGeometry(5.6,.035,8,96),new THREE.MeshBasicMaterial({color:0xffb020,transparent:true,opacity:.7}));
-customRing.rotation.x=-Math.PI/2; customRing.position.y=.01; customizerStage.add(customRing);
-const customFill=new THREE.PointLight(0xffb020,12,18); customFill.position.set(3,5,4); customizerStage.add(customFill);
-const customRim=new THREE.PointLight(0x2f99da,16,20); customRim.position.set(-4,3,-2); customizerStage.add(customRim);
+const customFloor=new THREE.Mesh(new THREE.CylinderGeometry(4.75,4.95,.24,96),new THREE.MeshStandardMaterial({color:0x0d1625,metalness:.38,roughness:.34}));
+customFloor.position.y=.12; customFloor.castShadow=false; customFloor.receiveShadow=false; customizerStage.add(customFloor);
+const customDeck=new THREE.Mesh(new THREE.CircleGeometry(4.72,96),new THREE.MeshStandardMaterial({color:0x17243a,metalness:.28,roughness:.28}));
+customDeck.rotation.x=-Math.PI/2; customDeck.position.y=.245; customizerStage.add(customDeck);
+const customRing=new THREE.Mesh(new THREE.TorusGeometry(4.45,.055,12,128),new THREE.MeshBasicMaterial({color:0x5fa9ff,transparent:true,opacity:.88}));
+customRing.rotation.x=-Math.PI/2; customRing.position.y=.29; customizerStage.add(customRing);
+const customAmbient=new THREE.AmbientLight(0xf6f8ff,1.75); customizerStage.add(customAmbient);
+const customFill=new THREE.PointLight(0xffe6bb,22,24); customFill.position.set(4,7,5); customFill.castShadow=false; customizerStage.add(customFill);
+const customRim=new THREE.PointLight(0x8bc4ff,18,22); customRim.position.set(-5,4,1); customRim.castShadow=false; customizerStage.add(customRim);
+const customTop=new THREE.DirectionalLight(0xffffff,2.2); customTop.position.set(0,10,2); customTop.castShadow=false; customizerStage.add(customTop);
+
+/* The supplied podium is the room, not a flat backdrop. It is authored Z-up,
+   so convert it once to the Y-up space used by the driving scene. The broad
+   base stays behind the circular display deck while its blue emission strips
+   remain bright without throwing a hard shadow across the car. */
+(function loadPodium(){
+  pending++;
+  const loader=new THREE.GLTFLoader();
+  if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  loader.load(ASSETS.podium,gltf=>{
+    const root=gltf.scene;
+    root.rotation.x=-Math.PI/2;
+    root.scale.setScalar(1.55);
+    root.position.set(0,0,-2.15);
+    root.updateMatrixWorld(true);
+    root.traverse(o=>{
+      if(!o.isMesh) return;
+      o.castShadow=false; o.receiveShadow=false;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      ms.forEach(m=>{
+        if(!m) return;
+        const n=(m.name||'').toLowerCase();
+        m.side=THREE.DoubleSide;
+        m.shadowSide=THREE.DoubleSide;
+        if(/blue.?emission/.test(n)){
+          m.color.set(0x3f83ff);
+          if(m.emissive){ m.emissive.set(0x2e73ff); m.emissiveIntensity=1.8; }
+          m.roughness=.24;
+        }else if(/metal/.test(n)){
+          m.color.set(0x5f7fb5); m.metalness=.34; m.roughness=.28;
+        }else if(/podium.?base/.test(n)){
+          m.color.set(0x1a2b55); m.metalness=.12; m.roughness=.56;
+        }
+        m.needsUpdate=true;
+      });
+    });
+    customizerStage.add(root); podiumRoot=root;
+    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
+    if(loaded>=pending) ready();
+  },undefined,err=>{
+    console.error('podium failed to load',err);
+    loaded++; if(loaded>=pending) ready();
+  });
+})();
 /* Contact patches and low points of the bodywork, in carGroup space, measured
    from the model once it loads rather than assumed. */
 const CARPTS=[], CARLOW=[];
@@ -2944,9 +2993,8 @@ const WHEELBASE=3.60;
     paintLoad();
     stylePrepare(car);
     styleLoad();
-    if(carPaint && carStyle.body==='#ff8000') carStyle.body=carPaint;
     carPaint=carStyle.body;
-    paintCar(carStyle.body);
+    styleApply('body',carStyle.body,false);
     styleApply('ring',carStyle.ring,false);
     styleApply('wing',carStyle.wing,false);
     styleApply('rims',carStyle.rims,false);
@@ -3266,32 +3314,36 @@ function paintSave(){
    washing a colour over the rest of the car. */
 const STYLE_KEY='f1sim.car.style';
 const STYLE_SWATCHES={
-  body:['#ff8000','#d72638','#1596d1','#101820','#f2c94c'],
-  ring:['#f2a20c','#e9eef2','#e24a3b','#54d6c7','#15171b'],
+  body:['#111418','#d72638','#1596d1','#f2c94c','#e9eef2'],
+  ring:['#15171b','#e9eef2','#e24a3b','#54d6c7','#f2a20c'],
   wing:['#15171b','#293241','#f2a20c','#d72638','#e9eef2'],
   rims:['#b6babd','#f2a20c','#15171b','#e9eef2','#7c8b98']
 };
-const STYLE_LABELS={body:{'#ff8000':'Papaya','#d72638':'Crimson','#1596d1':'Azure','#101820':'Stealth','#f2c94c':'Volt'},
-  ring:{'#f2a20c':'Gold','#e9eef2':'Ice','#e24a3b':'Red','#54d6c7':'Mint','#15171b':'Black'},
+const STYLE_LABELS={body:{'#111418':'Obsidian','#d72638':'Crimson','#1596d1':'Azure','#f2c94c':'Volt','#e9eef2':'Ice'},
+  ring:{'#15171b':'Black','#e9eef2':'Ice','#e24a3b':'Red','#54d6c7':'Mint','#f2a20c':'Gold'},
   wing:{'#15171b':'Carbon','#293241':'Slate','#f2a20c':'Gold','#d72638':'Crimson','#e9eef2':'Ice'},
   rims:{'#b6babd':'Satin silver','#f2a20c':'Gold','#15171b':'Black','#e9eef2':'Ice','#7c8b98':'Gunmetal'}};
-let carStyle={body:'#ff8000',ring:'#f2a20c',wing:'#15171b',rims:'#b6babd'};
-let styleTargets={ring:[],wing:[],rims:[]};
+let carStyle={body:'#111418',ring:'#15171b',wing:'#15171b',rims:'#b6babd'};
+let styleTargets={body:[],ring:[],wing:[],rims:[]};
 function styleLoad(){
   try{
     const v=JSON.parse(localStorage.getItem(STYLE_KEY)||'null');
     if(v&&typeof v==='object') Object.keys(carStyle).forEach(k=>{ if(typeof v[k]==='string') carStyle[k]=v[k]; });
   }catch(e){}
+  /* Migrate the previous papaya default rather than bringing it back from
+     local storage after the garage has switched to a black base finish. */
+  if(String(carStyle.body).toLowerCase()==='#ff8000') carStyle.body='#111418';
 }
 function styleSave(){ try{ localStorage.setItem(STYLE_KEY,JSON.stringify(carStyle)); }catch(e){} }
 function styleAddTarget(kind,mat){
   if(mat&&!styleTargets[kind].includes(mat)) styleTargets[kind].push(mat);
 }
 function stylePrepare(root){
-  styleTargets={ring:[],wing:[],rims:[]};
+  styleTargets={body:[],ring:[],wing:[],rims:[]};
   root.updateMatrixWorld(true);
   const addByMaterial=(o,ms)=>ms.forEach(m=>{
     const n=(m&&m.name||'').toLowerCase();
+    if(/paint/.test(n)) styleAddTarget('body',m);
     if(/halo|ring/.test(n)) styleAddTarget('ring',m);
     if(/mcl39_wheels|discs|chrome/.test(n)) styleAddTarget('rims',m);
   });
@@ -3332,14 +3384,19 @@ function styleApply(kind,hex,save=true){
   if(!STYLE_SWATCHES[kind]) return;
   hex=(hex||carStyle[kind]||STYLE_SWATCHES[kind][0]).toLowerCase();
   carStyle[kind]=hex;
-  if(kind==='body'){
-    carPaint=hex; paintCar(hex);
-  }else{
-    styleTargets[kind].forEach(m=>{
-      if(m&&m.color) m.color.set(hex);
-      if(m) m.needsUpdate=true;
-    });
-  }
+  styleTargets[kind].forEach(m=>{
+    if(!m) return;
+    /* The supplied car has its livery baked into several maps. Removing only
+       the finish map leaves the actual geometry and lighting intact, while
+       making the selected colour a true fill instead of a muddy multiplier. */
+    if(m.map){ if(!m.userData) m.userData={}; if(!m.userData.styleOriginalMap) m.userData.styleOriginalMap=m.map; m.map=null; }
+    if(m.color) m.color.set(hex);
+    if(kind==='rims'){ m.metalness=.72; m.roughness=.24; }
+    else if(kind==='ring'){ m.metalness=.18; m.roughness=.31; }
+    else if(kind==='wing'){ m.metalness=.28; m.roughness=.36; }
+    else { m.metalness=.12; m.roughness=.42; }
+    m.needsUpdate=true;
+  });
   if(save) styleSave();
   styleMark();
 }
@@ -6350,17 +6407,21 @@ function frame(now){
   if(customizerOn){
     customizerAngle=(customizerAngle+dt*0.16)%(Math.PI*2);
     if(carObj){
-      carGroup.position.set(0,RIDE,0);
+      carGroup.position.set(0,RIDE+.34,0);
       carGroup.rotation.set(0,customizerAngle,0);
       carGroup.updateMatrixWorld(true);
     }
+    if(podiumRoot) podiumRoot.visible=true;
     customizerStage.visible=true;
-    camera.position.set(5.6,2.75,6.3);
+    camera.position.set(6.8,3.25,8.2);
     camera.up.set(0,1,0);
-    camera.lookAt(0,.82,0);
-    camera.fov=42; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    camera.lookAt(0,1.02,-.75);
+    camera.fov=43; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
+    const _shadowState=renderer.shadowMap.enabled;
+    renderer.shadowMap.enabled=false;
     const _dg=performance.now(); renderer.render(scene,camera); PROF.draw+=performance.now()-_dg;
+    renderer.shadowMap.enabled=_shadowState;
     return;
   }
   customizerStage.visible=false;
