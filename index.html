@@ -83,6 +83,46 @@
           color:#dfe7f1;text-transform:none}
   /* Shown only while you are on the circuit, and it goes away for the opening
      shots along with the rest of the overlay. */
+
+  /* -------------------------------------------------- watching another driver */
+  #netbtn{position:fixed;left:18px;bottom:18px;z-index:9;display:none;
+          font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+          color:var(--paper);cursor:pointer;background:rgba(10,13,19,.68);
+          border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:8px 12px;
+          backdrop-filter:blur(6px)}
+  #netbtn.on{display:block} #netbtn:hover{background:rgba(255,255,255,.16)}
+  #netwrap{position:fixed;left:18px;bottom:56px;z-index:9;display:none;
+           font-family:var(--mono);color:var(--paper);opacity:.9}
+  #netwrap.on{display:block}
+  #netwrap b{display:block;font-size:19px;letter-spacing:.22em;color:var(--amber);margin-top:2px}
+  #netpanel{position:fixed;left:18px;bottom:56px;z-index:10;display:none;width:214px;
+            font-family:var(--mono);color:var(--paper);background:rgba(6,9,14,.9);
+            border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:12px;
+            backdrop-filter:blur(8px)}
+  #netpanel.on{display:block}
+  #netinput{width:100%;margin-top:8px;font:inherit;font-size:19px;letter-spacing:.22em;
+            text-align:center;text-transform:uppercase;color:var(--amber);
+            background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.16);
+            border-radius:7px;padding:9px 6px}
+  #netpanel .row{display:flex;gap:6px;margin-top:8px}
+  #netpanel button{flex:1;font:inherit;font-size:9.5px;letter-spacing:.13em;
+                   text-transform:uppercase;color:var(--paper);cursor:pointer;
+                   background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);
+                   border-radius:6px;padding:8px 4px}
+  #netpanel button:hover{background:rgba(255,255,255,.16)}
+  #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
+          text-transform:none;transition:opacity .2s ease;min-height:12px}
+  #netbar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9;
+          display:none;align-items:center;gap:12px;font-family:var(--mono);
+          color:var(--paper);background:rgba(10,13,19,.8);
+          border:1px solid rgba(255,255,255,.14);border-radius:11px;padding:9px 14px;
+          backdrop-filter:blur(8px)}
+  #netbar.show{display:flex}
+  #netbar b{font-size:17px;letter-spacing:.2em;color:var(--amber)}
+  #netbar button{font:inherit;font-size:9px;letter-spacing:.13em;text-transform:uppercase;
+                 color:var(--paper);cursor:pointer;background:rgba(255,255,255,.08);
+                 border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:6px 10px}
+  body.cinema #netbtn,body.cinema #netwrap{opacity:0;pointer-events:none;transition:opacity .4s}
   #homebtn{position:fixed;right:18px;top:18px;z-index:9;display:none;
            font-family:var(--mono);font-size:10px;letter-spacing:.14em;
            text-transform:uppercase;color:var(--paper);cursor:pointer;
@@ -460,6 +500,16 @@
     <button id="m2close">Done</button>
   </div>
 </div>
+<button id="netbtn">Watch a driver</button>
+<div id="netwrap"><span class="ttlbl">Your code</span><b id="netcode">……</b></div>
+<div id="netpanel">
+  <div class="ttlbl">Watch a driver</div>
+  <input id="netinput" maxlength="6" placeholder="CODE" autocomplete="off" spellcheck="false">
+  <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
+  <div id="netmsg"></div>
+</div>
+<div id="netbar"><span class="ttlbl">Watching</span><b id="netbarcode">------</b>
+  <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
@@ -605,6 +655,7 @@
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="meshopt_decoder.js"></script>
 <script src="GLTFLoader.js"></script>
 <script>
@@ -4473,6 +4524,8 @@ function ttStart(cinematic=true){
   lightsEl.classList.remove('show');
   document.getElementById('tt').classList.add('show');
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
+  const nb=document.getElementById('netbtn'); if(nb) nb.classList.add('on');
+  netHost(); netLabel();
   ttHUD();
   return true;
 }
@@ -4682,6 +4735,9 @@ function goHome(){
   const b=document.getElementById('boot'); if(b) b.classList.remove('gone');
   if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
+  const nb=document.getElementById('netbtn'); if(nb) nb.classList.remove('on');
+  const nw=document.getElementById('netwrap'); if(nw) nw.classList.remove('on');
+  netPanel(false);
   replayBtn(); homeReplayUI();
 }
 function replayStop(){
@@ -4924,6 +4980,182 @@ function m2Init(){
     m2X=x-wx*m2Sc; m2Y=y-wz*m2Sc;
     m2Draw();
   },{passive:false});
+}
+
+
+/* ---------------------------------------------------------- watching a driver
+   Peer to peer, so there is no server of ours in the middle and nothing to
+   provision: the code you hand somebody IS the address they connect to. A
+   public signalling server introduces the two browsers and then the car data
+   goes directly between them.
+
+   The code is six characters from an alphabet with no O, 0, I or 1 in it,
+   because it gets read aloud and typed in. Signalling refuses an id that is
+   already taken -- which is the collision case, and it is handled by the
+   protocol rather than by hoping: take the refusal, generate another, try
+   again, up to five times.
+
+   What goes down the wire is what a replay records -- position, heading,
+   speed, steering -- at twenty a second, and the far end plays it back the way
+   a replay plays back, on its own car. So every camera works while watching:
+   nose, chase, and the TV director, without any of them knowing the car is
+   being driven a hundred miles away. */
+const NET_ALPHA='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/* A handful of public STUN servers so two browsers behind ordinary home
+   routers can find a path to each other. Anything stricter than that -- a
+   corporate network, a phone on mobile data with symmetric NAT -- needs a TURN
+   relay, which is the one piece of this that cannot be free, and the code will
+   simply report that it could not reach the driver. */
+const NET_ICE={ iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:global.stun.twilio.com:3478'},
+  {urls:'stun:stun1.l.google.com:19302'}
+]};
+const NET_HZ=20, NET_LAG=0.22;         // seconds of buffer: smoothness costs delay
+const NET={ peer:null, code:null, conns:[], tries:0, next:0,
+            watching:null, buf:[], t0:0, base:0, live:false, log:[] };
+function netLog(m){ NET.log.push(m); if(NET.log.length>12) NET.log.shift(); }
+
+function netCode(){
+  let s='';
+  for(let i=0;i<6;i++) s+=NET_ALPHA[Math.floor(Math.random()*NET_ALPHA.length)];
+  return s;
+}
+function netLabel(){
+  const el=document.getElementById('netcode');
+  if(!el) return;
+  el.textContent = NET.code ? NET.code : '……';
+  const w=document.getElementById('netwrap');
+  if(w) w.classList.toggle('on', !!NET.code && !NET.watching);
+}
+/* Start broadcasting. Called when a session starts; harmless if it fails,
+   because nothing else depends on it. */
+function netHost(){
+  if(typeof Peer==='undefined' || NET.peer || NET.watching) return;
+  NET.tries=0;
+  const attempt=()=>{
+    const code=netCode();
+    const peer=new Peer(code,{debug:0, config:NET_ICE});
+    NET.peer=peer;
+    peer.on('open', id=>{ NET.code=id; NET.live=true; netLabel();
+      console.log('watch code: '+id); });
+    peer.on('connection', c=>{
+      NET.conns.push(c);
+      netLog('viewer connecting');
+      c.on('open', ()=>netLog('viewer channel open'));
+      c.on('error', e=>netLog('viewer error '+(e&&e.type||e)));
+      c.on('close', ()=>{ netLog('viewer gone'); NET.conns=NET.conns.filter(x=>x!==c); });
+    });
+    peer.on('error', e=>{
+      // the one that matters: somebody already has this code
+      if(e && e.type==='unavailable-id' && ++NET.tries<5){
+        try{ peer.destroy(); }catch(_){}
+        NET.peer=null; attempt(); return;
+      }
+      NET.live=false;
+    });
+  };
+  attempt();
+}
+function netSend(t){
+  if(!NET.live || !NET.conns.length || t<NET.next) return;
+  NET.next=t+1/NET_HZ;
+  const m={ t:+t.toFixed(2), x:+carState.wx.toFixed(2), z:+carState.wz.toFixed(2),
+            h:+carState.hdg.toFixed(3), s:+carState.speed.toFixed(1),
+            a:+PLAYER.steerAng.toFixed(3) };
+  for(const c of NET.conns){ if(c.open){ try{ c.send(m); }catch(_){} } }
+}
+/* Watch somebody. */
+function netWatch(code){
+  if(typeof Peer==='undefined'){ netStatus('This browser cannot connect'); return; }
+  code=(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(code.length<4){ netStatus('Enter the six-character code'); return; }
+  netStatus('Connecting to '+code+'…');
+  try{ if(NET.peer) NET.peer.destroy(); }catch(_){}
+  NET.peer=null; NET.live=false; NET.code=null; NET.conns=[];
+  const peer=new Peer(null,{debug:0, config:NET_ICE});
+  NET.peer=peer;
+  peer.on('open', id=>{
+    netLog('my peer open '+id);
+    /* Reliable, ordered, default serialisation. An unreliable channel looks
+       like the right choice for twenty position updates a second, and in
+       practice its open event never arrived: the host saw the connection
+       while the watcher sat waiting for a channel that never came up. These
+       packets are forty bytes; ordinary is fine. */
+    const c=peer.connect(code);
+    const giveUp=setTimeout(()=>{ if(!NET.watching) netStatus('No driver with that code'); }, 12000);
+    c.on('open', ()=>{
+      netLog('data channel open');
+      clearTimeout(giveUp);
+      NET.watching=code; NET.buf=[]; NET.t0=0;
+      TT.live=false; TTREC.playing=false;
+      document.body.classList.remove('cinema');
+      const tt=document.getElementById('tt'); if(tt) tt.classList.remove('show');
+      netPanel(false);
+      const bar=document.getElementById('netbar');
+      if(bar){ bar.classList.add('show');
+               document.getElementById('netbarcode').textContent=code; }
+      startPhase='go';
+    });
+    c.on('data', m=>{
+      if(!m||typeof m.x!=='number') return;
+      NET.buf.push(m);
+      if(NET.buf.length>240) NET.buf.shift();
+    });
+    c.on('close', ()=>{ netLog('closed'); netStopWatch('The driver stopped'); });
+    c.on('error', e=>{ netLog('conn error '+(e&&e.type||e)); netStopWatch('Lost the connection'); });
+  });
+  peer.on('error', e=>{ netLog('peer error '+(e&&e.type||e)); if(!NET.watching) netStatus('Could not connect'); });
+}
+function netStopWatch(why){
+  if(!NET.watching) return;
+  NET.watching=null; NET.buf=[];
+  const bar=document.getElementById('netbar'); if(bar) bar.classList.remove('show');
+  try{ if(NET.peer) NET.peer.destroy(); }catch(_){}
+  NET.peer=null; NET.live=false; NET.code=null;
+  if(why) netStatus(why);
+  goHome();
+}
+/* One step of watching, in place of drive(). Played a fifth of a second behind
+   the newest sample so a late packet has somewhere to land, and interpolated
+   the way a replay is, which is what keeps it smooth on a long lens. */
+function netStep(dt){
+  const f=NET.buf;
+  if(f.length<2) return;
+  if(!NET.t0){ NET.t0=performance.now()/1000; NET.base=f[0].t; }
+  const want=NET.base+(performance.now()/1000-NET.t0)-NET_LAG;
+  const newest=f[f.length-1].t;
+  if(want>newest){ NET.base+=Math.min(0.05,(want-newest)); }   // ease back rather than jump
+  let i=0;
+  while(i<f.length-2 && f[i+1].t<=want) i++;
+  if(i>2) f.splice(0,i-2), i=2;
+  const at=k=>f[Math.max(0,Math.min(f.length-1,k))];
+  const a=at(i), b=at(i+1), p0=at(i-1), p3=at(i+2);
+  const span=Math.max(1e-3,b.t-a.t), k=clamp((want-a.t)/span,0,1);
+  const cr=(v0,v1,v2,v3,t)=>{ const t2=t*t,t3=t2*t;
+    return 0.5*((2*v1)+(-v0+v2)*t+(2*v0-5*v1+4*v2-v3)*t2+(-v0+3*v1-3*v2+v3)*t3); };
+  const un=(h,ref)=>{ let d=h-ref;
+    while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI; return ref+d; };
+  const hPrev=carState.hdg;
+  carState.wx=cr(p0.x,a.x,b.x,p3.x,k);
+  carState.wz=cr(p0.z,a.z,b.z,p3.z,k);
+  carState.hdg=cr(un(p0.h,a.h),a.h,un(b.h,a.h),un(p3.h,a.h),k);
+  carState.speed=cr(p0.s,a.s,b.s,p3.s,k);
+  PLAYER.steerAng=cr(p0.a,a.a,b.a,p3.a,k);
+  let turned=carState.hdg-hPrev;
+  while(turned>Math.PI) turned-=2*Math.PI;
+  while(turned<-Math.PI) turned+=2*Math.PI;
+  tlStation(carState.wx, carState.wz);     // so the TV director cuts, as in a replay
+  presentCar(dt, carState.speed>=a.s, carState.speed<a.s-0.05, false, turned/Math.max(dt,1e-4));
+}
+function netStatus(msg){
+  const el=document.getElementById('netmsg');
+  if(el){ el.textContent=msg||''; el.style.opacity=msg?'1':'0'; }
+}
+function netPanel(on){
+  const el=document.getElementById('netpanel');
+  if(el) el.classList.toggle('on',on);
+  if(on){ const i=document.getElementById('netinput'); if(i){ i.value=''; i.focus(); } netStatus(''); }
 }
 
 /* --------------------------------------------------------------- TV camera
@@ -5444,6 +5676,14 @@ tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
 document.getElementById('m2close').onclick=()=>m2Show(false);
 document.getElementById('homebtn').onclick=goHome;
+document.getElementById('netbtn').onclick=()=>netPanel(!document.getElementById('netpanel').classList.contains('on'));
+document.getElementById('netcancel').onclick=()=>netPanel(false);
+document.getElementById('netgo').onclick=()=>netWatch(document.getElementById('netinput').value);
+document.getElementById('netstop').onclick=()=>netStopWatch('');
+document.getElementById('netinput').addEventListener('keydown',e=>{
+  if(e.key==='Enter') netWatch(e.currentTarget.value);
+  e.stopPropagation();                       // typing a code must not drive the car
+});
 document.getElementById('m2in').onclick=()=>{ m2Edge=0;
   document.getElementById('m2in').classList.add('on');
   document.getElementById('m2out').classList.remove('on'); m2Fit(); m2Draw(); };
@@ -6324,6 +6564,11 @@ window.SIM={
   },
   remeasureAll(){ ttRemeasure(); },
   touchAt(x,z){ tlTouch(x,z); },
+  net(){ return {code:NET.code, live:NET.live, viewers:NET.conns.length,
+                 watching:NET.watching, buffered:NET.buf.length, log:NET.log.slice(),
+                 ice:(NET.conns[0]&&NET.conns[0].peerConnection&&NET.conns[0].peerConnection.iceConnectionState)||null,
+                 openFlags:NET.conns.map(c=>!!c.open)}; },
+  watch(code){ netWatch(code); },
   map2d(){ const c=m2El(); const pts=tleLines[m2Edge];
     return { open:m2On, edge:m2Edge, points:pts.length, sc:m2Sc, drag:m2Drag, lastDrag:(window._m2last===undefined?-1:window._m2last), pan:m2Pan, downs:window._m2downs||0,
              cw:c?c.width:0, ch:c?c.height:0 }; },
@@ -6494,8 +6739,9 @@ function stepWorld(dt){
   if(!booted || customizerOn) return;
   t+=dt; _stepCount++;
   updateStart(dt);
-  if(TTREC.playing){ replayStep(dt); }
-  else { ttStep(dt); drive(dt); }
+  if(NET.watching){ netStep(dt); }
+  else if(TTREC.playing){ replayStep(dt); }
+  else { ttStep(dt); drive(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
