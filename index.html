@@ -4750,7 +4750,12 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
-    if(m2Drag>=0){ window._m2last=m2Drag; tleSave(); tleRedraw(); ttRemeasure(); }
+    if(m2Drag>=0){
+      window._m2last=m2Drag;
+      const p=tleLines[m2Edge][m2Drag];
+      tleSave();                       // your work is on disk before anything else
+      if(p) tlTouch(p.x,p.z);          // and only the stations near it are redone
+    }
     m2Drag=-1; m2Pan=false; m2Draw();
   });
   c.addEventListener('wheel',e=>{
@@ -5015,7 +5020,7 @@ function tlMeasure(curve,L){
     const dL=side(P.x,P.y,P.z,-rx,-rz, lastL);
     if(dR===lastR&&dL===lastL) carried++;
     lastR=dR; lastL=dL;
-    tlSt.push({x:P.x,z:P.z,rx,rz,dR,dL});
+    tlSt.push({x:P.x,z:P.z,rx,rz,dR,dL,bR:dR,bL:dL});   // b* = as surveyed
   }
   /* And then a median filter, because a circuit does not change width by
      fifteen metres between one station and the next four metres later. Where
@@ -5042,51 +5047,7 @@ function tlMeasure(curve,L){
      matter, because the side comes out of the geometry. A station too far
      from both keeps what was measured, so a half-marked circuit is still
      drivable. */
-  if(tleLines[0].length>=8 || tleLines[1].length>=8){
-    let used=0;
-    const walks=tleLines.map(l=>l.length>=8?tleWalk(l,tlSt):null);
-    for(let k=0;k<tlSt.length;k++){
-      const st=tlSt[k];
-      let bR=null, bL=null;
-      for(const w of walks){
-        const o=w&&w[k];
-        if(!o||o.dist>40) continue;
-        if(o.off>0.5){ if(!bR||o.dist<bR.dist) bR=o; }
-        else if(o.off<-0.5){ if(!bL||o.dist<bL.dist) bL=o; }
-      }
-      if(bR){ st.dR=bR.off; used++; }
-      if(bL){ st.dL=-bL.off; used++; }
-    }
-    console.log('track limits: '+used+' of '+(tlSt.length*2)+' station edges taken from the marked lines');
-  }
-  /* The kerb counts as track.
-
-     The white line is painted on the inside of the kerb, so measured against
-     the paint the exit of La Source is 0.3 m wide on the right -- the racing
-     line runs along the kerb there, and running wide by a wheel's width put
-     all four over the line while the car was still on the circuit as any
-     driver understands it. That is the complaint, and it was not a measuring
-     error: the surface really does change at 0.3 m.
-
-     So each edge is walked outward across its kerb and set down on the far
-     side of it. Past that is grass, gravel or run-off, and past that you have
-     genuinely left. Where the edge does not sit on a kerb at all, nothing
-     moves, and the strict-or-relaxed tolerance still applies on top. */
-  let kerbed=0;
-  for(const st of tlSt){
-    const g0=groundAt(st.x,st.z,1e9), ref=g0.hit?g0.y:0;
-    for(const side of [1,-1]){
-      const d0=side>0?st.dR:st.dL;
-      let r=d0, on=false;
-      for(let k=0;k<24;k++){                 // at most 6 m of kerb
-        const g=groundAt(st.x+side*st.rx*(r+0.25), st.z+side*st.rz*(r+0.25), ref);
-        if(!(g.hit&&g.kerb)) break;
-        r+=0.25; on=true;
-      }
-      if(on){ if(side>0) st.dR=r; else st.dL=r; kerbed++; }
-    }
-  }
-  if(kerbed) console.log('track limits: '+kerbed+' edges walked out across their kerb');
+  tlApply(tlSt);
   const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
   console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
     +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
@@ -5224,6 +5185,59 @@ function tleWalk(pts, stations){
     out[k]=best?{ off:best.off, dist:Math.sqrt(best.d2) }:null;
   }
   return out;
+}
+
+
+/* Laying the marked lines and the kerbs over the survey, for any set of
+   stations. The whole lap when it is built, and a few dozen either side of a
+   point you have just dragged -- which is the difference between the editor
+   feeling instant and freezing for ten seconds every time you move something.
+   Re-applying starts from the surveyed values rather than from whatever was
+   there before, so dragging a point back where it came from puts the limit
+   back exactly where it was. */
+function tlApply(list){
+  if(!list.length) return 0;
+  for(const st of list){ st.dR=st.bR; st.dL=st.bL; }
+  let used=0;
+  const walks=tleLines.map(l=>l.length>=8?tleWalk(l,list):null);
+  for(let k=0;k<list.length;k++){
+    const st=list[k];
+    let bR=null, bL=null;
+    for(const w of walks){
+      const o=w&&w[k];
+      if(!o||o.dist>40) continue;
+      if(o.off>0.5){ if(!bR||o.dist<bR.dist) bR=o; }
+      else if(o.off<-0.5){ if(!bL||o.dist<bL.dist) bL=o; }
+    }
+    if(bR){ st.dR=bR.off; used++; }
+    if(bL){ st.dL=-bL.off; used++; }
+  }
+  for(const st of list){
+    const g0=groundAt(st.x,st.z,1e9), ref=g0.hit?g0.y:0;
+    for(const side of [1,-1]){
+      let r=side>0?st.dR:st.dL, on=false;
+      for(let k=0;k<24;k++){
+        const g=groundAt(st.x+side*st.rx*(r+0.25), st.z+side*st.rz*(r+0.25), ref);
+        if(!(g.hit&&g.kerb)) break;
+        r+=0.25; on=true;
+      }
+      if(on){ if(side>0) st.dR=r; else st.dL=r; }
+    }
+  }
+  return used;
+}
+/* The stations a dragged point can possibly affect: the nearest one to it and
+   sixty either side, which is 240 m of circuit. */
+function tlTouch(x,z){
+  if(!tlSt.length) return;
+  let bi=0, bd=Infinity;
+  for(let i=0;i<tlSt.length;i++){
+    const dx=tlSt[i].x-x, dz=tlSt[i].z-z, d=dx*dx+dz*dz;
+    if(d<bd){ bd=d; bi=i; }
+  }
+  const n=tlSt.length, list=[];
+  for(let k=-60;k<=60;k++) list.push(tlSt[((bi+k)%n+n)%n]);
+  tlApply(list);
 }
 
 /* The station the car is at, searched around where it was so a hairpin's
@@ -6109,6 +6123,8 @@ window.SIM={
     m2Sc=sc; m2X=c.width/2-x*sc; m2Y=c.height/2-z*sc; m2Draw();
     return {sc:m2Sc};
   },
+  remeasureAll(){ ttRemeasure(); },
+  touchAt(x,z){ tlTouch(x,z); },
   map2d(){ const c=m2El(); const pts=tleLines[m2Edge];
     return { open:m2On, edge:m2Edge, points:pts.length, sc:m2Sc, drag:m2Drag, lastDrag:(window._m2last===undefined?-1:window._m2last), pan:m2Pan, downs:window._m2downs||0,
              cw:c?c.width:0, ch:c?c.height:0 }; },
