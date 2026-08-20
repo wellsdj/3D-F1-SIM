@@ -6961,6 +6961,7 @@ const bootMsg=document.getElementById('bootmsg');
 const qualifyingLoadEl=document.getElementById('qualifying-load');
 const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
+const QUALIFYING_LOAD_MIN_MS=10000;
 let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
 function qualifyingLoadSetStatus(text){
   if(qualifyingLoadStatusEl) qualifyingLoadStatusEl.textContent=text;
@@ -6991,7 +6992,7 @@ function qualifyingLoadShow(text){
 function qualifyingLoadHide(immediate=false){
   if(!qualifyingLoadEl) return;
   clearTimeout(qualifyingLoadTimer);
-  const wait=immediate?0:Math.max(0,850-(performance.now()-qualifyingLoadSince));
+  const wait=immediate?0:Math.max(0,QUALIFYING_LOAD_MIN_MS-(performance.now()-qualifyingLoadSince));
   const finish=()=>{
     qualifyingLoadEl.classList.remove('active');
     qualifyingLoadEl.setAttribute('aria-hidden','true');
