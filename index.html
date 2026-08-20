@@ -3446,7 +3446,10 @@ function stylePrepare(root){
   });
   root.traverse(o=>{
     if(!o.isMesh||!o.material) return;
-    const bodyish=o.parent&&/body/i.test(o.parent.name||'');
+    /* glTFpack inserts an unnamed mesh node between Body and its primitives,
+       so checking only the immediate parent misses the actual body section. */
+    let bodyish=false, ancestor=o.parent;
+    while(ancestor){ if(/body/i.test(ancestor.name||'')){ bodyish=true; break; } ancestor=ancestor.parent; }
     let ms=Array.isArray(o.material)?o.material:[o.material];
     /* The black centre section is part of the single Body mesh and uses the
        shared carbon materials. Clone those slots before styling them so the
