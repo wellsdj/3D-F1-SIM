@@ -409,8 +409,11 @@
   #lapbook-actions button:hover{background:rgba(255,176,32,.16);border-color:#ffb020}
 
   /* -------------------------------------------------------- car customiser */
+  /* No gradient over the stage: the scene behind is already black, and a wash
+     across it only tints the car you are trying to judge a colour on. Just
+     enough shading on the left to keep the text legible. */
   #customizer{position:fixed;inset:0;z-index:14;display:none;overflow:hidden;color:var(--paper);font-family:var(--mono);
-              background:linear-gradient(90deg,rgba(3,7,12,.64) 0%,rgba(3,7,12,.28) 34%,rgba(3,7,12,.05) 72%,rgba(3,7,12,.18) 100%)}
+              background:linear-gradient(90deg,rgba(0,0,0,.72) 0%,rgba(0,0,0,.34) 30%,rgba(0,0,0,0) 58%)}
   #customizer.open{display:block}
   body.customizer-open .hud,body.customizer-open #lights,body.customizer-open #golabel,body.customizer-open #tt,
   body.customizer-open #tlbtn,body.customizer-open #replaybtn,body.customizer-open #replaybar,body.customizer-open #map,body.customizer-open #cmap,
@@ -3051,17 +3054,19 @@ function buildMountains(){
 const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
+let customSpin=true, customDragging=false, customLastX=0;
 let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
 const CUSTOM_BG=new THREE.Color(0x05070b);   // the garage's own black
 const customizerStage=new THREE.Group();
 customizerStage.visible=false;
 scene.add(customizerStage);
-const customFloor=new THREE.Mesh(new THREE.CylinderGeometry(4.75,4.95,.24,96),new THREE.MeshStandardMaterial({color:0x0d1625,metalness:.38,roughness:.34}));
-customFloor.position.y=.12; customFloor.castShadow=false; customFloor.receiveShadow=false; customizerStage.add(customFloor);
-const customDeck=new THREE.Mesh(new THREE.CircleGeometry(4.72,96),new THREE.MeshStandardMaterial({color:0x17243a,metalness:.28,roughness:.28}));
-customDeck.rotation.x=-Math.PI/2; customDeck.position.y=.245; customizerStage.add(customDeck);
-const customRing=new THREE.Mesh(new THREE.TorusGeometry(4.45,.055,12,128),new THREE.MeshBasicMaterial({color:0x5fa9ff,transparent:true,opacity:.88}));
-customRing.rotation.x=-Math.PI/2; customRing.position.y=.29; customizerStage.add(customRing);
+/* One cylinder for the car to stand on, and nothing else: no deck, no glowing
+   ring, no backdrop. A turntable in a black room, which is the whole brief --
+   what is being looked at is the car. */
+const customFloor=new THREE.Mesh(new THREE.CylinderGeometry(4.6,4.6,.42,96),
+  new THREE.MeshStandardMaterial({color:0x14181f, metalness:.24, roughness:.62}));
+customFloor.position.y=.02; customFloor.castShadow=false; customFloor.receiveShadow=true;
+customizerStage.add(customFloor);
 /* The garage deliberately uses the same neutral key as the track. The old
    warm/cool point-light pair lifted saturated paints into neon pinks and
    blues, so the selected swatch no longer matched the car in motion. */
@@ -5281,6 +5286,8 @@ function tvNearest(s){
 }
 function tvPick(t){
   tvSeq++;
+  // count them, so a test can prove the picture is not being cut to ribbons
+  NET.cuts=(NET.cuts||0)+1;
   const i=tvNearest(tvCarS());
   if(tvSeq%TV_SPECIAL_EVERY===0){
     const kinds=['heli','airbox','nose','fixed'];
@@ -5298,8 +5305,17 @@ function tvUpdate(t,dt){
   if(!tvCams.length){ return false; }
   const s=tvCarS();
   const near=tvNearest(s);
-  // a new shot when the car reaches a new camera, or when one has run long
-  if(!tvShot || near!==tvCut || t-tvShot.born>9) tvPick(t);
+  /* A shot has to stand for at least a second and a half.
+
+     Without that the director cut on any change of nearest camera, and the
+     nearest camera can flip back and forth between two of them while the car
+     sits between the pair -- every flip a new shot, and every fourth shot an
+     onboard one, so the picture snapped between a camera at the trackside and
+     a camera inside the car several times a second. That is the flickering:
+     the car vanishing (the lens is inside it) and reappearing (it is not),
+     over and over. Television does not cut like that and neither does this. */
+  const held=tvShot?(t-tvShot.born):99;
+  if(!tvShot || (near!==tvCut && held>1.5) || held>9) tvPick(t);
 
   const car=carGroup.position, h=carState.hdg;
   const hx=Math.sin(h), hz=Math.cos(h);
@@ -6641,6 +6657,9 @@ window.SIM={
   },
   remeasureAll(){ ttRemeasure(); },
   touchAt(x,z){ tlTouch(x,z); },
+  carGroupY(){ return +carGroup.position.y.toFixed(2); },
+  carVisible(){ return carGroup.visible; },
+  garage(){ return {open:customizerOn, angle:+customizerAngle.toFixed(2), dragging:customDragging}; },
   net(){ return {code:NET.code, live:NET.live, viewers:NET.conns.length,
                  watching:NET.watching, buffered:NET.buf.length, log:NET.log.slice(),
                  ice:(NET.conns[0]&&NET.conns[0].peerConnection&&NET.conns[0].peerConnection.iceConnectionState)||null,
@@ -6761,7 +6780,7 @@ window.SIM={
     out.sort((a,b)=>b.tris-a.tris);
     return {total:out.reduce((a,q)=>a+q.tris,0), count:out.length, top:out.slice(0,16)};
   },
-  tv(){ return {cams:tvCams.length, shot:tvShot&&tvShot.kind, i:tvShot&&tvShot.i,
+  tv(){ return {cams:tvCams.length, cuts:NET.cuts||0, shot:tvShot&&tvShot.kind, i:tvShot&&tvShot.i,
                 camY:tvShot&&tvShot.kind==='track'&&tvCams[tvShot.i]?+tvCams[tvShot.i].y.toFixed(1):null}; },
   fakeLap(){        // drive a lap out of the recorder without waiting two minutes
     recStart();
@@ -6870,9 +6889,13 @@ function frame(now){
      driving placement is bypassed while it is open so the loaded car can
      rotate slowly on its own lit platform without the lap physics moving it. */
   if(customizerOn){
-    customizerAngle=(customizerAngle+dt*0.16)%(Math.PI*2);
+    /* It turns by itself until you take hold of it, and carries on when you
+       let go -- so you can stop it where you want and still see it move. */
+    if(!customDragging && customSpin) customizerAngle=(customizerAngle+dt*0.16)%(Math.PI*2);
     resetCustomizerPose();
-    if(podiumRoot) podiumRoot.visible=true;
+    /* No podium, no dome, no backdrop -- one cylinder and the car, which is
+       what was asked for and what makes a paint colour readable. */
+    if(podiumRoot) podiumRoot.visible=false;
     customizerStage.visible=true;
     camera.position.set(6.8,3.25,8.2);
     camera.up.set(0,1,0);
@@ -7410,6 +7433,26 @@ document.getElementById('customize-home').onclick=openCustomizer;
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
+/* Dragging the stage. The overlay's own panels keep their clicks -- only a
+   drag that starts on the empty part of the screen turns the car. */
+(function(){
+  const stage=document.getElementById('customizer');
+  if(!stage) return;
+  const onPanel=e=>!!(e.target.closest && e.target.closest('.custom-copy,.custom-panel,button,input,label,select'));
+  stage.addEventListener('pointerdown',e=>{
+    if(onPanel(e)) return;
+    customDragging=true; customLastX=e.clientX;
+    stage.setPointerCapture&&stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!customDragging) return;
+    customizerAngle=(customizerAngle - (e.clientX-customLastX)*0.008) % (Math.PI*2);
+    customLastX=e.clientX;
+  });
+  const up=()=>{ customDragging=false; };
+  stage.addEventListener('pointerup',up);
+  stage.addEventListener('pointercancel',up);
+})();
 /* One press. The confirmation step read as a second delete button sitting
    there, and the worst case is driving another lap. */
 document.getElementById('lapbook-delete').onclick=e=>{
