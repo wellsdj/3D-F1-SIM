@@ -223,10 +223,113 @@
 
   #boot #bar{position:relative;z-index:1;margin-top:18px;width:min(100%,500px);height:2px;background:rgba(236,234,228,.17)}
   #boot #bar i{background:linear-gradient(90deg,#ffb020,#ff5b28);box-shadow:0 0 14px rgba(255,176,32,.6)}
+
+  /* ----------------------------------------------------------- home actions */
+  #home-actions{position:relative;z-index:1;display:flex;flex-direction:column;gap:11px;width:min(100%,500px)}
+  #bestlapsbtn{position:relative;overflow:hidden;width:100%;font:inherit;font-size:11px;letter-spacing:.16em;
+               text-transform:uppercase;text-align:left;color:#dfe7f1;cursor:pointer;padding:14px 20px;
+               background:rgba(8,14,22,.48);border:1px solid rgba(236,234,228,.18);border-radius:3px;
+               transition:transform .18s ease,background .18s ease,border-color .18s ease}
+  #bestlapsbtn:after{content:"↗";position:absolute;right:19px;top:50%;transform:translateY(-50%);
+                     color:#ffb020;font-size:20px;transition:transform .18s ease}
+  #bestlapsbtn:hover{transform:translateX(6px);background:rgba(255,176,32,.13);border-color:#ffb020}
+  #bestlapsbtn:hover:after{transform:translate(4px,-50%)}
+  #bestlapsbtn span{display:block;margin-top:5px;font-size:9px;letter-spacing:.1em;opacity:.48;text-transform:none}
+
+  /* The home-only settings control stays quiet until it is needed. Hovering
+     the cog is the desktop affordance; .open keeps it usable on touch screens. */
+  #home-settings{position:absolute;right:clamp(24px,4vw,64px);top:clamp(24px,4vw,58px);z-index:6;font-family:var(--mono)}
+  #home-settings .cog{display:grid;place-items:center;width:66px;height:66px;border:1px solid rgba(236,234,228,.28);
+                      border-radius:50%;background:rgba(5,10,16,.42);color:#f4f7fb;cursor:pointer;
+                      font-size:30px;line-height:1;box-shadow:0 14px 40px rgba(0,0,0,.28);
+                      transition:transform .35s cubic-bezier(.2,.8,.2,1),background .2s ease,border-color .2s ease}
+  #home-settings .cog:hover,#home-settings.open .cog,#home-settings:focus-within .cog{transform:rotate(90deg);background:rgba(255,176,32,.15);border-color:#ffb020}
+  #home-settings .settings-menu{position:absolute;right:0;top:78px;width:285px;padding:10px;
+                                background:rgba(5,10,16,.9);border:1px solid rgba(236,234,228,.19);border-radius:8px;
+                                box-shadow:0 20px 54px rgba(0,0,0,.38);backdrop-filter:blur(15px);
+                                opacity:0;visibility:hidden;transform:translateY(-8px) scale(.98);transform-origin:top right;
+                                transition:opacity .2s ease,transform .2s ease,visibility .2s ease}
+  #home-settings:hover .settings-menu,#home-settings.open .settings-menu,#home-settings:focus-within .settings-menu{opacity:1;visibility:visible;transform:none}
+  #home-settings .menu-kicker{padding:5px 7px 10px;font-size:8px;letter-spacing:.28em;text-transform:uppercase;opacity:.48}
+  #home-settings .settings-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;padding:12px 9px;
+                                   font:inherit;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#f4f7fb;
+                                   background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);border-radius:5px;cursor:pointer}
+  #home-settings .settings-toggle:hover{background:rgba(255,176,32,.12);border-color:rgba(255,176,32,.48)}
+  #home-settings .settings-toggle i{font-style:normal;color:#ffb020;font-size:17px;transition:transform .2s ease}
+  #home-settings .settings-item.open .settings-toggle i{transform:rotate(90deg)}
+  #home-settings .limit-dropdown{display:none;padding:8px 0 2px}
+  #home-settings .settings-item.open .limit-dropdown{display:grid;gap:6px}
+  #home-settings .limit-choice{display:block;width:100%;padding:10px 10px 9px;font:inherit;text-align:left;color:#dfe7f1;
+                                background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.1);border-radius:5px;cursor:pointer}
+  #home-settings .limit-choice:hover{background:rgba(255,255,255,.08)}
+  #home-settings .limit-choice.on{background:rgba(255,176,32,.15);border-color:rgba(255,176,32,.72);box-shadow:inset 3px 0 #ffb020}
+  #home-settings .limit-choice b{display:block;font-size:10px;letter-spacing:.13em;text-transform:uppercase}
+  #home-settings .limit-choice span{display:block;margin-top:4px;font-size:9px;letter-spacing:.03em;opacity:.5;text-transform:none}
+  #customize-home{position:absolute;right:clamp(24px,4vw,64px);bottom:clamp(28px,5vw,72px);z-index:5;
+                  padding:13px 17px 12px;font:inherit;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+                  color:#f4f7fb;background:rgba(5,10,16,.56);border:1px solid rgba(236,234,228,.24);border-radius:4px;cursor:pointer;
+                  box-shadow:0 14px 36px rgba(0,0,0,.26);transition:transform .18s ease,background .18s ease,border-color .18s ease}
+  #customize-home:hover{transform:translateY(-3px);background:rgba(255,176,32,.16);border-color:#ffb020}
+  #customize-home span{display:block;margin-top:5px;font-size:8px;letter-spacing:.08em;opacity:.48;text-transform:none}
+
+  /* ---------------------------------------------------------- lap book */
+  #lapbook{position:fixed;inset:0;z-index:14;display:none;padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px);
+           color:var(--paper);font-family:var(--mono);background:linear-gradient(90deg,rgba(3,7,12,.98),rgba(3,7,12,.77)),url('home-hero.png') center/cover}
+  #lapbook.open{display:block}
+  #lapbook:before,#customizer:before{content:"";position:absolute;inset:20px;pointer-events:none;border:1px solid rgba(236,234,228,.1)}
+  .overlay-kicker{position:relative;z-index:1;color:#ffb020;font-size:9px;letter-spacing:.3em;text-transform:uppercase}
+  #lapbook h2,#customizer h2{position:relative;z-index:1;margin:15px 0 10px;font-size:clamp(38px,6vw,76px);font-weight:500;
+                             letter-spacing:-.08em;line-height:.9;text-transform:uppercase}
+  #lapbook h2 em,#customizer h2 em{font-style:normal;color:#ffb020}
+  #lapbook .lap-intro{position:relative;z-index:1;max-width:430px;font-size:10px;line-height:1.8;letter-spacing:.08em;text-transform:uppercase;opacity:.55}
+  #lapbook-list{position:relative;z-index:1;width:min(100%,560px);margin-top:28px;display:grid;gap:7px}
+  .lap-row{display:grid;grid-template-columns:50px 1fr auto;align-items:center;gap:15px;padding:14px 16px;
+           background:rgba(8,14,22,.58);border:1px solid rgba(236,234,228,.15);border-radius:4px}
+  .lap-row.best{border-color:rgba(255,176,32,.64);background:rgba(255,176,32,.1)}
+  .lap-row .rank{font-size:10px;color:#ffb020;letter-spacing:.15em}
+  .lap-row .lap-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+  .lap-row .lap-time{font-size:22px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  #lapbook-empty{position:relative;z-index:1;margin-top:28px;width:min(100%,560px);padding:20px;border:1px dashed rgba(236,234,228,.2);
+                 font-size:10px;letter-spacing:.13em;text-transform:uppercase;opacity:.55}
+  .overlay-close{position:absolute;z-index:3;right:clamp(24px,4vw,64px);top:clamp(24px,4vw,58px);display:grid;place-items:center;
+                 width:48px;height:48px;border:1px solid rgba(236,234,228,.25);border-radius:50%;background:rgba(5,10,16,.48);
+                 color:#f4f7fb;font:inherit;font-size:22px;cursor:pointer;transition:background .2s ease,transform .2s ease}
+  .overlay-close:hover{background:rgba(255,176,32,.18);transform:rotate(90deg)}
+  #lapbook-actions{position:relative;z-index:1;display:flex;gap:9px;margin-top:24px;flex-wrap:wrap}
+  #lapbook-actions button{font:inherit;font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:#f4f7fb;cursor:pointer;
+                          background:rgba(255,255,255,.07);border:1px solid rgba(236,234,228,.2);border-radius:4px;padding:12px 14px}
+  #lapbook-actions button:hover{background:rgba(255,176,32,.16);border-color:#ffb020}
+
+  /* -------------------------------------------------------- car customiser */
+  #customizer{position:fixed;inset:0;z-index:14;display:none;overflow:hidden;color:var(--paper);font-family:var(--mono);
+              background:linear-gradient(90deg,rgba(3,7,12,.99) 0%,rgba(3,7,12,.9) 34%,rgba(3,7,12,.44) 72%,rgba(3,7,12,.58) 100%)}
+  #customizer.open{display:block}
+  body.customizer-open .hud,body.customizer-open #lights,body.customizer-open #golabel,body.customizer-open #tt,
+  body.customizer-open #tlbtn,body.customizer-open #replaybtn,body.customizer-open #replaybar,body.customizer-open #map,body.customizer-open #cmap{opacity:0!important;pointer-events:none}
+  #customizer .custom-copy{position:relative;z-index:1;padding:clamp(30px,6vw,88px) 0 0 clamp(24px,8vw,132px)}
+  #customizer .custom-intro{position:relative;z-index:1;max-width:310px;font-size:10px;line-height:1.8;letter-spacing:.08em;text-transform:uppercase;opacity:.55}
+  #customizer .custom-controls{position:absolute;z-index:2;left:clamp(24px,8vw,132px);bottom:clamp(28px,6vw,82px);width:min(100% - 48px,360px);
+                                padding:16px;background:rgba(5,10,16,.7);border:1px solid rgba(236,234,228,.18);border-radius:7px;backdrop-filter:blur(14px)}
+  .style-group{margin-top:13px}.style-group:first-child{margin-top:0}
+  .style-group label{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-size:9px;letter-spacing:.18em;text-transform:uppercase;opacity:.72}
+  .style-group label span{font-size:8px;letter-spacing:.06em;opacity:.45;text-transform:none}
+  .style-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .style-swatches{display:flex;gap:6px;flex-wrap:wrap}
+  .style-swatches button{width:22px;height:22px;border:1px solid rgba(255,255,255,.24);border-radius:3px;cursor:pointer;padding:0;transition:transform .12s ease,border-color .12s ease}
+  .style-swatches button:hover{transform:scale(1.16)}
+  .style-swatches button.on{border-color:#fff;box-shadow:0 0 0 2px rgba(255,176,32,.56);transform:scale(1.12)}
+  .style-row input[type=color]{width:34px;height:24px;padding:0;border:1px solid rgba(255,255,255,.2);border-radius:4px;background:transparent;cursor:pointer}
+  #customizer .custom-note{margin:12px 0 0;font-size:8px;line-height:1.6;letter-spacing:.06em;opacity:.38}
+  #customizer .custom-tag{position:absolute;z-index:1;right:clamp(24px,5vw,80px);bottom:clamp(28px,6vw,82px);font-size:9px;letter-spacing:.24em;text-transform:uppercase;opacity:.45}
+  #customizer-stage{position:absolute;z-index:0;inset:0;pointer-events:none;background:radial-gradient(ellipse at 72% 55%,rgba(255,176,32,.12),transparent 33%),radial-gradient(ellipse at 72% 62%,rgba(21,95,150,.2),transparent 42%)}
+
   @media (max-width:700px){#boot{padding:26px 22px 30px;justify-content:flex-end;background:linear-gradient(180deg,rgba(3,7,12,.18) 0%,rgba(3,7,12,.52) 33%,rgba(3,7,12,.97) 76%),url('home-hero.png') 64% center/cover}
     #homecopy{margin-bottom:18px}#homecopy h1{font-size:clamp(38px,13vw,66px)}#homecopy p{font-size:9px}
-    #homecopy .spec{font-size:8px;gap:12px}#pick button{padding:14px 48px 13px 16px}#settings{padding:12px;margin-top:14px}
-    #tlpick{flex-direction:column}#settings p.note{font-size:8.5px}}
+    #homecopy .spec{font-size:8px;gap:12px}#pick button{padding:14px 48px 13px 16px}#bestlapsbtn{padding:13px 16px}
+    #home-settings{right:18px;top:18px}#home-settings .cog{width:52px;height:52px;font-size:24px}#home-settings .settings-menu{top:62px;width:min(285px,calc(100vw - 36px))}
+    #customize-home{right:18px;bottom:18px}#lapbook{padding:92px 22px 34px}#lapbook h2,#customizer h2{font-size:clamp(42px,14vw,66px)}
+    .lap-row{grid-template-columns:38px 1fr auto;gap:10px;padding:12px}.lap-row .lap-time{font-size:18px}
+    #customizer .custom-copy{padding:82px 22px 0}#customizer .custom-controls{left:18px;bottom:18px;width:calc(100% - 36px)}#customizer .custom-tag{display:none}}
 
   #settings p.note{margin:11px 2px 0;font-family:var(--mono);font-size:9.5px;
                    letter-spacing:.05em;opacity:.42;line-height:1.75;
@@ -365,37 +468,67 @@
 <div id="ttflash"><div class="big" id="ttflashbig"></div><div class="sub" id="ttflashsub"></div></div>
 
 <div id="boot">
+  <div id="home-settings">
+    <button class="cog" id="home-settings-toggle" aria-label="Open settings" aria-expanded="false">⚙</button>
+    <div class="settings-menu">
+      <div class="menu-kicker">Session settings</div>
+      <div class="settings-item" id="home-limit-item">
+        <button class="settings-toggle" id="home-limit-toggle" aria-expanded="false">Track limits <i>›</i></button>
+        <div class="limit-dropdown" id="home-limit-dropdown">
+          <button class="limit-choice" data-limit="0"><b>Very strict</b><span>Cross the white line and the lap is gone.</span></button>
+          <button class="limit-choice" data-limit="1"><b>Relaxed</b><span>A metre past the white line before it counts.</span></button>
+          <button class="limit-choice" data-limit="off"><b>Off</b><span>Track limits never delete a lap.</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
   <p id="bootmsg">System ready // Spa 2022</p>
   <div id="homecopy">
     <div class="eyebrow">Circuit 01 · Night run</div>
     <h1>Own the <em>apex.</em></h1>
-    <p>High-speed free roam on a living circuit. Choose your setup, hit the lights, and find the last tenth.</p>
-    <div class="spec"><span>01 / 01 circuit</span><span>7.00 km live route</span><span>solo session</span></div>
+    <p>High-speed qualifying on a living circuit. Hit the lights, chase the apex, and find the last tenth.</p>
+    <div class="spec"><span>01 / 01 circuit</span><span>7.00 km live route</span><span>solo qualifying</span></div>
   </div>
-  <div id="pick">
-    <button data-track="spa22"><b>Enter circuit <i>01</i></b><span>Spa 2022 // free roam // 102 m elevation</span><small>Start run <strong>↗</strong></small></button>
-  </div>
-  <div id="settings">
-    <h5>Track limits</h5>
-    <div id="tlpick">
-      <button data-tol="1"><b>Relaxed</b><span>a metre past the white line before it counts</span></button>
-      <button data-tol="0"><b>Very strict</b><span>over the white line at all and the lap is gone</span></button>
+  <div id="home-actions">
+    <div id="pick">
+      <button data-track="spa22"><b>Enter qualifying <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
     </div>
-    <p class="note">Two wheels over is fine. Three is fine. A lap is only deleted
-       when all four are past the line — and when you miss one of the five gates.</p>
+    <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
   </div>
-  <div id="settings" style="margin-top:26px">
-    <h5>Customise your car</h5>
-    <div id="paintrow">
-      <div id="paintsw"></div>
-      <input type="color" id="paintpick" value="#ff8000">
-      <button id="paintreset">Papaya</button>
-    </div>
-    <p class="note">The paint is repainted properly, hue by hue: the sponsors,
-       the carbon and the numbers stay exactly where they are.</p>
-  </div>
+  <button id="customize-home">Customise your car <span>Open the garage ↗</span></button>
   <div id="bar"><i></i></div>
 </div>
+
+<section id="lapbook" aria-hidden="true">
+  <button class="overlay-close" id="lapbook-close" aria-label="Close best laps">×</button>
+  <div class="overlay-kicker">Driver archive · Spa 2022</div>
+  <h2>Best <em>laps.</em></h2>
+  <p class="lap-intro">Your quickest qualifying runs live here. Select a record to watch it back from every camera.</p>
+  <div id="lapbook-list"></div>
+  <div id="lapbook-empty">No recorded laps yet. Enter qualifying and set a time.</div>
+  <div id="lapbook-actions">
+    <button id="lapbook-replay">Watch fastest lap ↗</button>
+    <button id="lapbook-back">Back to home</button>
+  </div>
+  </section>
+
+<section id="customizer" aria-hidden="true">
+  <div id="customizer-stage"></div>
+  <button class="overlay-close" id="customizer-close" aria-label="Close car customiser">×</button>
+  <div class="custom-copy">
+    <div class="overlay-kicker">Garage 01 · Live spec</div>
+    <h2>Build your <em>line.</em></h2>
+    <p class="custom-intro">Turn the car slowly, tune every visible finish, and take this exact spec into qualifying.</p>
+  </div>
+  <div class="custom-controls">
+    <div class="style-group"><label>Body <span id="style-body-value">Papaya</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#ff8000"></div></div>
+    <div class="style-group"><label>Ring <span id="style-ring-value">Gold</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#f2a20c"></div></div>
+    <div class="style-group"><label>Rear wing <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
+    <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
+    <p class="custom-note">Changes save automatically and carry into your next run.</p>
+  </div>
+  <div class="custom-tag">McLaren MCL39 · Qualifying trim</div>
+</section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="meshopt_decoder.js"></script>
@@ -2723,6 +2856,16 @@ function buildMountains(){
 const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
+let customizerOn=false, customizerAngle=0, pendingReplay=false;
+const customizerStage=new THREE.Group();
+customizerStage.visible=false;
+scene.add(customizerStage);
+const customFloor=new THREE.Mesh(new THREE.CircleGeometry(7.8,64),new THREE.MeshStandardMaterial({color:0x101923,metalness:.35,roughness:.42}));
+customFloor.rotation.x=-Math.PI/2; customFloor.position.y=-0.02; customFloor.receiveShadow=true; customizerStage.add(customFloor);
+const customRing=new THREE.Mesh(new THREE.TorusGeometry(5.6,.035,8,96),new THREE.MeshBasicMaterial({color:0xffb020,transparent:true,opacity:.7}));
+customRing.rotation.x=-Math.PI/2; customRing.position.y=.01; customizerStage.add(customRing);
+const customFill=new THREE.PointLight(0xffb020,12,18); customFill.position.set(3,5,4); customizerStage.add(customFill);
+const customRim=new THREE.PointLight(0x2f99da,16,20); customRim.position.set(-4,3,-2); customizerStage.add(customRim);
 /* Contact patches and low points of the bodywork, in carGroup space, measured
    from the model once it loads rather than assumed. */
 const CARPTS=[], CARLOW=[];
@@ -2752,8 +2895,16 @@ const WHEELBASE=3.60;
     stripSponsors(car);
     paintPrepare(car);
     paintLoad();
-    if(carPaint) paintCar(carPaint);
+    stylePrepare(car);
+    styleLoad();
+    if(carPaint && carStyle.body==='#ff8000') carStyle.body=carPaint;
+    carPaint=carStyle.body;
+    paintCar(carStyle.body);
+    styleApply('ring',carStyle.ring,false);
+    styleApply('wing',carStyle.wing,false);
+    styleApply('rims',carStyle.rims,false);
     paintUI();
+    styleUI();
 
     for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
       const w=car.getObjectByName(n);
@@ -3041,6 +3192,118 @@ function paintLoad(){
 function paintSave(){
   try{ if(carPaint) localStorage.setItem(PAINT_KEY,carPaint);
        else localStorage.removeItem(PAINT_KEY); }catch(e){}
+}
+
+/* --------------------------------------------------------- garage finishes
+   The body stays on the texture-aware paint path above. The three smaller
+   finish groups use their real glTF materials, so the colour controls remain
+   independent: halo/ring, rear wing and wheel rims can all be changed without
+   washing a colour over the rest of the car. */
+const STYLE_KEY='f1sim.car.style';
+const STYLE_SWATCHES={
+  body:['#ff8000','#d72638','#1596d1','#101820','#f2c94c'],
+  ring:['#f2a20c','#e9eef2','#e24a3b','#54d6c7','#15171b'],
+  wing:['#15171b','#293241','#f2a20c','#d72638','#e9eef2'],
+  rims:['#b6babd','#f2a20c','#15171b','#e9eef2','#7c8b98']
+};
+const STYLE_LABELS={body:{'#ff8000':'Papaya','#d72638':'Crimson','#1596d1':'Azure','#101820':'Stealth','#f2c94c':'Volt'},
+  ring:{'#f2a20c':'Gold','#e9eef2':'Ice','#e24a3b':'Red','#54d6c7':'Mint','#15171b':'Black'},
+  wing:{'#15171b':'Carbon','#293241':'Slate','#f2a20c':'Gold','#d72638':'Crimson','#e9eef2':'Ice'},
+  rims:{'#b6babd':'Satin silver','#f2a20c':'Gold','#15171b':'Black','#e9eef2':'Ice','#7c8b98':'Gunmetal'}};
+let carStyle={body:'#ff8000',ring:'#f2a20c',wing:'#15171b',rims:'#b6babd'};
+let styleTargets={ring:[],wing:[],rims:[]};
+function styleLoad(){
+  try{
+    const v=JSON.parse(localStorage.getItem(STYLE_KEY)||'null');
+    if(v&&typeof v==='object') Object.keys(carStyle).forEach(k=>{ if(typeof v[k]==='string') carStyle[k]=v[k]; });
+  }catch(e){}
+}
+function styleSave(){ try{ localStorage.setItem(STYLE_KEY,JSON.stringify(carStyle)); }catch(e){} }
+function styleAddTarget(kind,mat){
+  if(mat&&!styleTargets[kind].includes(mat)) styleTargets[kind].push(mat);
+}
+function stylePrepare(root){
+  styleTargets={ring:[],wing:[],rims:[]};
+  root.updateMatrixWorld(true);
+  const addByMaterial=(o,ms)=>ms.forEach(m=>{
+    const n=(m&&m.name||'').toLowerCase();
+    if(/halo|ring/.test(n)) styleAddTarget('ring',m);
+    if(/mcl39_wheels|discs|chrome/.test(n)) styleAddTarget('rims',m);
+  });
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    addByMaterial(o,ms);
+    if(/rear.?wing|wing.?rear/i.test(o.name||'')) ms.forEach(m=>styleAddTarget('wing',m));
+    if(!o.geometry||!o.geometry.groups||!o.geometry.attributes.position||!o.geometry.groups.length) return;
+    /* The body is one glTF mesh with material groups. Split its rear-most
+       groups into cloned materials so the rear wing can have its own finish. */
+    const bodyish=o.parent&&/body/i.test(o.parent.name||'');
+    if(!bodyish) return;
+    const p=o.geometry.attributes.position, idx=o.geometry.index;
+    let minZ=Infinity,maxZ=-Infinity,minY=Infinity,maxY=-Infinity;
+    const world=new THREE.Vector3();
+    for(let i=0;i<p.count;i++){ world.fromBufferAttribute(p,i).applyMatrix4(o.matrixWorld);
+      minZ=Math.min(minZ,world.z); maxZ=Math.max(maxZ,world.z); minY=Math.min(minY,world.y); maxY=Math.max(maxY,world.y); }
+    const spanZ=Math.max(0.01,maxZ-minZ), spanY=Math.max(0.01,maxY-minY), groups=o.geometry.groups;
+    const next=[];
+    groups.forEach((g,gi)=>{
+      let az=0,ay=0,n=0;
+      for(let j=g.start;j<g.start+g.count;j++){
+        const vi=idx?idx.getX(j):j;
+        world.fromBufferAttribute(p,vi).applyMatrix4(o.matrixWorld); az+=world.z; ay+=world.y; n++;
+      }
+      const z=az/Math.max(1,n), y=ay/Math.max(1,n);
+      const src=ms[g.materialIndex]||ms[0];
+      const rear=z<minZ+spanZ*.24 && y>minY+spanY*.26;
+      if(rear){ const clone=src.clone(); next[gi]=clone; styleAddTarget('wing',clone); }
+      else next[gi]=src;
+      g.materialIndex=gi;
+    });
+    o.material=next;
+  });
+}
+function styleApply(kind,hex,save=true){
+  if(!STYLE_SWATCHES[kind]) return;
+  hex=(hex||carStyle[kind]||STYLE_SWATCHES[kind][0]).toLowerCase();
+  carStyle[kind]=hex;
+  if(kind==='body'){
+    carPaint=hex; paintCar(hex);
+  }else{
+    styleTargets[kind].forEach(m=>{
+      if(m&&m.color) m.color.set(hex);
+      if(m) m.needsUpdate=true;
+    });
+  }
+  if(save) styleSave();
+  styleMark();
+}
+function styleMark(){
+  document.querySelectorAll('.style-group').forEach(group=>{
+    const wrap=group.querySelector('.style-swatches'), kind=wrap&&wrap.dataset.style;
+    if(!kind) return;
+    const value=(carStyle[kind]||'').toLowerCase();
+    group.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.hex===value));
+    const label=group.querySelector('label span');
+    if(label) label.textContent=(STYLE_LABELS[kind]&&STYLE_LABELS[kind][value])||value;
+    const pick=group.querySelector('input[type=color]'); if(pick) pick.value=value;
+  });
+}
+function styleUI(){
+  document.querySelectorAll('.style-swatches').forEach(wrap=>{
+    if(wrap.childElementCount) return;
+    const kind=wrap.dataset.style;
+    (STYLE_SWATCHES[kind]||[]).forEach(hex=>{
+      const b=document.createElement('button'); b.type='button'; b.dataset.hex=hex; b.style.background=hex;
+      b.title=(STYLE_LABELS[kind]&&STYLE_LABELS[kind][hex])||hex;
+      b.onclick=()=>styleApply(kind,hex); wrap.appendChild(b);
+    });
+  });
+  document.querySelectorAll('[data-style-picker]').forEach(p=>{
+    if(p.dataset.bound) return; p.dataset.bound='1';
+    p.oninput=()=>styleApply(p.dataset.stylePicker,p.value);
+  });
+  styleMark();
 }
 
 /* ----------------------------------------------------------------- debris */
@@ -4080,6 +4343,7 @@ function ttLine(){
     return;
   }
   TT.last=TT.t;
+  recHistory(TT.t);
   const rec = TT.best===null || TT.t<TT.best;
   if(rec){
     TT.best=TT.t;
@@ -4137,8 +4401,9 @@ function ttHUD(){
    round the circle where it wraps, so a lap recorded at 20 Hz plays back as
    smoothly as it was driven at 60. */
 const REPLAY_KEY='f1sim.tt.replay.spa22';
+const LAPS_KEY='f1sim.tt.history.spa22';
 const REC_HZ=20;
-const TTREC={ on:false, next:0, frames:[], best:null, playing:false, pt:0, i:0 };
+const TTREC={ on:false, next:0, frames:[], best:null, history:[], playing:false, pt:0, i:0 };
 
 function recStart(){ TTREC.frames=[]; TTREC.next=0; TTREC.on=true; }
 function recStep(t){
@@ -4155,11 +4420,21 @@ function recKeep(lapTime){
   try{ localStorage.setItem(REPLAY_KEY, JSON.stringify(TTREC.best)); }catch(e){}
   replayBtn();
 }
+function recHistory(lapTime){
+  if(!(lapTime>0)) return;
+  TTREC.history=[...(TTREC.history||[]),{t:+lapTime.toFixed(2),at:Date.now()}]
+    .sort((a,b)=>a.t-b.t).slice(0,8);
+  try{ localStorage.setItem(LAPS_KEY,JSON.stringify(TTREC.history)); }catch(e){}
+}
 function recLoad(){
   try{ const d=JSON.parse(localStorage.getItem(REPLAY_KEY)||'null');
        if(d&&Array.isArray(d.f)&&d.f.length>4) TTREC.best=d; }catch(e){}
+  try{ const h=JSON.parse(localStorage.getItem(LAPS_KEY)||'[]');
+       if(Array.isArray(h)) TTREC.history=h.filter(x=>x&&x.t>0).sort((a,b)=>a.t-b.t).slice(0,8); }catch(e){}
+  if(!TTREC.history.length&&TTREC.best) TTREC.history=[{t:+TTREC.best.t,at:0}];
   replayBtn();
 }
+recLoad();
 function replayBtn(){
   const b=document.getElementById('replaybtn');
   if(!b) return;
@@ -4361,17 +4636,24 @@ function tvUpdate(t,dt){
 
    Two frames in a row, not one: a single probe landing in a seam between two
    triangles should never cost somebody a lap. */
-const TL_KEY='f1sim.tt.limits';
-let TL_TOL=1.0;                    // metres past the line before it counts
+const TL_KEY='f1sim.tt.limits.v2';
+const TL_OFF=Infinity;
+let TL_TOL=0;                      // default: very strict, at the white line
 let _tlFrames=0;
 function tlLoad(){
-  try{ const v=localStorage.getItem(TL_KEY); if(v!==null) TL_TOL=parseFloat(v)||0; }catch(e){}
+  try{
+    const v=localStorage.getItem(TL_KEY);
+    if(v==='off') TL_TOL=TL_OFF;
+    else if(v!==null){ const n=parseFloat(v); TL_TOL=isFinite(n)?Math.max(0,n):0; }
+  }catch(e){}
 }
 function tlSet(tol){
-  TL_TOL=tol;
-  try{ localStorage.setItem(TL_KEY,String(tol)); }catch(e){}
-  document.querySelectorAll('#tlpick button').forEach(b=>
-    b.classList.toggle('on', parseFloat(b.dataset.tol)===tol));
+  TL_TOL = tol==='off' || tol===TL_OFF ? TL_OFF : Math.max(0,parseFloat(tol)||0);
+  try{ localStorage.setItem(TL_KEY,TL_TOL===TL_OFF?'off':String(TL_TOL)); }catch(e){}
+  document.querySelectorAll('.limit-choice').forEach(b=>{
+    const v=b.dataset.limit;
+    b.classList.toggle('on',v==='off'?TL_TOL===TL_OFF:TL_TOL!==TL_OFF&&parseFloat(v)===TL_TOL);
+  });
 }
 /* Where the white lines are, measured once off the model's own geometry.
 
@@ -4661,7 +4943,7 @@ function tlWheelOn(lx,lz){
   const st=tlStation(wx,wz);
   if(!st) return true;                  // nothing measured: never take a lap away
   const off=(wx-st.x)*st.rx + (wz-st.z)*st.rz;    // + is right of the line
-  return off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL;
+  return TL_TOL===TL_OFF || (off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL);
 }
 tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>tleShow(!tleOn);
@@ -5579,12 +5861,17 @@ const tmp=new THREE.Vector3();
 const _p2=new THREE.Vector2(), _d2=new THREE.Vector2(), _aim=new THREE.Vector3();
 const _fwd=new THREE.Vector3(), _carP=new THREE.Vector3();
 const _frustum=new THREE.Frustum(), _pmv=new THREE.Matrix4();
-let last=performance.now(), t=0;
+let last=performance.now(), t=0, frameStarted=false;
+function runFrame(){
+  if(frameStarted) return;
+  frameStarted=true; last=performance.now(); requestAnimationFrame(frame);
+}
 
 /* One step of the world. Called at a fixed rate, however fast the picture is
    being drawn -- see frame(). */
 let _stepCount=0;
 function stepWorld(dt){
+  if(!booted || customizerOn) return;
   t+=dt; _stepCount++;
   updateStart(dt);
   if(TTREC.playing){ replayStep(dt); }
@@ -5635,6 +5922,34 @@ function frame(now){
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
   windU.value=t;
+
+  /* The garage is a real inspection view, not a still image. The normal
+     driving placement is bypassed while it is open so the loaded car can
+     rotate slowly on its own lit platform without the lap physics moving it. */
+  if(customizerOn){
+    customizerAngle=(customizerAngle+dt*0.16)%(Math.PI*2);
+    if(carObj){
+      carGroup.position.set(0,RIDE,0);
+      carGroup.rotation.set(0,customizerAngle,0);
+      carGroup.updateMatrixWorld(true);
+    }
+    customizerStage.visible=true;
+    camera.position.set(5.6,2.75,6.3);
+    camera.up.set(0,1,0);
+    camera.lookAt(0,.82,0);
+    camera.fov=42; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    skyDome.position.copy(camera.position);
+    const _dg=performance.now(); renderer.render(scene,camera); PROF.draw+=performance.now()-_dg;
+    return;
+  }
+  customizerStage.visible=false;
+  if(!booted){
+    camera.position.set(5.6,2.75,6.3); camera.lookAt(0,.82,0);
+    camera.fov=42; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    skyDome.position.copy(camera.position);
+    const _idle=performance.now(); renderer.render(scene,camera); PROF.draw+=performance.now()-_idle;
+    return;
+  }
 
   // place the car at (s, n) with its own heading. Matrices must be current
   // before carPoint() reads mount positions off the bodywork.
@@ -5954,15 +6269,86 @@ function maybeStart(){
   updateStatus();
   document.getElementById('tag').firstChild.textContent=TRACK.name;
   document.getElementById('tagsub').textContent =
-    (FREEROAM?'Free roam':(LAP/1000).toFixed(3)+' km')+' · McLaren MCL39';
+    (TRACK.id==='spa22'?'Fast laps':(LAP/1000).toFixed(3)+' km')+' · McLaren MCL39';
   document.getElementById('boot').classList.add('gone');
-  requestAnimationFrame(frame);
+  runFrame();
+  if(pendingReplay){ pendingReplay=false; setTimeout(()=>replayStart(),900); }
 }
 function ready(){ assetsDone=true; maybeStart(); }
 
 const bootEl=document.getElementById('boot');
 const pickEl=document.getElementById('pick');
 const bootMsg=document.getElementById('bootmsg');
+
+function lapBookRefresh(){
+  recLoad();
+  const list=document.getElementById('lapbook-list'), empty=document.getElementById('lapbook-empty'), play=document.getElementById('lapbook-replay');
+  const laps=(TTREC.history&&TTREC.history.length?TTREC.history:(TTREC.best?[{t:TTREC.best.t,at:0}]:[])).slice(0,8);
+  if(!list||!empty) return;
+  list.innerHTML=laps.map((lap,i)=>'<div class="lap-row '+(i===0?'best':'')+'">'
+    +'<span class="rank">'+String(i+1).padStart(2,'0')+'</span>'
+    +'<span class="lap-label">'+(i===0?'Fastest lap':'Recorded lap')+'</span>'
+    +'<b class="lap-time">'+ttFmt(lap.t)+'</b></div>').join('');
+  empty.style.display=laps.length?'none':'';
+  if(play){ play.disabled=!TTREC.best; play.style.opacity=TTREC.best?'1':'.45'; }
+}
+function openLapBook(){
+  lapBookRefresh();
+  const el=document.getElementById('lapbook'); if(!el) return;
+  el.classList.add('open'); el.setAttribute('aria-hidden','false');
+}
+function closeLapBook(){
+  const el=document.getElementById('lapbook'); if(!el) return;
+  el.classList.remove('open'); el.setAttribute('aria-hidden','true');
+}
+function openCustomizer(){
+  styleUI();
+  customizerOn=true; customizerAngle=0; customizerStage.visible=true;
+  const el=document.getElementById('customizer'); if(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
+  bootEl.classList.add('gone');
+  document.body.classList.remove('cinema'); document.body.classList.add('customizer-open');
+  runFrame();
+}
+function closeCustomizer(){
+  customizerOn=false; customizerStage.visible=false;
+  const el=document.getElementById('customizer'); if(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
+  document.body.classList.remove('customizer-open');
+  if(!booted) bootEl.classList.remove('gone');
+}
+
+const homeSettings=document.getElementById('home-settings');
+const homeSettingsToggle=document.getElementById('home-settings-toggle');
+const homeLimitItem=document.getElementById('home-limit-item');
+const homeLimitToggle=document.getElementById('home-limit-toggle');
+homeSettingsToggle.onclick=e=>{
+  e.stopPropagation(); const on=homeSettings.classList.toggle('open');
+  homeSettingsToggle.setAttribute('aria-expanded',String(on));
+};
+homeLimitToggle.onclick=e=>{
+  e.stopPropagation(); const on=homeLimitItem.classList.toggle('open');
+  homeLimitToggle.setAttribute('aria-expanded',String(on));
+};
+document.querySelectorAll('.limit-choice').forEach(b=>b.addEventListener('click',()=>{
+  tlSet(b.dataset.limit);
+  homeLimitItem.classList.add('open');
+  homeLimitToggle.setAttribute('aria-expanded','true');
+}));
+addEventListener('pointerdown',e=>{
+  if(homeSettings&&!homeSettings.contains(e.target)){
+    homeSettings.classList.remove('open'); homeSettingsToggle.setAttribute('aria-expanded','false');
+  }
+});
+document.getElementById('bestlapsbtn').onclick=openLapBook;
+document.getElementById('customize-home').onclick=openCustomizer;
+document.getElementById('lapbook-close').onclick=closeLapBook;
+document.getElementById('lapbook-back').onclick=closeLapBook;
+document.getElementById('customizer-close').onclick=closeCustomizer;
+document.getElementById('lapbook-replay').onclick=()=>{
+  if(!TTREC.best) return;
+  closeLapBook();
+  if(booted) replayStart();
+  else { pendingReplay=true; startTrack('spa22'); }
+};
 
 function startTrack(id){
   const t=TRACKS[id];
