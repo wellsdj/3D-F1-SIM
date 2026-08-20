@@ -106,22 +106,50 @@
      the frame loop and only ever laid out here */
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
-  #boot{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;gap:18px;
-        background:var(--ink);color:var(--paper);font-family:var(--mono);z-index:9;
-        transition:opacity .7s ease}
-  #boot p{margin:0;font-size:11px;letter-spacing:.28em;text-transform:uppercase;opacity:.7}
+  #boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:flex-start;
+        justify-content:flex-start;gap:0;overflow-y:auto;padding:clamp(44px,6vw,86px) clamp(28px,8vw,132px);
+        background:linear-gradient(90deg,rgba(3,7,12,.98) 0%,rgba(3,7,12,.9) 24%,
+        rgba(3,7,12,.47) 55%,rgba(3,7,12,.15) 100%),
+        linear-gradient(180deg,rgba(3,7,12,.2),rgba(3,7,12,.76)),url('home-hero.png') center/cover;
+        color:var(--paper);font-family:var(--mono);z-index:9;transition:opacity .7s ease}
+  #boot:before{content:"";position:absolute;inset:20px;pointer-events:none;border:1px solid rgba(236,234,228,.09);
+               clip-path:polygon(0 0,38% 0,38% 1px,0 1px,0 100%,1px 100%,1px 0)}
+  #boot:after{content:"";position:absolute;left:0;right:0;top:0;height:3px;
+              background:linear-gradient(90deg,var(--amber),#ff5b28 34%,transparent 72%);opacity:.9}
+  #boot p{margin:0;font-size:10px;letter-spacing:.3em;text-transform:uppercase;opacity:.68}
+  #homecopy{position:relative;z-index:1;max-width:560px;margin-bottom:24px}
+  #homecopy .eyebrow{display:flex;align-items:center;gap:10px;color:#ffb020;font-size:10px;
+                      letter-spacing:.28em;text-transform:uppercase;margin-bottom:18px}
+  #homecopy .eyebrow:before{content:"";width:31px;height:2px;background:#ffb020;box-shadow:0 0 14px rgba(255,176,32,.7)}
+  #homecopy h1{margin:0;color:#f4f7fb;font-family:var(--mono);font-size:clamp(42px,6vw,82px);
+              line-height:.92;letter-spacing:-.08em;font-weight:500;text-transform:uppercase}
+  #homecopy h1 em{font-style:normal;color:#ffb020}
+  #homecopy p{max-width:390px;margin:20px 0 0;font-size:11px;line-height:1.8;letter-spacing:.08em;
+              text-transform:uppercase;opacity:.55}
+  #homecopy .spec{display:flex;gap:20px;margin-top:22px;padding-top:12px;border-top:1px solid rgba(236,234,228,.16);
+                   font-size:9px;letter-spacing:.16em;opacity:.55;text-transform:uppercase}
   #bar{width:200px;height:2px;background:rgba(236,234,228,.14);overflow:hidden}
   #bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .3s ease}
   #boot.gone{opacity:0;pointer-events:none}
-  #pick{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
-  #pick button{font-family:var(--mono);cursor:pointer;color:var(--paper);
-        background:rgba(236,234,228,.05);border:1px solid var(--line);
-        border-radius:6px;padding:16px 20px;min-width:210px;text-align:left;
-        transition:background .18s ease,border-color .18s ease}
-  #pick button:hover{background:rgba(242,162,12,.13);border-color:var(--amber)}
-  #pick button b{display:block;font-size:14px;letter-spacing:.14em;
-        text-transform:uppercase;margin-bottom:5px}
-  #pick button span{display:block;font-size:10.5px;letter-spacing:.08em;opacity:.6}
+  #pick{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;width:min(100%,500px)}
+  #pick button{position:relative;overflow:hidden;width:100%;font-family:var(--mono);cursor:pointer;color:var(--paper);
+        background:linear-gradient(105deg,rgba(11,18,27,.88),rgba(17,25,37,.48));border:1px solid rgba(236,234,228,.25);
+        border-radius:3px;padding:17px 52px 15px 20px;min-width:0;text-align:left;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 18px 40px rgba(0,0,0,.22);
+        transition:transform .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease}
+  #pick button:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#ffb020;
+                     box-shadow:0 0 18px rgba(255,176,32,.72)}
+  #pick button:after{content:"↗";position:absolute;right:19px;top:50%;transform:translateY(-50%);color:#ffb020;font-size:23px;
+                     transition:transform .18s ease}
+  #pick button:hover{transform:translateX(6px);background:linear-gradient(105deg,rgba(255,176,32,.2),rgba(17,25,37,.62));
+                     border-color:#ffb020;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 48px rgba(0,0,0,.36)}
+  #pick button:hover:after{transform:translate(4px,-50%)}
+  #pick button b{display:flex;justify-content:space-between;align-items:center;font-size:14px;letter-spacing:.16em;
+        text-transform:uppercase;margin-bottom:7px}
+  #pick button b i{font-style:normal;font-size:9px;color:#ffb020;letter-spacing:.2em;opacity:.9}
+  #pick button span{display:block;font-size:10px;letter-spacing:.12em;opacity:.58;text-transform:uppercase}
+  #pick button small{display:block;margin-top:12px;font-size:8px;letter-spacing:.2em;color:#ffb020;opacity:.7}
+  #pick button small strong{font-size:12px;margin-left:4px}
   /* start gantry lights, mirrored on screen so they read in every camera */
   #lights{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
           display:flex;gap:clamp(5px,.95vw,13px);padding:clamp(6px,1vw,13px);
@@ -146,29 +174,31 @@
            pointer-events:none;opacity:0;transition:opacity .3s ease;z-index:8}
   #golabel.show{opacity:1}
   /* ------------------------------------------------ settings, on the way in */
-  #settings{margin:22px auto 0;max-width:430px;text-align:left}
-  #settings h5{margin:0 0 9px;font-family:var(--mono);font-size:9px;letter-spacing:.34em;
-               text-transform:uppercase;opacity:.5;font-weight:400}
+  #settings{position:relative;z-index:1;margin:18px 0 0;max-width:500px;width:100%;text-align:left;
+            padding:14px 16px;background:rgba(5,10,16,.55);border:1px solid rgba(236,234,228,.13);
+            border-radius:4px;backdrop-filter:blur(10px)}
+  #settings h5{margin:0 0 10px;font-family:var(--mono);font-size:9px;letter-spacing:.34em;
+               text-transform:uppercase;opacity:.62;font-weight:400;color:#dfe7f1}
   #tlpick{display:flex;gap:8px}
   #tlpick button{flex:1;font:inherit;font-family:var(--mono);font-size:10px;letter-spacing:.13em;
                  text-transform:uppercase;color:#dfe7f1;cursor:pointer;
-                 background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.12);
-                 border-radius:9px;padding:11px 12px;text-align:left;line-height:1.5;
-                 transition:background .15s ease,border-color .15s ease}
-  #tlpick button:hover{background:rgba(255,255,255,.09)}
-  #tlpick button.on{background:rgba(255,176,32,.14);border-color:rgba(255,176,32,.55)}
+                 background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.16);
+                 border-radius:3px;padding:11px 12px;text-align:left;line-height:1.5;
+                 transition:background .15s ease,border-color .15s ease,transform .15s ease}
+  #tlpick button:hover{background:rgba(255,255,255,.1);transform:translateY(-2px)}
+  #tlpick button.on{background:rgba(255,176,32,.16);border-color:rgba(255,176,32,.68);box-shadow:inset 3px 0 #ffb020}
   #tlpick button b{display:block;font-size:11.5px;letter-spacing:.1em;margin-bottom:3px}
   #tlpick button span{display:block;opacity:.55;letter-spacing:.06em;text-transform:none;
                       font-size:9.5px}
   #paintnote{}
   /* ------------------------------------------------ customise your car */
-  #paintrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #paintrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   #paintsw{display:flex;gap:7px;flex-wrap:wrap}
-  #paintsw button{width:30px;height:30px;border-radius:50%;cursor:pointer;padding:0;
-                  border:2px solid rgba(255,255,255,.18);transition:transform .12s ease,
-                  border-color .12s ease}
+  #paintsw button{width:28px;height:28px;border-radius:3px;cursor:pointer;padding:0;
+                  border:1px solid rgba(255,255,255,.24);transition:transform .12s ease,
+                  border-color .12s ease,box-shadow .12s ease}
   #paintsw button:hover{transform:scale(1.12)}
-  #paintsw button.on{border-color:#fff;transform:scale(1.15)}
+  #paintsw button.on{border-color:#fff;transform:scale(1.12);box-shadow:0 0 0 2px rgba(255,176,32,.5)}
   #paintpick{width:44px;height:30px;padding:0;border:1px solid rgba(255,255,255,.2);
              border-radius:6px;background:transparent;cursor:pointer}
   #paintreset{font:inherit;font-family:var(--mono);font-size:9px;letter-spacing:.14em;
@@ -176,6 +206,13 @@
               background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
               border-radius:6px;padding:8px 11px}
   #paintreset:hover{background:rgba(255,255,255,.14)}
+
+  #boot #bar{position:relative;z-index:1;margin-top:18px;width:min(100%,500px);height:2px;background:rgba(236,234,228,.17)}
+  #boot #bar i{background:linear-gradient(90deg,#ffb020,#ff5b28);box-shadow:0 0 14px rgba(255,176,32,.6)}
+  @media (max-width:700px){#boot{padding:26px 22px 30px;justify-content:flex-end;background:linear-gradient(180deg,rgba(3,7,12,.18) 0%,rgba(3,7,12,.52) 33%,rgba(3,7,12,.97) 76%),url('home-hero.png') 64% center/cover}
+    #homecopy{margin-bottom:18px}#homecopy h1{font-size:clamp(38px,13vw,66px)}#homecopy p{font-size:9px}
+    #homecopy .spec{font-size:8px;gap:12px}#pick button{padding:14px 48px 13px 16px}#settings{padding:12px;margin-top:14px}
+    #tlpick{flex-direction:column}#settings p.note{font-size:8.5px}}
 
   #settings p.note{margin:11px 2px 0;font-family:var(--mono);font-size:9.5px;
                    letter-spacing:.05em;opacity:.42;line-height:1.75;
@@ -312,9 +349,15 @@
 <div id="ttflash"><div class="big" id="ttflashbig"></div><div class="sub" id="ttflashsub"></div></div>
 
 <div id="boot">
-  <p id="bootmsg">Spa-Francorchamps</p>
+  <p id="bootmsg">System ready // Spa 2022</p>
+  <div id="homecopy">
+    <div class="eyebrow">Circuit 01 · Night run</div>
+    <h1>Own the <em>apex.</em></h1>
+    <p>High-speed free roam on a living circuit. Choose your setup, hit the lights, and find the last tenth.</p>
+    <div class="spec"><span>01 / 01 circuit</span><span>7.00 km live route</span><span>solo session</span></div>
+  </div>
   <div id="pick">
-    <button data-track="spa22"><b>Spa-Francorchamps</b><span>2022 layout · free roam · 102 m of elevation</span></button>
+    <button data-track="spa22"><b>Enter circuit <i>01</i></b><span>Spa 2022 // free roam // 102 m elevation</span><small>Start run <strong>↗</strong></small></button>
   </div>
   <div id="settings">
     <h5>Track limits</h5>
