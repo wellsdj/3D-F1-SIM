@@ -3598,7 +3598,8 @@ const CAMS=[
      the trim that used to be on the arrow keys and shift. Those controls are
      gone: this was the only place anybody left them, so it is the seat now. */
   {name:'Nose cam', p:[0,0.94,0.49], fov:70, zoom:10, shake:1.30},
-  {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35}
+  {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35},
+  {name:'TV',      tv:true, fov:40, zoom:0, shake:0}
 ];
 let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
@@ -3880,6 +3881,7 @@ function ttBuild(){
   TT.rad=Math.max(x1-x0,z1-z0)/2;
   TT.ang0=Math.atan2(carState.wx-TT.cx, carState.wz-TT.cz);   // start over the grid
   tlMeasure(curve,L);
+  tvBuild(curve,L);
 }
 function ttPaint(){
   const pips=document.querySelectorAll('#ttpips i');
@@ -4047,6 +4049,129 @@ function ttHUD(){
   const le=document.getElementById('ttlast'); if(le) le.textContent=ttFmt(TT.last);
 }
 
+
+
+/* --------------------------------------------------------------- TV camera
+   A director rather than a camera. Twenty positions are placed round the lap
+   at load -- one every 350 m, out on the far side of the circuit from its
+   centre, standing on the real ground so none of them ends up buried in the
+   hill -- and the car is handed from one to the next as it comes past, the way
+   a broadcast does it.
+
+   The lens does the work a long lens does: focal length is set from how far
+   away the car actually is, so a car 300 m up the road is a tight shot and one
+   going past at twenty metres is wide. That is what makes a fixed camera look
+   like television rather than like a security camera.
+
+   Between the trackside shots the director cuts to the onboard views -- the
+   airbox camera above the driver's head, the tip of the nose -- and to the
+   helicopter, which sits well back and high and turns with the car. Every
+   fourth shot is one of those, so a lap is not twenty identical passes.
+
+   The aim is eased rather than snapped. A camera that tracks a car perfectly
+   looks computed; one that lags it by a hair looks operated. */
+const TV_N=20, TV_SPECIAL_EVERY=4;
+let tvCams=[], tvShot=null, tvCut=0, tvSeq=0;
+const _tvAim=new THREE.Vector3(), _tvTo=new THREE.Vector3(), _tvP=new THREE.Vector3();
+
+function tvBuild(curve,L){
+  tvCams=[];
+  if(!curve||!L) return;
+  const P=new THREE.Vector3(), T=new THREE.Vector3();
+  for(let k=0;k<TV_N;k++){
+    const u=k/TV_N;
+    curve.getPointAt(u,P); curve.getTangentAt(u,T);
+    const tl=Math.hypot(T.x,T.z)||1, dx=T.x/tl, dz=T.z/tl;
+    // out, away from the middle of the circuit, so the camera looks inward
+    let ox=P.x-TT.cx, oz=P.z-TT.cz;
+    const ol=Math.hypot(ox,oz)||1; ox/=ol; oz/=ol;
+    /* Every third one is a close, low camera: the car fills the frame and is
+       gone again, which is the shot that sells the speed on a straight. */
+    const close=(k%3===2);
+    const out=close ? 13+ (k%2)*4 : 30+(k%4)*9;
+    const up =close ? 2.2 : 9+(k%3)*4.5;
+    const x=P.x+ox*out, z=P.z+oz*out;
+    const g=groundAt(x,z,1e9);
+    tvCams.push({ x, y:(g.hit?g.y:P.y)+up, z, s:u*L, close,
+                  fx:dx, fz:dz });
+  }
+  console.log('tv: '+tvCams.length+' trackside cameras');
+}
+/* The shot the car is in: the camera it is closest to, searched round the lap
+   in distance along the line rather than through the air, so the far side of a
+   hairpin cannot steal it. */
+function tvNearest(s){
+  let bi=0, bd=Infinity;
+  for(let i=0;i<tvCams.length;i++){
+    let d=Math.abs(tvCams[i].s-s);
+    if(d>TT.len/2) d=TT.len-d;
+    if(d<bd){ bd=d; bi=i; }
+  }
+  return bi;
+}
+function tvPick(t){
+  tvSeq++;
+  const i=tvNearest(tvCarS());
+  if(tvSeq%TV_SPECIAL_EVERY===0){
+    const kinds=['heli','airbox','nose','fixed'];
+    tvShot={ kind:kinds[(tvSeq/TV_SPECIAL_EVERY|0)%kinds.length], i, born:t };
+  } else {
+    tvShot={ kind:'track', i, born:t };
+  }
+  tvCut=i;
+}
+/* Where the car is round the lap, for the director. Track limits already
+   works this out every frame for the delta, so it costs nothing here. */
+function tvCarS(){ return tlSt.length ? (tlIdx/tlSt.length)*TT.len : 0; }
+
+function tvUpdate(t,dt){
+  if(!tvCams.length){ return false; }
+  const s=tvCarS();
+  const near=tvNearest(s);
+  // a new shot when the car reaches a new camera, or when one has run long
+  if(!tvShot || near!==tvCut || t-tvShot.born>9) tvPick(t);
+
+  const car=carGroup.position, h=carState.hdg;
+  const hx=Math.sin(h), hz=Math.cos(h);
+  const base=car.y-RIDE;
+  _tvTo.set(car.x+hx*carState.speed*0.35, car.y+0.4, car.z+hz*carState.speed*0.35);
+  if(_tvAim.lengthSq()===0) _tvAim.copy(_tvTo);
+  _tvAim.lerp(_tvTo, 1-Math.pow(0.0009,dt));      // eased: operated, not computed
+
+  const k=tvShot.kind;
+  if(k==='airbox'){
+    camera.position.copy(pointOn(carObj,carGroup,0,1.28,-0.35));
+    camera.lookAt(car.x+hx*30, base+1.4, car.z+hz*30);
+    camera.fov=62;
+  } else if(k==='nose'){
+    camera.position.copy(pointOn(carObj,carGroup,0,0.42,2.42));
+    camera.lookAt(car.x+hx*40, base+0.9, car.z+hz*40);
+    camera.fov=70;
+  } else if(k==='heli'){
+    const a=h+Math.PI;                     // behind, and it swings round with the car
+    camera.position.set(car.x+Math.sin(a)*62, base+34, car.z+Math.cos(a)*62);
+    clearGround(camera.position,6);
+    camera.lookAt(_tvAim);
+    camera.fov=34;
+  } else if(k==='fixed'){
+    /* Following, but never turning with the car: the offset is in world axes,
+       so the car rotates inside the frame instead of the world rotating around
+       it. */
+    camera.position.set(car.x+26, base+11, car.z+26);
+    clearGround(camera.position,2);
+    camera.lookAt(_tvAim);
+    camera.fov=38;
+  } else {
+    const c=tvCams[tvShot.i];
+    camera.position.set(c.x,c.y,c.z);
+    camera.lookAt(_tvAim);
+    const d=Math.hypot(c.x-car.x, c.z-car.z);
+    // the lens: keep the car about a sixth of the frame, within reason
+    camera.fov=clamp(2*Math.atan(17/Math.max(d,8))*180/Math.PI, 9, 52);
+  }
+  camera.up.set(0,1,0);
+  return true;
+}
 
 /* -------------------------------------------------------- track limits
    The white line is the track. Past it is the kerb, and past that the grass,
@@ -5233,6 +5358,9 @@ window.SIM={
     out.sort((a,b)=>b.tris-a.tris);
     return {total:out.reduce((a,q)=>a+q.tris,0), count:out.length, top:out.slice(0,16)};
   },
+  tv(){ return {cams:tvCams.length, shot:tvShot&&tvShot.kind, i:tvShot&&tvShot.i,
+                camY:tvShot&&tvShot.kind==='track'&&tvCams[tvShot.i]?+tvCams[tvShot.i].y.toFixed(1):null}; },
+  setCam(i){ camMode=i%CAMS.length; orbit=false; freeLook=false; updateStatus(); return CAMS[camMode].name; },
   prof(){
     const f=Math.max(1,PROF.frames), i=renderer.info;
     const r={ frames:PROF.frames, fps:+_simFps.toFixed(1),
@@ -5437,7 +5565,10 @@ function frame(now){
     return v;
   };
 
-  if(orbit){
+  if(C.tv && !orbit && !freeLook && FREEROAM && tvUpdate(t,dt)){
+    camera.updateProjectionMatrix();
+  }
+  else if(orbit){
     const cx=vGroup.position.x, cz=vGroup.position.z;
     camera.position.set(
       cx+Math.sin(orbYaw)*Math.cos(orbPitch)*orbDist,
