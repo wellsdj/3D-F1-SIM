@@ -332,7 +332,9 @@
   #qualifying-load .load-status{font-size:9px;letter-spacing:.18em;opacity:.48}
   #qualifying-load .load-weather{display:grid;gap:10px;width:min(92vw,560px);margin-top:10px;text-align:left}
   #qualifying-load .weather-kicker{font-size:8px;letter-spacing:.24em;text-align:center;color:rgba(244,247,251,.58)}
-  #qualifying-load .weather-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  #qualifying-load .weather-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;
+                                    opacity:1;transform:none;transition:opacity .36s ease,transform .36s ease}
+  #qualifying-load .weather-options.fading{opacity:0;transform:translateY(7px) scale(.98);pointer-events:none}
   #qualifying-load .weather-choice{display:grid;gap:5px;min-height:62px;padding:12px 13px;text-align:left;
                                     color:var(--paper);font:inherit;background:rgba(7,14,23,.58);
                                     border:1px solid rgba(236,234,228,.2);border-radius:3px;cursor:pointer;
@@ -2179,6 +2181,36 @@ const skyDome=new THREE.Mesh(new THREE.SphereGeometry(3400,32,18), skyMat);
 skyDome.frustumCulled=false;
 scene.add(skyDome);
 
+/* A very small, deterministic star field for the night preset. The points
+   live just inside the sky dome and follow the camera, so they read as distant
+   stars rather than drifting particles. They are kept above the horizon and
+   rendered without depth writes so the sky remains a clean backdrop. */
+const starPositions=new Float32Array(220*3);
+const starRand=mulberry32(20260820);
+for(let i=0;i<220;i++){
+  const az=starRand()*Math.PI*2;
+  const y=.10+starRand()*.86;
+  const r=Math.sqrt(Math.max(0,1-y*y));
+  const radius=3200+starRand()*140;
+  starPositions[i*3]=Math.cos(az)*r*radius;
+  starPositions[i*3+1]=y*radius;
+  starPositions[i*3+2]=Math.sin(az)*r*radius;
+}
+const starGeo=new THREE.BufferGeometry();
+starGeo.setAttribute('position',new THREE.BufferAttribute(starPositions,3));
+const nightStars=new THREE.Points(starGeo,new THREE.PointsMaterial({
+  color:0xd9e7ff,size:1.35,sizeAttenuation:false,transparent:true,opacity:.78,
+  depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending
+}));
+nightStars.frustumCulled=false;
+nightStars.renderOrder=2;
+nightStars.visible=false;
+scene.add(nightStars);
+function centerNightStars(view){
+  nightStars.position.copy(view.position);
+  nightStars.visible=timeOfDay==='night'&&!customizerOn;
+}
+
 /* ----------------------------------------------------------------- lights */
 const raceHemi = new THREE.HemisphereLight(sRGB(0x9fc3e2).getHex(), sRGB(0x4d4a30).getHex(), 0.72);
 scene.add(raceHemi);
@@ -3131,6 +3163,7 @@ function applyTimeOfDay(kind){
   customTop.color.copy(sRGB(p.sun));
   customTop.intensity=p.sunIntensity;
   customTop.position.copy(SUN_DIR).multiplyScalar(10);
+  nightStars.visible=timeOfDay==='night'&&!customizerOn;
   document.body.dataset.timeOfDay=timeOfDay;
 }
 applyTimeOfDay('midday');
@@ -4897,7 +4930,7 @@ function goHome(){
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   document.body.classList.remove('cinema');
   const tt=document.getElementById('tt'); if(tt) tt.classList.remove('show');
-  const b=document.getElementById('boot'); if(b) b.classList.remove('gone');
+  const b=document.getElementById('boot'); if(b){ b.classList.remove('gone'); b.style.opacity=''; }
   if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
   const nb=document.getElementById('netbtn'); if(nb) nb.classList.remove('on');
@@ -7007,6 +7040,7 @@ function frame(now){
     camera.lookAt(0,1.02,-.75);
     camera.fov=43; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
+    centerNightStars(camera);
     /* Hide the driving lights while the garage is rendered, then restore
        them before returning. This gives the preview exactly the same colour
        response as a lap without doubling the directional key. */
@@ -7039,6 +7073,7 @@ function frame(now){
     camera.position.set(5.6,2.75,6.3); camera.lookAt(0,.82,0);
     camera.fov=42; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
+    centerNightStars(camera);
     const _idle=performance.now(); renderer.render(scene,camera); PROF.draw+=performance.now()-_idle;
     return;
   }
@@ -7119,6 +7154,7 @@ function frame(now){
   if(m2On){
     m2Sync();
     skyDome.position.set(m2Cam.position.x, 0, m2Cam.position.z);
+    centerNightStars(m2Cam);
     renderer.render(scene, m2Cam);
     return;
   }
@@ -7141,6 +7177,7 @@ function frame(now){
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
+    centerNightStars(camera);
     { const _d0=performance.now(); renderer.render(scene,camera);
     PROF.draw+=performance.now()-_d0; }
     return;
@@ -7159,6 +7196,7 @@ function frame(now){
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
+    centerNightStars(camera);
     renderer.render(scene,camera);
     return;
   }
@@ -7271,6 +7309,7 @@ function frame(now){
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   skyDome.position.copy(camera.position);   // the dome is finite; keep it centred
+  centerNightStars(camera);
 
   // cull the forest a cell at a time -- instanced meshes carry no usable
   // bounding sphere, so the test has to be ours
@@ -7395,6 +7434,8 @@ function qualifyingLoadSetStatus(text){
 function qualifyingWeatherReset(){
   qualifyingWeatherChoice='';
   qualifyingStartQueued=false;
+  const options=qualifyingWeatherEl&&qualifyingWeatherEl.querySelector('.weather-options');
+  if(options) options.classList.remove('fading');
   qualifyingWeatherButtons.forEach(btn=>{
     btn.classList.remove('on');
     btn.setAttribute('aria-pressed','false');
@@ -7419,10 +7460,13 @@ function qualifyingChooseWeather(kind){
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
   qualifyingWeatherChoice=kind;
   applyTimeOfDay(kind);
+  const options=qualifyingWeatherEl&&qualifyingWeatherEl.querySelector('.weather-options');
+  if(options) options.classList.add('fading');
   qualifyingWeatherButtons.forEach(btn=>{
     const on=btn.dataset.weather===kind;
     btn.classList.toggle('on',on);
     btn.setAttribute('aria-pressed',on?'true':'false');
+    btn.disabled=true;
   });
   if(qualifyingTrackReady) qualifyingBegin();
   else qualifyingLoadSetStatus('Loading '+(TRACK&&TRACK.name||'the circuit'));
@@ -7458,8 +7502,12 @@ function qualifyingLoadShow(text,allowWeather=true){
   qualifyingLoadSetStatus(text||'Choose session lighting');
   qualifyingLoadEl.classList.add('active');
   qualifyingLoadEl.setAttribute('aria-hidden','false');
+  qualifyingLoadEl.style.opacity='1';
+  qualifyingLoadEl.style.visibility='visible';
+  qualifyingLoadEl.style.pointerEvents='auto';
   document.body.classList.add('qualifying-loading');
   bootEl.classList.add('gone');
+  bootEl.style.opacity='0';
   /* The supplied intro clip can be dropped in as qualifying-intro.mp4. A
      quiet HEAD check keeps the poster fallback clean until that asset exists. */
   if(qualifyingLoadVideo&&!qualifyingVideoChecked){
@@ -7481,6 +7529,9 @@ function qualifyingLoadHide(immediate=false){
   const finish=()=>{
     qualifyingLoadEl.classList.remove('active');
     qualifyingLoadEl.setAttribute('aria-hidden','true');
+    qualifyingLoadEl.style.opacity='0';
+    qualifyingLoadEl.style.visibility='hidden';
+    qualifyingLoadEl.style.pointerEvents='none';
     document.body.classList.remove('qualifying-loading');
     if(qualifyingLoadVideo) qualifyingLoadVideo.pause();
   };
@@ -7494,6 +7545,7 @@ function qualifyingLoadFail(text){
     qualifyingLoadHide(true);
     pickEl.style.display='';
     bootEl.classList.remove('gone');
+    bootEl.style.opacity='';
   },1400);
 }
 
