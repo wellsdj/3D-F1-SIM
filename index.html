@@ -81,6 +81,16 @@
   #m2hint{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:2;
           font-family:var(--mono);font-size:10px;letter-spacing:.1em;opacity:.45;
           color:#dfe7f1;text-transform:none}
+  /* Shown only while you are on the circuit, and it goes away for the opening
+     shots along with the rest of the overlay. */
+  #homebtn{position:fixed;right:18px;top:18px;z-index:9;display:none;
+           font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+           text-transform:uppercase;color:var(--paper);cursor:pointer;
+           background:rgba(10,13,19,.68);border:1px solid rgba(255,255,255,.16);
+           border-radius:7px;padding:8px 12px;backdrop-filter:blur(6px)}
+  #homebtn.on{display:block}
+  #homebtn:hover{background:rgba(255,255,255,.16)}
+  body.cinema #homebtn{opacity:0;pointer-events:none;transition:opacity .4s ease}
   #tlbtn{position:fixed;right:18px;top:96px;z-index:8;font-family:var(--mono);
          font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
          background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:4px;
@@ -450,6 +460,7 @@
     <button id="m2close">Done</button>
   </div>
 </div>
+<button id="homebtn">&larr; Home</button>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
 <div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b></div>
@@ -4461,6 +4472,7 @@ function ttStart(cinematic=true){
   startPhase='hold'; startT=0; holdFor=1e9;      // held until the lights go out
   lightsEl.classList.remove('show');
   document.getElementById('tt').classList.add('show');
+  const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
   ttHUD();
   return true;
 }
@@ -4657,17 +4669,26 @@ function replayStart(){
 /* Stopping a replay puts you back on the home screen rather than on the grid.
    You came here to watch a lap, not to drive one, so the way out is the way
    you came in. The circuit stays loaded behind it, so going again is instant. */
+/* Back to the home screen from wherever you are: the trial stands down, any
+   replay stops, the circuit stays loaded behind it so going again is instant,
+   and the entry button -- which startTrack hides on the way in -- comes back,
+   or the home screen would have no way off it. */
+function goHome(){
+  TTREC.playing=false;
+  TT.live=false;
+  const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
+  document.body.classList.remove('cinema');
+  const tt=document.getElementById('tt'); if(tt) tt.classList.remove('show');
+  const b=document.getElementById('boot'); if(b) b.classList.remove('gone');
+  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
+  const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
+  replayBtn(); homeReplayUI();
+}
 function replayStop(){
   TTREC.playing=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   replayBtn();
-  TT.live=false;
-  document.body.classList.remove('cinema');
-  const b=document.getElementById('boot');
-  if(b) b.classList.remove('gone');
-  // startTrack hid the entry button on the way in; it is the way back in too
-  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
-  homeReplayUI();
+  goHome();
 }
 /* And going back in from the home screen with the circuit already loaded: no
    reloading, no second startTrack, just the lights again. */
@@ -5422,6 +5443,7 @@ function tlWheelOn(lx,lz){
 tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
 document.getElementById('m2close').onclick=()=>m2Show(false);
+document.getElementById('homebtn').onclick=goHome;
 document.getElementById('m2in').onclick=()=>{ m2Edge=0;
   document.getElementById('m2in').classList.add('on');
   document.getElementById('m2out').classList.remove('on'); m2Fit(); m2Draw(); };
