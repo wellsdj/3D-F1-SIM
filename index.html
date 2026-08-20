@@ -3577,7 +3577,7 @@ addEventListener('keydown',e=>{
       carState.wx=g.x; carState.wz=g.z; carState.hdg=Math.atan2(g.dx,g.dz);
       carState.speed=0; PLAYER.steerIn=0; PLAYER.steerAng=0;
       PLAYER.groundY=g.y+RIDE; clearDebris();
-      ttStart();
+      ttStart(false);                 // restart at the countdown, not the drone shots
     } else resetToTrack();
   }
   if(k==='g') armStart();                            // back to the grid, new sequence
@@ -3936,14 +3936,17 @@ function ttSaveBest(){
   }catch(e){}
   TT.bestSplits=TT.splits.slice();
 }
-function ttStart(){
+function ttStart(cinematic=true){
   ttBuild();
   if(!TT.gates.length) return;
   try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b;
        const sp=JSON.parse(localStorage.getItem(TT_SPLITS_KEY)||'null');
        if(Array.isArray(sp)&&sp.length) TT.bestSplits=sp; }catch(e){}
-  TT.live=true; TT.drone=TT_DRONE; TT.cd=TT_COUNT; TT.shown=-1; TT.armed=false;
-  document.body.classList.add('cinema');
+  TT.live=true; TT.drone=cinematic?TT_DRONE:0; TT.cd=TT_COUNT; TT.shown=-1; TT.armed=false;
+  document.body.classList.toggle('cinema',cinematic);
+  if(!cinematic && scene.fog && TT._fog!==undefined){
+    scene.fog.density=TT._fog; TT._fog=undefined;
+  }
   ttReset();
   TT.prevX=carState.wx; TT.prevZ=carState.wz;
   carState.speed=0;
