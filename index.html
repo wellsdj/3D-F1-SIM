@@ -3156,7 +3156,6 @@ const WHEELBASE=3.60;
     styleApply('ring',carStyle.ring,false);
     styleApply('wing',carStyle.wing,false);
     styleApply('rims',carStyle.rims,false);
-    paintUI();
     styleUI();
 
     for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
@@ -3411,15 +3410,13 @@ function paintCar(hex){
   }
 }
 
-/* The swatches on the way in. Eight liveries worth having and a picker for
-   anything else, applied the moment you choose so the car is already yours by
-   the time you are on the circuit. */
-const PAINT_SWATCHES=['#ff8000','#e2001a','#00a3e0','#00352f','#0600ef',
-                      '#b6babd','#111418','#f6d200','#ff87bc','#6cd3bf'];
-/* The home screen asks the same question the in-game button does, before any
-   circuit is loaded: the best lap lives in storage, so it can be read straight
-   from there. The button is always on the page -- greyed when there is nothing
-   to watch, which tells you the feature exists and what to do about it. */
+/* The paint swatches that lived on the old home screen went with it when the
+   screen was redesigned; the car's colours are set in the garage now. paintCar
+   and paintPrepare below are still the things that do the work -- only the old
+   controls are gone. */
+/* The home screen's own best-lap button. That screen has been redesigned twice
+   under this function, so it checks for its element rather than assuming it --
+   and it stays, because goHome calls it every time you leave the circuit. */
 function homeReplayUI(){
   const b=document.getElementById('homereplay');
   if(!b) return;
@@ -3428,34 +3425,8 @@ function homeReplayUI(){
        if(d&&Array.isArray(d.f)&&d.f.length>4) best=d.t; }catch(e){}
   b.disabled=!best;
   b.textContent = best ? ('Watch your best lap · '+ttFmt(best)) : 'No lap yet — drive one first';
-  b.onclick=()=>{ if(!best) return;
-    window._autoReplay=true;
-    const go=document.querySelector('#pick button[data-track]');
-    if(go) go.click();
-  };
-}
-function paintUI(){
-  const wrap=document.getElementById('paintsw');
-  if(!wrap||wrap.childElementCount) return;
-  PAINT_SWATCHES.forEach(hex=>{
-    const b=document.createElement('button');
-    b.style.background=hex; b.dataset.hex=hex;
-    b.onclick=()=>paintPick(hex);
-    wrap.appendChild(b);
-  });
-  const pick=document.getElementById('paintpick');
-  if(pick) pick.oninput=()=>paintPick(pick.value);
-  const rst=document.getElementById('paintreset');
-  if(rst) rst.onclick=()=>{ paintCar(null); carPaint=null; paintSave(); paintMark(); };
-  paintMark();
-}
-function paintPick(hex){
-  paintCar(hex); carPaint=hex; paintSave(); paintMark();
-  const pick=document.getElementById('paintpick'); if(pick) pick.value=hex;
-}
-function paintMark(){
-  document.querySelectorAll('#paintsw button').forEach(b=>
-    b.classList.toggle('on', carPaint && b.dataset.hex.toLowerCase()===carPaint.toLowerCase()));
+  b.onclick=()=>{ if(!best) return; window._autoReplay=true;
+    const go=document.querySelector('#pick button[data-track]'); if(go) go.click(); };
 }
 function paintLoad(){
   try{ const v=localStorage.getItem(PAINT_KEY); if(v) carPaint=v; }catch(e){}
@@ -4774,12 +4745,14 @@ function replayBtn(){
 }
 function replayStart(){
   if(!TTREC.best||!TTREC.best.f.length) return;
+  netLabel();
   /* Immediate, not held: the loading screen's ten-second minimum is there so
      the walk out to the car has room to breathe, and there is no walk out to a
      replay. Whatever is left of it goes now. */
   if(typeof qualifyingLoadHide==='function') qualifyingLoadHide(true);
   TTREC.playing=true; TTREC.pt=0; TTREC.i=0;
   TT.live=false;                       // the trial stands down while this runs
+  netLabel();                          // and nobody can join a recording
   document.body.classList.remove('cinema');   // or the whole overlay stays faded out
   document.getElementById('tt').classList.remove('show');
   const r=document.getElementById('replaybar'); if(r) r.classList.add('show');
@@ -5094,7 +5067,11 @@ function netLabel(){
   if(!el) return;
   el.textContent = NET.code ? NET.code : '……';
   const w=document.getElementById('netwrap');
-  if(w) w.classList.toggle('on', !!NET.code && !NET.watching);
+  /* Only while you are actually driving. Watching your own replay is not
+     something anybody can join, and offering a code there is just confusing --
+     which is exactly what it looked like. */
+  const driving = !!NET.code && !NET.watching && !TTREC.playing && TT.live;
+  if(w) w.classList.toggle('on', driving);
 }
 /* Start broadcasting. Called when a session starts; harmless if it fails,
    because nothing else depends on it. */
@@ -5160,6 +5137,7 @@ function netWatch(code){
       document.body.classList.remove('cinema');
       const tt=document.getElementById('tt'); if(tt) tt.classList.remove('show');
       netPanel(false);
+      netLabel();                    // your own code goes away while you watch
       const bar=document.getElementById('netbar');
       if(bar){ bar.classList.add('show');
                document.getElementById('netbarcode').textContent=code; }
@@ -5181,6 +5159,7 @@ function netStopWatch(why){
   const bar=document.getElementById('netbar'); if(bar) bar.classList.remove('show');
   try{ if(NET.peer) NET.peer.destroy(); }catch(_){}
   NET.peer=null; NET.live=false; NET.code=null;
+  netLabel();
   if(why) netStatus(why);
   goHome();
 }
@@ -6782,16 +6761,16 @@ window.SIM={
   },
   tv(){ return {cams:tvCams.length, cuts:NET.cuts||0, shot:tvShot&&tvShot.kind, i:tvShot&&tvShot.i,
                 camY:tvShot&&tvShot.kind==='track'&&tvCams[tvShot.i]?+tvCams[tvShot.i].y.toFixed(1):null}; },
-  fakeLap(){        // drive a lap out of the recorder without waiting two minutes
-    recStart();
-    const f=[];
-    for(let i=0;i<=600;i++){
-      const t=i/20, u=(i/600)%1;
-      const a=window.SIM.at(u*TT.len);
-      f.push([+t.toFixed(2), +a.x.toFixed(2), +a.z.toFixed(2), +a.hdg.toFixed(3), 55, 0]);
+  fakeLap(kph){        // a lap at a believable speed, recorded the way a real one is
+    const v=(kph||200)/3.6, hz=30, f=[];
+    let d=0, t=0;
+    while(d<TT.len){
+      const a=window.SIM.at(d);
+      f.push([+t.toFixed(2), +a.x.toFixed(2), +a.z.toFixed(2), +a.hdg.toFixed(3), +v.toFixed(1), 0]);
+      d+=v/hz; t+=1/hz;
     }
-    TTREC.frames=f; recKeep(30.0);
-    return {frames:f.length, bytes:(localStorage.getItem(REPLAY_KEY)||'').length};
+    recStart(); TTREC.frames=f; recKeep(+t.toFixed(2));
+    return {frames:f.length, seconds:+t.toFixed(1)};
   },
   at(s){
     if(!TT.curve||!TT.len) return null;
