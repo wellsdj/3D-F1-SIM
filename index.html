@@ -81,6 +81,16 @@
   #m2hint{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:2;
           font-family:var(--mono);font-size:10px;letter-spacing:.1em;opacity:.45;
           color:#dfe7f1;text-transform:none}
+  /* Shown only while you are on the circuit, and it goes away for the opening
+     shots along with the rest of the overlay. */
+  #homebtn{position:fixed;right:18px;top:18px;z-index:9;display:none;
+           font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+           text-transform:uppercase;color:var(--paper);cursor:pointer;
+           background:rgba(10,13,19,.68);border:1px solid rgba(255,255,255,.16);
+           border-radius:7px;padding:8px 12px;backdrop-filter:blur(6px)}
+  #homebtn.on{display:block}
+  #homebtn:hover{background:rgba(255,255,255,.16)}
+  body.cinema #homebtn{opacity:0;pointer-events:none;transition:opacity .4s ease}
   #tlbtn{position:fixed;right:18px;top:96px;z-index:8;font-family:var(--mono);
          font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
          background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:4px;
@@ -234,6 +244,16 @@
   #homereplay:hover:not(:disabled){background:rgba(255,176,32,.14);
               border-color:rgba(255,176,32,.5)}
   #homereplay:disabled{opacity:.4;cursor:default}
+  .ctrl-row{display:flex;align-items:center;gap:7px;padding:5px 2px;font-size:10px;
+            letter-spacing:.06em;text-transform:none;color:#dfe7f1;opacity:.85}
+  .ctrl-row span{opacity:.72}
+  .ctrl-row .ctrl-note{opacity:.45;font-style:italic}
+  .ctrl-row kbd{font:inherit;font-size:9px;border:1px solid rgba(255,255,255,.22);
+                border-radius:3px;padding:2px 6px;background:rgba(0,0,0,.35)}
+  /* Gone from the screen, kept in the file: the key legend now lives in the
+     settings menu, and these two were tools rather than controls. */
+  #keys{display:none!important}
+  #tlbtn,#replaybtn{display:none!important}
   #paintrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   #paintsw{display:flex;gap:7px;flex-wrap:wrap}
   #paintsw button{width:28px;height:28px;border-radius:3px;cursor:pointer;padding:0;
@@ -457,6 +477,7 @@
     <button id="m2close">Done</button>
   </div>
 </div>
+<button id="homebtn">&larr; Home</button>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
 <div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b></div>
@@ -534,6 +555,19 @@
           <button class="limit-choice" data-limit="0"><b>Very strict</b><span>Cross the white line and the lap is gone.</span></button>
           <button class="limit-choice" data-limit="1"><b>Relaxed</b><span>A metre past the white line before it counts.</span></button>
           <button class="limit-choice" data-limit="off"><b>Off</b><span>Track limits never delete a lap.</span></button>
+        </div>
+      </div>
+      <div class="settings-item" id="home-controls-item">
+        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="false">Controls <i>&rsaquo;</i></button>
+        <div class="limit-dropdown" id="home-controls-dropdown">
+          <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
+          <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
+          <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV director</span></div>
+          <div class="ctrl-row"><kbd>R</kbd><span>Restart the lap from the line</span></div>
+          <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
+          <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
+          <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
+          <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
       </div>
     </div>
@@ -1277,6 +1311,24 @@ function fixSceneryMaterials(root){
    drops building walls, barrier faces and the backdrop, so the car cannot end
    up perched on the side of something. */
 let roadMesh=null;      // the racing surface, for track limits
+/* Where a session starts, set once when the circuit is placed. Everything that
+   puts the car back -- R, the countdown, coming out of a replay -- uses this,
+   so a restart is the same restart every time. R used to put the car on the
+   first gate instead, which sits a little up the road from the grid, so every
+   restart crept forward; and the opening shot framed wherever the car happened
+   to be standing, which after a replay was somewhere else entirely. */
+let SPAWN=null;
+function goToStart(){
+  if(!SPAWN) return false;
+  carState.wx=SPAWN.x; carState.wz=SPAWN.z; carState.hdg=SPAWN.hdg;
+  carState.speed=0; carState.psi=0; carState.n=0;
+  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
+  const g=groundAt(SPAWN.x,SPAWN.z,1e9);
+  PLAYER.groundY=(g.hit?g.y:0)+RIDE;
+  carGroup.position.set(SPAWN.x, PLAYER.groundY, SPAWN.z);
+  clearDebris();
+  return true;
+}
 const HF={cell:6, minx:0, minz:0, nx:0, nz:0, bins:null, tri:null, tag:null};
 /* Which surfaces are loose. This model names its materials properly, so the
    gravel traps are found by name rather than guessed at from colour: sand_new
@@ -4070,7 +4122,6 @@ addEventListener('keydown',e=>{
     if(!markMode && markPts.length>1){ markLines.push(markPts); markPts=[]; markRedraw(); }
     updateStatus(); }
   if(k==='n'){ markExport(); }
-  if(k==='p'){ gridShow(!gridMode); }
   if(k==='q'){ detailLevel=(detailLevel+1)%DETAILS.length; applyDetail(); }
   if(TTREC.playing && (k==='w'||k==='s'||k==='escape')){ replayStop(); return; }
   if(k==='r'){                                       // back to the line, new lap
@@ -4239,9 +4290,11 @@ function gridLabel(n){
   return s;
 }
 function gridRedraw(){
+  /* The ten slots are data for a grid that does not exist yet, not scenery.
+     They were drawn as cyan posts standing on the start line every session. */
   if(gridGroup){ scene.remove(gridGroup);
     gridGroup.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); }
-  gridGroup=new THREE.Group(); scene.add(gridGroup);
+  gridGroup=new THREE.Group(); gridGroup.visible=false; scene.add(gridGroup);
   const mat=new THREE.LineBasicMaterial({color:0x00ffff,depthTest:false});
   gridPts.forEach((p,i)=>{
     const g=new THREE.BufferGeometry();
@@ -4442,7 +4495,11 @@ function ttSaveBest(){
 function ttStart(cinematic=true){
   qualifyingLoadHide();
   ttBuild();
-  if(!TT.gates.length) return;
+  if(!TT.gates.length) return false;
+  /* Always from the same place. The opening shot frames the car, so without
+     this it framed wherever you happened to have stopped -- which after
+     watching a replay was somewhere else on the circuit entirely. */
+  goToStart();
   try{ const b=parseFloat(localStorage.getItem(TT_KEY)); if(b>0) TT.best=b;
        const sp=JSON.parse(localStorage.getItem(TT_SPLITS_KEY)||'null');
        if(Array.isArray(sp)&&sp.length) TT.bestSplits=sp; }catch(e){}
@@ -4457,7 +4514,9 @@ function ttStart(cinematic=true){
   startPhase='hold'; startT=0; holdFor=1e9;      // held until the lights go out
   lightsEl.classList.remove('show');
   document.getElementById('tt').classList.add('show');
+  const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
   ttHUD();
+  return true;
 }
 function ttStep(dt){
   if(!TT.live) return;
@@ -4582,7 +4641,14 @@ function ttHUD(){
    smoothly as it was driven at 60. */
 const REPLAY_KEY='f1sim.tt.replay.spa22';
 const LAPS_KEY='f1sim.tt.history.spa22';
-const REC_HZ=20;
+/* Thirty samples a second, not twenty, and read back through a cubic rather
+   than a straight line. Linear interpolation is continuous in position but not
+   in velocity: the car changes direction very slightly at every sample, which
+   is invisible from the cockpit and obvious through a TV camera on a long lens
+   three hundred metres away, because the lens magnifies the wobble along with
+   everything else. A Catmull-Rom through the four samples around the moment
+   has no such kinks. */
+const REC_HZ=30;
 const TTREC={ on:false, next:0, frames:[], best:null, history:[], playing:false, pt:0, i:0 };
 
 function recStart(){ TTREC.frames=[]; TTREC.next=0; TTREC.on=true; }
@@ -4645,17 +4711,26 @@ function replayStart(){
 /* Stopping a replay puts you back on the home screen rather than on the grid.
    You came here to watch a lap, not to drive one, so the way out is the way
    you came in. The circuit stays loaded behind it, so going again is instant. */
+/* Back to the home screen from wherever you are: the trial stands down, any
+   replay stops, the circuit stays loaded behind it so going again is instant,
+   and the entry button -- which startTrack hides on the way in -- comes back,
+   or the home screen would have no way off it. */
+function goHome(){
+  TTREC.playing=false;
+  TT.live=false;
+  const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
+  document.body.classList.remove('cinema');
+  const tt=document.getElementById('tt'); if(tt) tt.classList.remove('show');
+  const b=document.getElementById('boot'); if(b) b.classList.remove('gone');
+  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
+  const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
+  replayBtn(); homeReplayUI();
+}
 function replayStop(){
   TTREC.playing=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   replayBtn();
-  TT.live=false;
-  document.body.classList.remove('cinema');
-  const b=document.getElementById('boot');
-  if(b) b.classList.remove('gone');
-  // startTrack hid the entry button on the way in; it is the way back in too
-  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
-  homeReplayUI();
+  goHome();
 }
 /* And going back in from the home screen with the circuit already loaded: no
    reloading, no second startTrack, just the lights again. */
@@ -4673,24 +4748,33 @@ function replayStep(dt){
   const end=f[f.length-1][0];
   if(TTREC.pt>=end){ replayStop(); return; }
   while(TTREC.i<f.length-2 && f[TTREC.i+1][0]<=TTREC.pt) TTREC.i++;
-  const a=f[TTREC.i], b=f[TTREC.i+1];
+  const n=f.length;
+  const at=i=>f[Math.max(0,Math.min(n-1,i))];
+  const a=at(TTREC.i), b=at(TTREC.i+1), p0=at(TTREC.i-1), p3=at(TTREC.i+2);
   const span=Math.max(1e-4,b[0]-a[0]), k=clamp((TTREC.pt-a[0])/span,0,1);
-  carState.wx=a[1]+(b[1]-a[1])*k;
-  carState.wz=a[2]+(b[2]-a[2])*k;
-  let dh=b[3]-a[3];
-  while(dh>Math.PI) dh-=2*Math.PI;      // the short way round, or it spins on the wrap
-  while(dh<-Math.PI) dh+=2*Math.PI;
+  const cr=(v0,v1,v2,v3,t)=>{
+    const t2=t*t, t3=t2*t;
+    return 0.5*((2*v1)+(-v0+v2)*t+(2*v0-5*v1+4*v2-v3)*t2+(-v0+3*v1-3*v2+v3)*t3);
+  };
+  carState.wx=cr(p0[1],a[1],b[1],p3[1],k);
+  carState.wz=cr(p0[2],a[2],b[2],p3[2],k);
+  /* Heading is unwrapped against the sample being interpolated from before it
+     goes through the curve, or the car spins on the wrap. */
+  const un=(h,ref)=>{ let d=h-ref;
+    while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI; return ref+d; };
   const hPrev=carState.hdg;
-  carState.hdg=a[3]+dh*k;
+  carState.hdg=cr(un(p0[3],a[3]), a[3], un(b[3],a[3]), un(p3[3],a[3]), k);
   let turned=carState.hdg-hPrev;
   while(turned>Math.PI) turned-=2*Math.PI;
   while(turned<-Math.PI) turned+=2*Math.PI;
-  carState.speed=a[4]+(b[4]-a[4])*k;
-  PLAYER.steerAng=a[5]+(b[5]-a[5])*k;
-  /* Keep the station pointer moving. It is normally advanced by the time
-     trial, which stands down during a replay -- and the TV director works out
-     which camera the car is at from that pointer, so with it frozen the
-     director sat on its first shot for the whole lap. */
+  carState.speed=cr(p0[4],a[4],b[4],p3[4],k);
+  PLAYER.steerAng=cr(p0[5],a[5],b[5],p3[5],k);
+  /* Keep the station pointer moving. Track limits advances it every frame
+     while you are driving and the TV director reads it to know which camera
+     the car has reached -- so during a replay, with the trial stood down,
+     nothing moved it and the director sat on its first shot for the whole lap.
+     This line was here, and I deleted it myself rewriting the interpolation
+     above; hence the test below, which now watches the camera actually change. */
   tlStation(carState.wx, carState.wz);
   const el=document.getElementById('replayt');
   if(el) el.textContent=ttFmt(TTREC.pt);
@@ -5402,6 +5486,7 @@ function tlWheelOn(lx,lz){
 tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
 document.getElementById('m2close').onclick=()=>m2Show(false);
+document.getElementById('homebtn').onclick=goHome;
 document.getElementById('m2in').onclick=()=>{ m2Edge=0;
   document.getElementById('m2in').classList.add('on');
   document.getElementById('m2out').classList.remove('on'); m2Fit(); m2Draw(); };
@@ -6620,14 +6705,16 @@ function frame(now){
      the whole lap. */
   if(TT.live && TT.drone>TT_NEAR && TT.rad){
     const k=clamp((TT_WIDE-(TT.drone-TT_NEAR))/TT_WIDE,0,1);
-    const ang=TT.ang0+0.55*k, R=TT.rad*(1.45-0.18*k);
+    /* Closer than it was: at 1.45 radii the circuit sat in the middle of a lot
+       of empty valley. This fills the frame with the lap. */
+    const ang=TT.ang0+0.5*k, R=TT.rad*(1.02-0.14*k);
     if(scene.fog){ if(TT._fog===undefined) TT._fog=scene.fog.density;
                    scene.fog.density=TT._fog*0.18; }
-    camera.position.set(TT.cx+Math.sin(ang)*R, TT.cy+TT.rad*(0.92-0.12*k),
+    camera.position.set(TT.cx+Math.sin(ang)*R, TT.cy+TT.rad*(0.66-0.09*k),
                         TT.cz+Math.cos(ang)*R);
     camera.up.set(0,1,0);
     camera.lookAt(TT.cx, TT.cy, TT.cz);
-    camera.fov=46;
+    camera.fov=44;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
@@ -6982,7 +7069,13 @@ function closeCustomizer(){
   customizerOn=false; customizerStage.visible=false;
   const el=document.getElementById('customizer'); if(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
   document.body.classList.remove('customizer-open');
-  if(!booted) bootEl.classList.remove('gone');
+  /* Always back to the home screen. This used to put the home screen back only
+     if you had never been on the circuit, so once you had driven, closing the
+     customiser dropped you onto the track instead -- mid-session, wherever the
+     car happened to be. You opened it from home, so home is where closing it
+     takes you. */
+  bootEl.classList.remove('gone');
+  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
 }
 
 const homeSettings=document.getElementById('home-settings');
@@ -6992,6 +7085,12 @@ const homeLimitToggle=document.getElementById('home-limit-toggle');
 homeSettingsToggle.onclick=e=>{
   e.stopPropagation(); const on=homeSettings.classList.toggle('open');
   homeSettingsToggle.setAttribute('aria-expanded',String(on));
+};
+const homeControlsItem=document.getElementById('home-controls-item');
+const homeControlsToggle=document.getElementById('home-controls-toggle');
+if(homeControlsToggle) homeControlsToggle.onclick=e=>{
+  e.stopPropagation(); const on=homeControlsItem.classList.toggle('open');
+  homeControlsToggle.setAttribute('aria-expanded',String(on));
 };
 homeLimitToggle.onclick=e=>{
   e.stopPropagation(); const on=homeLimitItem.classList.toggle('open');
@@ -7092,6 +7191,7 @@ function startTrack(id){
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
       chunkTrack(root);        // everything above needs the meshes whole; nothing below does
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
+      SPAWN={x:0, z:0, hdg:carState.hdg};      // the one true starting place
       PLAYER.groundY=RIDE; PLAYER.carVY=0;
       carGroup.position.set(0, PLAYER.groundY, 0);
       console.log('spawn: explicit, at model '+sx+', '+sz+' facing '+sdeg+' deg');
