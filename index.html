@@ -409,7 +409,8 @@
            background:rgba(8,14,22,.58);border:1px solid rgba(236,234,228,.15);border-radius:4px}
   .lap-row.best{border-color:rgba(255,176,32,.64);background:rgba(255,176,32,.1)}
   .lap-row .rank{font-size:10px;color:#ffb020;letter-spacing:.15em}
-  .lap-row .lap-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+  .lap-row .lap-label{display:grid;gap:5px;font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+  .lap-row .lap-label small{font-size:7px;letter-spacing:.08em;line-height:1.45;opacity:.48;text-transform:uppercase}
   .lap-row .lap-time{font-size:22px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
   #lapbook-empty{position:relative;z-index:1;margin-top:28px;width:min(100%,560px);padding:20px;border:1px dashed rgba(236,234,228,.2);
                  font-size:10px;letter-spacing:.13em;text-transform:uppercase;opacity:.55}
@@ -4708,7 +4709,8 @@ function ttLine(){
     return;
   }
   TT.last=TT.t;
-  recHistory(TT.t);
+  const lapMeta=lapSnapshot();
+  recHistory(TT.t,lapMeta);
   const rec = TT.best===null || TT.t<TT.best;
   /* Also when there is nothing recorded yet, not only when the lap is quicker.
      A time set before laps were being recorded -- or kept after a recording was
@@ -4718,7 +4720,7 @@ function ttLine(){
   if(rec || !TTREC.best){
     if(rec) TT.best=TT.t;
     ttSaveBest();
-    recKeep(TT.t);
+    recKeep(TT.t,lapMeta);
     ttFlash('rec','NEW BEST',ttFmt(TT.t));
   } else {
     ttFlash('good','LAP '+ttFmt(TT.t),'+'+(TT.t-TT.best).toFixed(2)+' off your best');
@@ -4781,6 +4783,60 @@ const LAPS_KEY='f1sim.tt.history.spa22';
    has no such kinks. */
 const REC_HZ=30;
 const TTREC={ on:false, next:0, frames:[], best:null, history:[], playing:false, pt:0, i:0 };
+let replayContext=null;
+
+/* A replay is more than a path through the circuit. Keep the exact session
+   light and the four independent garage finishes beside the frames, so a
+   later customisation or qualifying choice cannot rewrite what the record
+   looked like when it was set. */
+function liverySnapshot(){
+  return {body:carStyle.body,ring:carStyle.ring,wing:carStyle.wing,rims:carStyle.rims};
+}
+function liveryNormalise(value){
+  if(!value||typeof value!=='object') return null;
+  const out={};
+  for(const k of ['body','ring','wing','rims']){
+    const v=String(value[k]||'').toLowerCase();
+    if(/^#[0-9a-f]{6}$/.test(v)) out[k]=v;
+  }
+  return Object.keys(out).length===4?out:null;
+}
+function lapSnapshot(){
+  const p=TIME_OF_DAY[timeOfDay]||TIME_OF_DAY.midday;
+  return {schema:2,capturedAt:Date.now(),track:TRACK&&TRACK.id||'spa22',
+          conditions:{lighting:timeOfDay,label:p.label,weather:'dry'},livery:liverySnapshot()};
+}
+function replayNormalise(value){
+  if(!value||typeof value!=='object'||!Array.isArray(value.f)||value.f.length<5) return null;
+  const out={...value,t:+value.t,f:value.f};
+  out.capturedAt=Number.isFinite(+value.capturedAt)?+value.capturedAt:(Number.isFinite(+value.at)?+value.at:0);
+  const c=value.conditions&&typeof value.conditions==='object'?value.conditions:null;
+  const lighting=c&&TIME_OF_DAY[c.lighting]?c.lighting:null;
+  out.conditions=lighting?{lighting,label:TIME_OF_DAY[lighting].label,weather:'dry'}:null;
+  out.livery=liveryNormalise(value.livery);
+  return out;
+}
+function replayLiveryApply(value){
+  const l=liveryNormalise(value); if(!l) return false;
+  for(const k of ['body','ring','wing','rims']) carStyle[k]=l[k];
+  carPaint=l.body;
+  for(const k of ['body','ring','wing','rims']) styleApply(k,l[k],false);
+  styleMark(); paintMark();
+  return true;
+}
+function replayMetadataBegin(){
+  if(!TTREC.best) return;
+  replayContext={lighting:timeOfDay,livery:liverySnapshot()};
+  const c=TTREC.best.conditions;
+  if(c&&TIME_OF_DAY[c.lighting]) applyTimeOfDay(c.lighting);
+  replayLiveryApply(TTREC.best.livery);
+}
+function replayMetadataEnd(){
+  if(!replayContext) return;
+  applyTimeOfDay(replayContext.lighting);
+  replayLiveryApply(replayContext.livery);
+  replayContext=null;
+}
 
 function recStart(){ TTREC.frames=[]; TTREC.next=0; TTREC.on=true; }
 function recStep(t){
@@ -4791,24 +4847,32 @@ function recStep(t){
                       +carState.hdg.toFixed(3), +carState.speed.toFixed(1),
                       +PLAYER.steerAng.toFixed(3) ]);
 }
-function recKeep(lapTime){
+function recKeep(lapTime,meta){
   if(!TTREC.frames.length) return;
-  TTREC.best={ t:lapTime, f:TTREC.frames.slice() };
+  const snap=meta||lapSnapshot();
+  TTREC.best={ t:lapTime, f:TTREC.frames.slice(), schema:snap.schema,
+               capturedAt:snap.capturedAt,track:snap.track,conditions:snap.conditions,livery:snap.livery };
   try{ localStorage.setItem(REPLAY_KEY, JSON.stringify(TTREC.best)); }catch(e){}
   replayBtn();
 }
-function recHistory(lapTime){
+function recHistory(lapTime,meta){
   if(!(lapTime>0)) return;
-  TTREC.history=[...(TTREC.history||[]),{t:+lapTime.toFixed(2),at:Date.now()}]
+  const snap=meta||lapSnapshot();
+  TTREC.history=[...(TTREC.history||[]),{t:+lapTime.toFixed(2),at:snap.capturedAt,
+    conditions:snap.conditions,livery:snap.livery}]
     .sort((a,b)=>a.t-b.t).slice(0,8);
   try{ localStorage.setItem(LAPS_KEY,JSON.stringify(TTREC.history)); }catch(e){}
 }
 function recLoad(){
   try{ const d=JSON.parse(localStorage.getItem(REPLAY_KEY)||'null');
-       if(d&&Array.isArray(d.f)&&d.f.length>4) TTREC.best=d; }catch(e){}
+       const best=replayNormalise(d); if(best) TTREC.best=best; }catch(e){}
   try{ const h=JSON.parse(localStorage.getItem(LAPS_KEY)||'[]');
-       if(Array.isArray(h)) TTREC.history=h.filter(x=>x&&x.t>0).sort((a,b)=>a.t-b.t).slice(0,8); }catch(e){}
-  if(!TTREC.history.length&&TTREC.best) TTREC.history=[{t:+TTREC.best.t,at:0}];
+       if(Array.isArray(h)) TTREC.history=h.filter(x=>x&&x.t>0).map(x=>({
+         ...x,t:+x.t,conditions:x.conditions&&TIME_OF_DAY[x.conditions.lighting]?{
+           lighting:x.conditions.lighting,label:TIME_OF_DAY[x.conditions.lighting].label,weather:'dry'}:null,
+         livery:liveryNormalise(x.livery)})).sort((a,b)=>a.t-b.t).slice(0,8); }catch(e){}
+  if(!TTREC.history.length&&TTREC.best) TTREC.history=[{t:+TTREC.best.t,at:TTREC.best.capturedAt||0,
+    conditions:TTREC.best.conditions,livery:TTREC.best.livery}];
   replayBtn();
 }
 recLoad();
@@ -4837,6 +4901,7 @@ function replayStart(){
      the walk out to the car has room to breathe, and there is no walk out to a
      replay. Whatever is left of it goes now. */
   if(typeof qualifyingLoadHide==='function') qualifyingLoadHide(true);
+  replayMetadataBegin();
   TTREC.playing=true; TTREC.pt=0; TTREC.i=0;
   TT.live=false;                       // the trial stands down while this runs
   document.body.classList.remove('cinema');   // or the whole overlay stays faded out
@@ -4853,6 +4918,7 @@ function replayStart(){
    and the entry button -- which startTrack hides on the way in -- comes back,
    or the home screen would have no way off it. */
 function goHome(){
+  replayMetadataEnd();
   TTREC.playing=false;
   TT.live=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
@@ -4868,6 +4934,7 @@ function goHome(){
 }
 function replayStop(){
   TTREC.playing=false;
+  replayMetadataEnd();
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   replayBtn();
   goHome();
@@ -7338,10 +7405,11 @@ const bootMsg=document.getElementById('bootmsg');
 const qualifyingLoadEl=document.getElementById('qualifying-load');
 const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
+const qualifyingWeatherEl=document.getElementById('qualifying-weather');
 const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
 const QUALIFYING_LOAD_MIN_MS=10000;
 let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
-let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false;
+let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false, qualifyingAllowsWeather=true;
 function qualifyingLoadSetStatus(text){
   if(qualifyingLoadStatusEl) qualifyingLoadStatusEl.textContent=text;
 }
@@ -7369,7 +7437,7 @@ function qualifyingBegin(){
   ttStart();
 }
 function qualifyingChooseWeather(kind){
-  if(!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
+  if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
   qualifyingWeatherChoice=kind;
   applyTimeOfDay(kind);
   qualifyingWeatherButtons.forEach(btn=>{
@@ -7383,6 +7451,13 @@ function qualifyingChooseWeather(kind){
 function qualifyingLoadReady(){
   if(!qualifyingLoadEl||!qualifyingLoadEl.classList.contains('active')) return;
   qualifyingTrackReady=true;
+  if(!qualifyingAllowsWeather){
+    if(qualifyingStartQueued) return;
+    qualifyingStartQueued=true;
+    qualifyingLoadHide(true);
+    setTimeout(()=>{ if(TTREC.best) replayStart(); },260);
+    return;
+  }
   /* Replays are a review action, not a new qualifying session. Keep the
      existing path instant with a neutral light while normal entries wait for
      the driver's choice. */
@@ -7390,11 +7465,16 @@ function qualifyingLoadReady(){
   if(qualifyingWeatherChoice) qualifyingBegin();
   else qualifyingLoadSetStatus('Choose session lighting');
 }
-function qualifyingLoadShow(text){
+function qualifyingLoadShow(text,allowWeather=true){
   if(!qualifyingLoadEl) return;
   clearTimeout(qualifyingLoadTimer);
+  qualifyingAllowsWeather=allowWeather;
   qualifyingTrackReady=false;
   qualifyingWeatherReset();
+  if(qualifyingWeatherEl){
+    qualifyingWeatherEl.style.display=allowWeather?'':'none';
+    qualifyingWeatherEl.setAttribute('aria-hidden',allowWeather?'false':'true');
+  }
   qualifyingLoadSince=performance.now();
   qualifyingLoadSetStatus(text||'Choose session lighting');
   qualifyingLoadEl.classList.add('active');
@@ -7438,6 +7518,22 @@ function qualifyingLoadFail(text){
   },1400);
 }
 
+function lapDateLabel(ts){
+  const d=new Date(+ts);
+  if(!Number.isFinite(+ts)||+ts<=0||Number.isNaN(d.getTime())) return 'Date not recorded';
+  return d.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function lapConditionsLabel(lap){
+  const c=lap&&lap.conditions;
+  if(!c||!TIME_OF_DAY[c.lighting]) return 'Session light not recorded';
+  return TIME_OF_DAY[c.lighting].label+' · Dry track';
+}
+function lapLiveryLabel(lap){
+  const l=liveryNormalise(lap&&lap.livery);
+  if(!l) return 'Livery snapshot not recorded';
+  const label=(kind,hex)=>(STYLE_LABELS[kind]&&STYLE_LABELS[kind][hex])||hex;
+  return 'Livery · '+label('body',l.body)+' / '+label('ring',l.ring)+' / '+label('wing',l.wing)+' / '+label('rims',l.rims);
+}
 function lapBookRefresh(){
   /* Only read from storage if there is nothing in hand. recLoad() used to run
      unconditionally, so deleting cleared everything and then immediately read
@@ -7448,7 +7544,10 @@ function lapBookRefresh(){
   if(!list||!empty) return;
   list.innerHTML=laps.map((lap,i)=>'<div class="lap-row '+(i===0?'best':'')+'">'
     +'<span class="rank">'+String(i+1).padStart(2,'0')+'</span>'
-    +'<span class="lap-label">'+(i===0?'Fastest lap':'Recorded lap')+'</span>'
+    +'<span class="lap-label">'+(i===0?'Fastest lap':'Recorded lap')
+    +'<small>'+lapDateLabel(lap.at||lap.capturedAt)+'</small>'
+    +'<small>'+lapConditionsLabel(lap)+'</small>'
+    +'<small>'+lapLiveryLabel(lap)+'</small></span>'
     +'<b class="lap-time">'+ttFmt(lap.t)+'</b></div>').join('');
   empty.style.display=laps.length?'none':'';
   /* A disabled button that says nothing is a button that looks broken. A lap
@@ -7578,7 +7677,7 @@ document.getElementById('lapbook-replay').onclick=()=>{
     /* Already loaded, so there is nothing to wait for -- but the screen still
        marks the transition rather than cutting straight from a menu into a
        moving car. It is dismissed the moment the replay has the car. */
-    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading your best lap');
+    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading your best lap',false);
     setTimeout(replayStart, 260);
   }
   else { pendingReplay=true; startTrack('spa22'); }
@@ -7586,8 +7685,9 @@ document.getElementById('lapbook-replay').onclick=()=>{
 
 function startTrack(id){
   const t=TRACKS[id];
-  qualifyingLoadShow((pendingReplay||window._autoReplay)
-    ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'));
+  const replayMode=!!(pendingReplay||window._autoReplay);
+  qualifyingLoadShow(replayMode
+    ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'),!replayMode);
   pickEl.style.display='none';
   applyTrackConstants(t);
   if(t.procedural){
