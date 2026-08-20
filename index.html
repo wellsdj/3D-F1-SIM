@@ -245,7 +245,7 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Cockpit</em><br>Aids <em id="aname">On</em><br>Frames <em id="fname">60</em></div>
+<div class="hud" id="status">Camera <em id="camname">Nose cam</em><br>Aids <em id="aname">On</em><br>Detail <em id="dname">Full</em><br>Frames <em id="fname">60</em></div>
 <button id="gridtoggle" style="display:none">Editor</button>
 <button id="tlbtn">Track limits</button>
 <div id="tlpanel">
@@ -287,7 +287,7 @@
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake &nbsp; <kbd>A</kbd><kbd>D</kbd> steering</div>
-  <div><kbd>R</kbd> restart the lap &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail</div>
+  <div><kbd>R</kbd> restart the lap &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
 </div>
 
 <div id="lights">
@@ -1143,6 +1143,92 @@ function groundAt(x,z,refY){
   if(ny<0){nx=-nx;ny=-ny;nz=-nz;}
   _gnd.nx=nx; _gnd.ny=ny; _gnd.nz=nz;
   return _gnd;
+}
+
+
+/* ----------------------------------------------------------- chunking ----
+   The circuit arrives as 84 meshes and about 1.19 million triangles, and the
+   big ones stretch a mile and a half: the trees are one mesh 2.4 km across,
+   the guardrails one mesh 1.3 km across. A mesh that long is inside the view
+   frustum from everywhere on the lap, so the graphics card was asked to draw
+   the whole seven kilometres of Spa every frame -- Blanchimont while you sit
+   on the grid -- and no amount of view distance could help, because there was
+   nothing to cull.
+
+   So the long meshes are cut into 140 m cells. Nothing is added and nothing is
+   lost: every triangle goes to the cell its centre falls in, and the chunks
+   share the original vertex buffers, so this costs index arrays and no vertex
+   memory at all. What it buys is that each chunk has its own small bounding
+   sphere, and three.js then culls the ones behind you and over the hill by
+   itself, every frame, for free.
+
+   The bounding spheres are computed here rather than by computeBoundingSphere,
+   which measures the whole position buffer and ignores the index -- every
+   chunk would come out with the bounds of the entire mesh it came from and
+   none of them would ever cull. */
+/* 100 m cells. Sixty were tried and cost more than they saved: eight per cent
+   fewer triangles for twice the draw calls, and a draw call is CPU every
+   frame. */
+const CHUNK=100, CHUNK_MIN_TRIS=5000, CHUNK_MIN_SPAN=150;
+/* A distance cull on top of this was tried and taken out again: at the longest
+   view on the circuit it saved 800 triangles out of 782,000, because everything
+   in frame was inside the radius anyway. Pulling the radius in far enough to
+   matter meant popping, and the fog at a kilometre only hides 13% of a
+   building. Frustum culling on small cells is the whole win. */
+let chunkList=[];
+function chunkTrack(root){
+  chunkList=[];
+  const jobs=[];
+  root.traverse(o=>{ if(o.isMesh&&o.geometry&&o.geometry.attributes.position) jobs.push(o); });
+  let cut=0, made=0, tris=0;
+  const _v=new THREE.Vector3();
+  for(const o of jobs){
+    const g=o.geometry, pos=g.attributes.position, idx=g.index;
+    const nTri=(idx?idx.count:pos.count)/3;
+    if(nTri<CHUNK_MIN_TRIS) continue;
+    if(!g.boundingBox) g.computeBoundingBox();
+    const size=g.boundingBox.getSize(_v);
+    if(Math.max(size.x,size.z)<CHUNK_MIN_SPAN) continue;
+    const at=i=>idx?idx.getX(i):i;
+    const cells=new Map();
+    for(let t=0;t<nTri;t++){
+      const a=at(t*3), b=at(t*3+1), c=at(t*3+2);
+      const cx=(pos.getX(a)+pos.getX(b)+pos.getX(c))/3;
+      const cz=(pos.getZ(a)+pos.getZ(b)+pos.getZ(c))/3;
+      const key=Math.floor(cx/CHUNK)+','+Math.floor(cz/CHUNK);
+      let arr=cells.get(key);
+      if(!arr){ arr=[]; cells.set(key,arr); }
+      arr.push(a,b,c);
+    }
+    if(cells.size<2) continue;
+    const grp=new THREE.Group();
+    grp.name=(o.name||'mesh')+'_chunks';
+    grp.position.copy(o.position); grp.quaternion.copy(o.quaternion); grp.scale.copy(o.scale);
+    for(const list of cells.values()){
+      const ng=new THREE.BufferGeometry();
+      for(const k in g.attributes) ng.setAttribute(k, g.attributes[k]);   // shared, not copied
+      ng.setIndex(new THREE.Uint32BufferAttribute(list,1));
+      // bounds from this chunk's own vertices, or nothing would ever cull
+      let x0=1e30,y0=1e30,z0=1e30,x1=-1e30,y1=-1e30,z1=-1e30;
+      for(let i=0;i<list.length;i++){
+        const v=list[i], x=pos.getX(v), y=pos.getY(v), z=pos.getZ(v);
+        if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; if(z<z0)z0=z; if(z>z1)z1=z;
+      }
+      ng.boundingBox=new THREE.Box3(new THREE.Vector3(x0,y0,z0), new THREE.Vector3(x1,y1,z1));
+      const c=ng.boundingBox.getCenter(new THREE.Vector3());
+      ng.boundingSphere=new THREE.Sphere(c, Math.hypot(x1-x0,y1-y0,z1-z0)/2);
+      const m=new THREE.Mesh(ng,o.material);
+      m.castShadow=o.castShadow; m.receiveShadow=o.receiveShadow;
+      m.userData=o.userData;
+      grp.add(m); made++; chunkList.push(m);
+    }
+    o.parent.add(grp);
+    o.parent.remove(o);
+    cut++; tris+=nTri;
+  }
+  console.log('chunked: '+cut+' long meshes ('+Math.round(tris/1000)+'k triangles) into '+
+              made+' cells of '+CHUNK+' m');
+  return {cut, made};
 }
 
 /* ------------------------------------------- centreline from a road mesh --
@@ -3484,7 +3570,7 @@ addEventListener('keydown',e=>{
     updateStatus(); }
   if(k==='n'){ markExport(); }
   if(k==='p'){ gridShow(!gridMode); }
-  if(k==='q'){ detailFull=!detailFull; applyDetail(); }
+  if(k==='q'){ detailLevel=(detailLevel+1)%DETAILS.length; applyDetail(); }
   if(k==='r'){                                       // back to the line, new lap
     if(TT.gates.length && trackRoot && FREEROAM){
       const g=TT.gates[0];
@@ -3519,6 +3605,7 @@ function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
+  const dn=document.getElementById('dname'); if(dn) dn.textContent = DETAILS[detailLevel].name;
 }
 /* Full detail by default, and nothing downgrades it behind your back -- the
    old adaptive check dropped the scene to Low a couple of seconds after load
@@ -3530,15 +3617,33 @@ function updateStatus(){
    frame. Worth knowing when to reach for it: the frame rate is in the status
    panel, and under about 20 fps the world can no longer keep real time, so the
    car starts to feel slow even though it is not. */
+/* Three settings on Q, and the one in the middle is the one to reach for.
+
+   The number that matters most here is not triangles, it is pixels. Full
+   renders at 1.75 device pixels per CSS pixel, which on a retina screen is
+   three times the fill of rendering at 1.0 -- every shader, every shadow
+   lookup, every fog sample, three times over. Balanced at 1.35 is 40% fewer
+   pixels than Full and is close to impossible to tell apart at speed; Fast is
+   1.0 with the shadows off, which is roughly a third of Full's GPU work.
+
+   Nothing switches by itself. The automatic version of this was taken out for
+   dropping the scene to Low after one slow first frame and never putting it
+   back, and it stays out. */
+const DETAILS=[{name:'Full', px:1.75, sh:true},
+               {name:'Balanced', px:1.35, sh:true},
+               {name:'Fast', px:1.0, sh:false}];
+let detailLevel=0;
 let detailFull=true;
 function applyDetail(){
-  shadowsOn=detailFull;
-  renderer.shadowMap.enabled=detailFull;
-  shadowCasters.forEach(m=>{ m.castShadow = detailFull && m.userData.casts!==false; });
+  const d=DETAILS[detailLevel];
+  detailFull=d.sh;
+  shadowsOn=d.sh;
+  renderer.shadowMap.enabled=d.sh;
+  shadowCasters.forEach(m=>{ m.castShadow = d.sh && m.userData.casts!==false; });
   // this just overrode the per-cell tree gating in the frame loop, so make the
   // cull loop reapply it on the next frame rather than leaving distant cells casting
   treeCells.forEach(b=>{ b.cast=undefined; });
-  renderer.setPixelRatio(detailFull ? Math.min(devicePixelRatio,1.75) : 1);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, d.px));
   updateStatus();
 }
 
@@ -4774,6 +4879,7 @@ function steerRack(C, want, kph, dt, aids){
 const _PROBE_Y=[0,0,0,0];
 const LAYER=1.5;                 // metres: past this, it is not our surface
 function probeCar(wx,wz,hdg,refY,out){
+  PROF.probes++;
   const fx=Math.sin(hdg), fz=Math.cos(hdg);
   const fresh=!(refY<1e8);       // "no history, give me the topmost" -- no band
   let looseHits=0, grassHits=0, tried=0, banded=true;
@@ -5118,6 +5224,28 @@ window.SIM={
   wheels(){ return CARPTS.length===4 ? CARPTS.map((c,i)=>tlWheelOn(c.x,c.z)) : null; },
   probe(x,z,refY){ return {...probeCar(x,z,0,refY,{}), y:undefined}; },
   get fps(){ return _simFps; },
+  meshes(){
+    const out=[];
+    trackRoot && trackRoot.traverse(o=>{ if(!o.isMesh||!o.geometry) return;
+      const g=o.geometry, n=(g.index?g.index.count:g.attributes.position.count)/3;
+      g.computeBoundingBox();
+      const bb=g.boundingBox, s=bb.getSize(new THREE.Vector3());
+      out.push({name:o.name.slice(0,28), mat:(o.material&&o.material.name)||'', tris:Math.round(n),
+                span:Math.round(Math.max(s.x,s.z))});
+    });
+    out.sort((a,b)=>b.tris-a.tris);
+    return {total:out.reduce((a,q)=>a+q.tris,0), count:out.length, top:out.slice(0,16)};
+  },
+  prof(){
+    const f=Math.max(1,PROF.frames), i=renderer.info;
+    const r={ frames:PROF.frames, fps:+_simFps.toFixed(1),
+      physMs:+(PROF.phys/f).toFixed(2), drawMs:+(PROF.draw/f).toFixed(2),
+      stepsPerFrame:+(PROF.steps/f).toFixed(2), probesPerFrame:+(PROF.probes/f).toFixed(1),
+      calls:i.render.calls, tris:i.render.triangles,
+      programs:i.programs?i.programs.length:0, geometries:i.memory.geometries,
+      textures:i.memory.textures, shadows:renderer.shadowMap.enabled };
+    profReset(); return r;
+  },
 };
 
 /* ------------------------------------------------------------- main loop */
@@ -5157,6 +5285,10 @@ function stepWorld(dt){
    arrive at once, so a tab left in the background does not come back and
    fast-forward the lap. */
 const STEP=1/60, MAX_STEPS=15, LONG_STEP=0.1;
+/* Where a frame goes. Cheap enough to leave in: four counters and a
+   performance.now() either side of each phase. */
+const PROF={phys:0, place:0, cull:0, draw:0, steps:0, frames:0, probes:0};
+function profReset(){ for(const k in PROF) PROF[k]=0; }
 let _acc=0, _simFps=60;
 function frame(now){
   requestAnimationFrame(frame);
@@ -5164,6 +5296,7 @@ function frame(now){
   if(raw>0) _simFps += (1/raw - _simFps)*0.2;
   _acc+=raw;
   let steps=0;
+  const _t0=performance.now();
   while(_acc>=STEP && steps<MAX_STEPS){ stepWorld(STEP); _acc-=STEP; steps++; }
   /* Fifteen sixtieths is a quarter of a second of world per frame, so real
      time holds down to about four frames a second. Below that, taking more
@@ -5172,7 +5305,8 @@ function frame(now){
      a tenth of a second. Coarse, and coarse is the right trade: the car
      integrates a little less exactly for one frame instead of the whole world
      sliding into slow motion, which is the thing you actually notice. */
-  if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; }
+  if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; steps++; }
+  PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
   windU.value=t;
 
@@ -5264,7 +5398,8 @@ function frame(now){
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
-    renderer.render(scene,camera);
+    { const _d0=performance.now(); renderer.render(scene,camera);
+    PROF.draw+=performance.now()-_d0; }
     return;
   }
   if(TT.live && TT.drone>0){
@@ -5565,6 +5700,7 @@ function startTrack(id){
       buildRoadMap(rd.mesh);
       const gg=groundAt(0,0,1e9);
       if(gg.hit){ root.position.y-=gg.y; root.updateWorldMatrix(true,true); buildHeightField(root); }
+      chunkTrack(root);        // everything above needs the meshes whole; nothing below does
       carState.wx=0; carState.wz=0; carState.hdg=sdeg*Math.PI/180; carState.speed=0;
       PLAYER.groundY=RIDE; PLAYER.carVY=0;
       carGroup.position.set(0, PLAYER.groundY, 0);
