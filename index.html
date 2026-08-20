@@ -85,17 +85,18 @@
      shots along with the rest of the overlay. */
 
   /* -------------------------------------------------- watching another driver */
-  #netbtn{position:fixed;left:18px;bottom:18px;z-index:9;display:none;
+  /* Bottom right, out of the speedometer's corner. */
+  #netbtn{position:fixed;right:18px;bottom:18px;z-index:9;display:none;
           font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
           color:var(--paper);cursor:pointer;background:rgba(10,13,19,.68);
           border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:8px 12px;
           backdrop-filter:blur(6px)}
   #netbtn.on{display:block} #netbtn:hover{background:rgba(255,255,255,.16)}
-  #netwrap{position:fixed;left:18px;bottom:56px;z-index:9;display:none;
-           font-family:var(--mono);color:var(--paper);opacity:.9}
+  #netwrap{position:fixed;right:18px;bottom:56px;z-index:9;display:none;
+           font-family:var(--mono);color:var(--paper);opacity:.9;text-align:right}
   #netwrap.on{display:block}
   #netwrap b{display:block;font-size:19px;letter-spacing:.22em;color:var(--amber);margin-top:2px}
-  #netpanel{position:fixed;left:18px;bottom:56px;z-index:10;display:none;width:214px;
+  #netpanel{position:fixed;right:18px;bottom:56px;z-index:10;display:none;width:214px;
             font-family:var(--mono);color:var(--paper);background:rgba(6,9,14,.9);
             border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:12px;
             backdrop-filter:blur(8px)}
@@ -4754,8 +4755,13 @@ function replayBtn(){
 }
 function replayStart(){
   if(!TTREC.best||!TTREC.best.f.length) return;
+  /* Immediate, not held: the loading screen's ten-second minimum is there so
+     the walk out to the car has room to breathe, and there is no walk out to a
+     replay. Whatever is left of it goes now. */
+  if(typeof qualifyingLoadHide==='function') qualifyingLoadHide(true);
   TTREC.playing=true; TTREC.pt=0; TTREC.i=0;
   TT.live=false;                       // the trial stands down while this runs
+  document.body.classList.remove('cinema');   // or the whole overlay stays faded out
   document.getElementById('tt').classList.remove('show');
   const r=document.getElementById('replaybar'); if(r) r.classList.add('show');
   startPhase='go';
@@ -5504,16 +5510,30 @@ function tlMeasure(curve,L){
    is worked out from the geometry -- draw them in whatever order suits you. */
 let tleOn=false, tleEdge=0, tleLines=[[],[]], tleGroup=null;
 const TLE_KEY='f1sim.tl.edges.spa22';
+/* Bumped whenever the lines in this file change.
+
+   Saved edits used to win over the file unconditionally, which is right while
+   you are drawing and wrong the moment a corrected line ships: your browser
+   kept handing you the copy you had saved days ago and the new one never
+   arrived, however many times it was pushed. The saved copy now records the
+   version it was drawn against, and a copy drawn against an older file is
+   dropped -- the file is newer, and the file is the one that was fixed. */
+const TLE_VER=3;
 const TLE_COL=[0x33ddff, 0xffb020];
 
 function tleModel(v){ return gridToModel(v); }
 function tleSave(){
-  try{ localStorage.setItem(TLE_KEY, JSON.stringify(tleLines.map(l=>l.map(tleModel)))); }catch(e){}
+  try{ localStorage.setItem(TLE_KEY,
+    JSON.stringify({ver:TLE_VER, lines:tleLines.map(l=>l.map(tleModel))})); }catch(e){}
 }
 function tleLoad(){
   let d=null;
   try{ d=JSON.parse(localStorage.getItem(TLE_KEY)||'null'); }catch(e){}
-  if(Array.isArray(d)&&d.length===2) tleLines=d.map(l=>l.map(editModelToWorld));
+  // an old shape (a bare pair of lines) or an older version: the file wins
+  if(d && !Array.isArray(d) && d.ver===TLE_VER && Array.isArray(d.lines))
+    tleLines=d.lines.map(l=>l.map(editModelToWorld));
+  else if(d) { try{ localStorage.removeItem(TLE_KEY); }catch(e){}
+               console.log('track limits: dropped a saved copy from an older build'); }
   // the inside edge ships with the file; anything marked since wins over it
   if(!tleLines[0].length && typeof SPA_EDGE_IN!=='undefined')
     tleLines[0]=SPA_EDGE_IN.map(editModelToWorld);
@@ -7370,13 +7390,20 @@ document.getElementById('lapbook-delete').onclick=e=>{
 document.getElementById('lapbook-replay').onclick=()=>{
   if(!TTREC.best) return;
   closeLapBook();
-  if(booted) replayStart();
+  if(booted){
+    /* Already loaded, so there is nothing to wait for -- but the screen still
+       marks the transition rather than cutting straight from a menu into a
+       moving car. It is dismissed the moment the replay has the car. */
+    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading your best lap');
+    setTimeout(replayStart, 260);
+  }
   else { pendingReplay=true; startTrack('spa22'); }
 };
 
 function startTrack(id){
   const t=TRACKS[id];
-  qualifyingLoadShow('Preparing '+(t&&t.name||'the circuit'));
+  qualifyingLoadShow((pendingReplay||window._autoReplay)
+    ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'));
   pickEl.style.display='none';
   applyTrackConstants(t);
   if(t.procedural){
@@ -7448,7 +7475,11 @@ function startTrack(id){
       tleLoad();
       recLoad();
       if(window._autoReplay){ window._autoReplay=false; setTimeout(()=>{ if(TTREC.best) replayStart(); }, 400); }
-      ttStart();
+      /* Coming in to watch a lap: no opening cutscene, because the lap is the
+         thing you came for. The loading screen stays up until the replay
+         actually starts, rather than handing over to a drone shot that is
+         about to be interrupted. */
+      ttStart(!(pendingReplay||window._autoReplay));
       return;
     }
     /* The start lights hang over the start line, so their position is the line.
