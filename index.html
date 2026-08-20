@@ -160,6 +160,23 @@
   #tlpick button b{display:block;font-size:11.5px;letter-spacing:.1em;margin-bottom:3px}
   #tlpick button span{display:block;opacity:.55;letter-spacing:.06em;text-transform:none;
                       font-size:9.5px}
+  #paintnote{}
+  /* ------------------------------------------------ customise your car */
+  #paintrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #paintsw{display:flex;gap:7px;flex-wrap:wrap}
+  #paintsw button{width:30px;height:30px;border-radius:50%;cursor:pointer;padding:0;
+                  border:2px solid rgba(255,255,255,.18);transition:transform .12s ease,
+                  border-color .12s ease}
+  #paintsw button:hover{transform:scale(1.12)}
+  #paintsw button.on{border-color:#fff;transform:scale(1.15)}
+  #paintpick{width:44px;height:30px;padding:0;border:1px solid rgba(255,255,255,.2);
+             border-radius:6px;background:transparent;cursor:pointer}
+  #paintreset{font:inherit;font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+              text-transform:uppercase;color:var(--paper);cursor:pointer;
+              background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+              border-radius:6px;padding:8px 11px}
+  #paintreset:hover{background:rgba(255,255,255,.14)}
+
   #settings p.note{margin:11px 2px 0;font-family:var(--mono);font-size:9.5px;
                    letter-spacing:.05em;opacity:.42;line-height:1.75;
                    text-transform:none}
@@ -307,6 +324,16 @@
     </div>
     <p class="note">Two wheels over is fine. Three is fine. A lap is only deleted
        when all four are past the line — and when you miss one of the five gates.</p>
+  </div>
+  <div id="settings" style="margin-top:26px">
+    <h5>Customise your car</h5>
+    <div id="paintrow">
+      <div id="paintsw"></div>
+      <input type="color" id="paintpick" value="#ff8000">
+      <button id="paintreset">Papaya</button>
+    </div>
+    <p class="note">The paint is repainted properly, hue by hue: the sponsors,
+       the carbon and the numbers stay exactly where they are.</p>
   </div>
   <div id="bar"><i></i></div>
 </div>
@@ -2489,6 +2516,10 @@ const WHEELBASE=3.60;
     const b1=new THREE.Box3().setFromObject(car);
     car.position.y=-b1.min.y;           // drop the tyres onto the deck
     carGroup.add(car); carObj=car;
+    paintPrepare(car);
+    paintLoad();
+    if(carPaint) paintCar(carPaint);
+    paintUI();
 
     for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
       const w=car.getObjectByName(n);
@@ -2602,6 +2633,161 @@ function pointOn(obj,group,x,y,z){
   return _cp.set(group.position.x,y,group.position.z);
 }
 function carPoint(x,y,z){ return pointOn(carObj,carGroup,x,y,z); }
+
+
+/* ------------------------------------------------------------- paintwork
+   Recolouring a real car is not setting a material colour. This McLaren's
+   livery is painted into its texture -- papaya, with the sponsors, the carbon
+   weave, the numbers and the shading all in the same image -- so multiplying
+   a colour over it turns the whole car muddy and takes the logos with it.
+
+   What actually works is to repaint the pixels that are papaya and leave
+   every other pixel exactly as it is. Each pixel goes to hue/saturation/
+   lightness; anything close to the car's own base hue and colourful enough to
+   be paint is moved to the hue you picked, keeping its own saturation and
+   lightness so every highlight, shadow and reflection survives; anything else
+   -- the near-greys of the carbon, the white text, a sponsor's red or blue --
+   is copied through untouched.
+
+   The base hue is measured from the texture rather than assumed, by taking
+   the most common hue among its colourful pixels, so this works on whatever
+   car is dropped in next.
+
+   The original pixels are kept, so changing colour again works from the paint
+   as it shipped instead of compounding one shift on top of another and
+   sliding the car around the colour wheel. */
+const PAINT_KEY='f1sim.car.paint';
+const PAINT_RE=/paint/i;                 // mcl39_paints, mcl39_halo_paint
+let paintJobs=[], paintHue=null, carPaint=null;
+
+function rgb2hsl(r,g,b){
+  r/=255; g/=255; b/=255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2;
+  if(mx===mn) return [0,0,l];
+  const d=mx-mn, s=l>0.5 ? d/(2-mx-mn) : d/(mx+mn);
+  let h;
+  if(mx===r)      h=((g-b)/d+(g<b?6:0))/6;
+  else if(mx===g) h=((b-r)/d+2)/6;
+  else            h=((r-g)/d+4)/6;
+  return [h,s,l];
+}
+function hsl2rgb(h,s,l){
+  if(s===0){ const v=l*255; return [v,v,v]; }
+  const q=l<0.5 ? l*(1+s) : l+s-l*s, p=2*l-q;
+  const f=t=>{ t=(t%1+1)%1;
+    if(t<1/6) return p+(q-p)*6*t;
+    if(t<1/2) return q;
+    if(t<2/3) return p+(q-p)*(2/3-t)*6;
+    return p; };
+  return [f(h+1/3)*255, f(h)*255, f(h-1/3)*255];
+}
+/* Collect the paint materials and copy their textures out once. */
+function paintPrepare(root){
+  paintJobs=[];
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    for(const m of ms){
+      if(!m||!m.name||!PAINT_RE.test(m.name)||!m.map||!m.map.image) continue;
+      if(paintJobs.some(j=>j.mat===m)) continue;
+      const img=m.map.image, w=img.width||img.videoWidth, h=img.height||img.videoHeight;
+      if(!w||!h) continue;
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      const ctx=cv.getContext('2d',{willReadFrequently:true});
+      try{ ctx.drawImage(img,0,0); }catch(e){ continue; }
+      let src;
+      try{ src=ctx.getImageData(0,0,w,h); }catch(e){ continue; }
+      paintJobs.push({mat:m, cv, ctx, src, orig:m.map});
+    }
+  });
+  if(!paintJobs.length) return 0;
+  // the car's own hue: the commonest one among pixels colourful enough to be paint
+  const bins=new Float64Array(36);
+  for(const j of paintJobs){
+    const d=j.src.data;
+    for(let i=0;i<d.length;i+=16){          // every fourth pixel is plenty
+      if(d[i+3]<8) continue;
+      const [hh,ss,ll]=rgb2hsl(d[i],d[i+1],d[i+2]);
+      if(ss<0.35||ll<0.12||ll>0.94) continue;
+      bins[Math.min(35,Math.floor(hh*36))]+=1;
+    }
+  }
+  let bi=0; for(let i=1;i<36;i++) if(bins[i]>bins[bi]) bi=i;
+  paintHue=(bi+0.5)/36;
+  console.log('paintwork: '+paintJobs.length+' material(s), base hue '+Math.round(paintHue*360)+'deg');
+  return paintJobs.length;
+}
+/* Repaint to a hex colour. Null puts the car back to how it shipped. */
+function paintCar(hex){
+  if(!paintJobs.length) return;
+  carPaint=hex||null;
+  if(hex===null||hex===undefined){
+    for(const j of paintJobs){ if(j.mat.map!==j.orig){ j.mat.map=j.orig; j.mat.needsUpdate=true; } }
+    return;
+  }
+  const c=new THREE.Color(hex);
+  const [th,ts]=rgb2hsl(c.r*255,c.g*255,c.b*255);
+  for(const j of paintJobs){
+    const src=j.src.data;
+    const out=j.ctx.createImageData(j.src.width,j.src.height);
+    const dst=out.data;
+    for(let i=0;i<src.length;i+=4){
+      dst[i]=src[i]; dst[i+1]=src[i+1]; dst[i+2]=src[i+2]; dst[i+3]=src[i+3];
+      if(src[i+3]<8) continue;
+      const [hh,ss,ll]=rgb2hsl(src[i],src[i+1],src[i+2]);
+      if(ss<0.22) continue;                       // carbon, text, chrome: not paint
+      let dh=Math.abs(hh-paintHue); if(dh>0.5) dh=1-dh;
+      if(dh>0.11) continue;                       // somebody else's logo
+      /* Saturation is nudged toward the colour you asked for rather than
+         replaced, so a dark shadowed panel stays a dark shadowed panel. */
+      const s2=clamp(ss*0.45+ts*0.55, 0, 1);
+      const [r2,g2,b2]=hsl2rgb(th, s2, ll);
+      dst[i]=r2; dst[i+1]=g2; dst[i+2]=b2;
+    }
+    j.ctx.putImageData(out,0,0);
+    const tex=new THREE.CanvasTexture(j.cv);
+    tex.flipY=j.orig.flipY; tex.wrapS=j.orig.wrapS; tex.wrapT=j.orig.wrapT;
+    tex.encoding=j.orig.encoding; tex.colorSpace=j.orig.colorSpace;
+    tex.anisotropy=j.orig.anisotropy; tex.needsUpdate=true;
+    j.mat.map=tex; j.mat.needsUpdate=true;
+  }
+}
+
+/* The swatches on the way in. Eight liveries worth having and a picker for
+   anything else, applied the moment you choose so the car is already yours by
+   the time you are on the circuit. */
+const PAINT_SWATCHES=['#ff8000','#e2001a','#00a3e0','#00352f','#0600ef',
+                      '#b6babd','#111418','#f6d200','#ff87bc','#6cd3bf'];
+function paintUI(){
+  const wrap=document.getElementById('paintsw');
+  if(!wrap||wrap.childElementCount) return;
+  PAINT_SWATCHES.forEach(hex=>{
+    const b=document.createElement('button');
+    b.style.background=hex; b.dataset.hex=hex;
+    b.onclick=()=>paintPick(hex);
+    wrap.appendChild(b);
+  });
+  const pick=document.getElementById('paintpick');
+  if(pick) pick.oninput=()=>paintPick(pick.value);
+  const rst=document.getElementById('paintreset');
+  if(rst) rst.onclick=()=>{ paintCar(null); carPaint=null; paintSave(); paintMark(); };
+  paintMark();
+}
+function paintPick(hex){
+  paintCar(hex); carPaint=hex; paintSave(); paintMark();
+  const pick=document.getElementById('paintpick'); if(pick) pick.value=hex;
+}
+function paintMark(){
+  document.querySelectorAll('#paintsw button').forEach(b=>
+    b.classList.toggle('on', carPaint && b.dataset.hex.toLowerCase()===carPaint.toLowerCase()));
+}
+function paintLoad(){
+  try{ const v=localStorage.getItem(PAINT_KEY); if(v) carPaint=v; }catch(e){}
+}
+function paintSave(){
+  try{ if(carPaint) localStorage.setItem(PAINT_KEY,carPaint);
+       else localStorage.removeItem(PAINT_KEY); }catch(e){}
+}
 
 /* ----------------------------------------------------------------- debris */
 /* Bodywork that comes off in a barrier hit. A single instanced mesh with a
