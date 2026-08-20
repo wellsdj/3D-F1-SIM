@@ -61,6 +61,26 @@
   #gridtoggle:hover{background:rgba(255,255,255,.12)}
   #gridtoggle.hide{display:none}
   /* --------------------------------------------- track limits, by hand */
+
+  /* ------------------------------------------ track limits, seen from above */
+  #m2wrap{position:fixed;inset:0;z-index:30;display:none}
+  #m2wrap.on{display:block}
+  #m2canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;
+            touch-action:none}
+  #m2bar{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:2;
+         display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:10px;
+         letter-spacing:.14em;text-transform:uppercase;color:#dfe7f1;
+         background:rgba(10,13,19,.86);border:1px solid rgba(255,255,255,.12);
+         border-radius:11px;padding:10px 12px}
+  #m2bar button{font:inherit;font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+                color:#dfe7f1;cursor:pointer;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:8px 12px}
+  #m2bar button:hover{background:rgba(255,255,255,.15)}
+  #m2bar button.on{background:var(--amber);border-color:var(--amber);color:#111}
+  #m2info{opacity:.6;padding:0 6px}
+  #m2hint{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:2;
+          font-family:var(--mono);font-size:10px;letter-spacing:.1em;opacity:.45;
+          color:#dfe7f1;text-transform:none}
   #tlbtn{position:fixed;right:18px;top:96px;z-index:8;font-family:var(--mono);
          font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
          background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:4px;
@@ -409,6 +429,17 @@
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
 <div class="hud" id="status">Camera <em id="camname">Nose cam</em><br>Aids <em id="aname">On</em><br>Detail <em id="dname">Full</em><br>Frames <em id="fname">60</em></div>
 <button id="gridtoggle" style="display:none">Editor</button>
+<div id="m2wrap">
+  <canvas id="m2canvas" width="1600" height="1000"></canvas>
+  <div id="m2hint">Drag a yellow point to move the limit · drag the background to pan · scroll to zoom</div>
+  <div id="m2bar">
+    <button id="m2in">Inside</button>
+    <button id="m2out" class="on">Outside</button>
+    <span id="m2info"></span>
+    <button id="m2copy">Copy</button>
+    <button id="m2close">Done</button>
+  </div>
+</div>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
 <div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b></div>
@@ -4586,6 +4617,175 @@ function clearGround(v,pad){
   return v;
 }
 
+
+/* ------------------------------------------------- track limits, from above
+   The 3D version asked you to click a spot on a circuit you were standing on,
+   which is fine for dropping a few points and hopeless for fixing a line. This
+   is the same data seen from directly above: the limit as a thick red line,
+   every point on it as a yellow circle, and you drag the circles until the
+   line is where the limit really is.
+
+   Nothing here computes anything. It is a drawing tool -- what you drag is
+   what the car is judged against, and Copy hands you the numbers to keep. */
+let m2Vis=[];
+let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
+const m2El=()=>document.getElementById('m2canvas');
+
+const m2Cam=new THREE.OrthographicCamera(-100,100,100,-100,1,20000);
+/* The overhead camera is set from the same numbers the overlay draws with, so
+   a point drawn at a screen position is over the piece of track at that screen
+   position. Orthographic, so there is no perspective to correct for and world
+   x/z map to screen x/y linearly whatever the elevation underneath. */
+function m2Sync(){
+  const c=m2El(); if(!c) return;
+  const w=c.width, h=c.height;
+  const wx0=(0-m2X)/m2Sc, wx1=(w-m2X)/m2Sc;
+  const wz0=(0-m2Y)/m2Sc, wz1=(h-m2Y)/m2Sc;
+  const cx=(wx0+wx1)/2, cz=(wz0+wz1)/2;
+  m2Cam.left=-(wx1-wx0)/2; m2Cam.right=(wx1-wx0)/2;
+  m2Cam.top=(wz1-wz0)/2;   m2Cam.bottom=-(wz1-wz0)/2;
+  m2Cam.near=1; m2Cam.far=12000;
+  m2Cam.position.set(cx, 4000, cz);
+  m2Cam.up.set(0,0,-1);
+  m2Cam.lookAt(cx,0,cz);
+  m2Cam.updateProjectionMatrix();
+  m2Cam.updateMatrixWorld();
+}
+function m2Show(on){
+  m2On=on;
+  const w=document.getElementById('m2wrap');
+  if(w) w.classList.toggle('on',on);
+  if(on){
+    // the overlay matches the window, so the mapping is one canvas pixel to one
+    const c=m2El();
+    if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
+           c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
+    m2Fit(); m2Draw();
+  }
+}
+function m2Fit(){
+  const pts=tleLines[m2Edge].length?tleLines[m2Edge]:tleLines[0];
+  if(!pts.length) return;
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+  for(const p of pts){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.z<z0)z0=p.z; if(p.z>z1)z1=p.z; }
+  const c=m2El(); if(!c) return;
+  const w=c.width, h=c.height;
+  m2Sc=Math.min(w/(x1-x0+120), h/(z1-z0+120));
+  m2X=w/2-((x0+x1)/2)*m2Sc;
+  m2Y=h/2-((z0+z1)/2)*m2Sc;
+}
+const m2sx=x=>x*m2Sc+m2X, m2sy=z=>z*m2Sc+m2Y;
+const m2wx=sx=>(sx-m2X)/m2Sc, m2wz=sy=>(sy-m2Y)/m2Sc;
+
+function m2Draw(){
+  const c=m2El(); if(!c) return;
+  m2Sync();
+  const g=c.getContext('2d');
+  /* Transparent: what is behind this canvas is the circuit itself, rendered
+     from directly overhead by the same renderer that draws the game. The line
+     is drawn on the track rather than on a diagram of it. */
+  g.clearRect(0,0,c.width,c.height);
+
+  // the racing line, faint, so you can see which way round the circuit goes
+  if(TT.curve){
+    g.strokeStyle='rgba(150,170,200,.34)'; g.lineWidth=1.5;
+    g.beginPath();
+    const P=new THREE.Vector3();
+    for(let u=0;u<=1.0001;u+=1/400){
+      TT.curve.getPointAt(Math.min(u,1),P);
+      const x=m2sx(P.x), y=m2sy(P.z);
+      u===0?g.moveTo(x,y):g.lineTo(x,y);
+    }
+    g.stroke();
+  }
+  // the other limit line, dim
+  const other=tleLines[1-m2Edge];
+  if(other.length>1){
+    g.strokeStyle='rgba(120,200,255,.28)'; g.lineWidth=2;
+    g.beginPath();
+    other.forEach((p,i)=>{ const x=m2sx(p.x), y=m2sy(p.z); i?g.lineTo(x,y):g.moveTo(x,y); });
+    g.closePath(); g.stroke();
+  }
+  // the line being edited: red, thick, closed
+  const pts=tleLines[m2Edge];
+  if(pts.length>1){
+    g.strokeStyle='#ff3b30'; g.lineWidth=6; g.lineJoin='round'; g.lineCap='round';
+    g.beginPath();
+    pts.forEach((p,i)=>{ const x=m2sx(p.x), y=m2sy(p.z); i?g.lineTo(x,y):g.moveTo(x,y); });
+    g.closePath(); g.stroke();
+  }
+  /* The handles are a fixed size on screen and thinned by screen spacing.
+     Five hundred points round seven kilometres is one every six pixels zoomed
+     out, so drawing them all buried the red line under a solid yellow rope and
+     grabbing one got you whichever neighbour the maths preferred. Only points
+     at least fourteen pixels from the last drawn one get a circle, and only
+     those can be grabbed -- so zoom out and you see the line, zoom in and the
+     handles appear where you are working. */
+  m2Vis.length=0;
+  const r=5.5;
+  let lx=-1e9, ly=-1e9;
+  for(let i=0;i<pts.length;i++){
+    const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
+    if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
+    if(i!==m2Drag && Math.hypot(x-lx,y-ly)<14) continue;
+    lx=x; ly=y; m2Vis.push(i);
+    g.beginPath(); g.arc(x,y,i===m2Drag?r*1.7:r,0,Math.PI*2);
+    g.fillStyle=i===m2Drag?'#fff':'#ffd21e';
+    g.fill();
+    g.lineWidth=1.5; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke();
+  }
+  const info=document.getElementById('m2info');
+  if(info) info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '
+    +m2Vis.length+' handles';
+}
+function m2Hit(sx,sy){
+  const pts=tleLines[m2Edge];
+  const r=9;                       // screen pixels, and the nearest one wins
+  let best=-1, bd=r*r;
+  for(const i of m2Vis){
+    const dx=m2sx(pts[i].x)-sx, dy=m2sy(pts[i].z)-sy;
+    const d=dx*dx+dy*dy;
+    if(d<bd){ bd=d; best=i; }
+  }
+  return best;
+}
+function m2Init(){
+  const c=m2El(); if(!c) return;
+  const pos=e=>{ const b=c.getBoundingClientRect();
+                 return [ (e.clientX-b.left)*c.width/b.width, (e.clientY-b.top)*c.height/b.height ]; };
+  c.addEventListener('pointerdown',e=>{
+    window._m2downs=(window._m2downs||0)+1;
+    const [x,y]=pos(e);
+    m2Drag=m2Hit(x,y);
+    if(m2Drag<0){ m2Pan=true; m2LX=x; m2LY=y; }
+    c.setPointerCapture(e.pointerId); m2Draw();
+  });
+  c.addEventListener('pointermove',e=>{
+    const [x,y]=pos(e);
+    if(m2Drag>=0){
+      const p=tleLines[m2Edge][m2Drag];
+      p.x=m2wx(x); p.z=m2wz(y);
+      const g=groundAt(p.x,p.z,1e9); if(g.hit) p.y=g.y;   // keep it on the ground
+      m2Draw();
+    } else if(m2Pan){
+      m2X+=x-m2LX; m2Y+=y-m2LY; m2LX=x; m2LY=y; m2Draw();
+    }
+  });
+  c.addEventListener('pointerup',()=>{
+    if(m2Drag>=0){ window._m2last=m2Drag; tleSave(); tleRedraw(); ttRemeasure(); }
+    m2Drag=-1; m2Pan=false; m2Draw();
+  });
+  c.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const [x,y]=pos(e);
+    const wx=m2wx(x), wz=m2wz(y);
+    m2Sc*=Math.exp(-e.deltaY*0.0016);
+    m2Sc=clamp(m2Sc,0.03,3);
+    m2X=x-wx*m2Sc; m2Y=y-wz*m2Sc;
+    m2Draw();
+  },{passive:false});
+}
+
 /* --------------------------------------------------------------- TV camera
    A director rather than a camera. Twenty positions are placed round the lap
    at load -- one every 350 m, out on the far side of the circuit from its
@@ -5092,7 +5292,20 @@ function tlWheelOn(lx,lz){
   return TL_TOL===TL_OFF || (off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL);
 }
 tlLoad(); tlSet(TL_TOL);
-document.getElementById('tlbtn').onclick=()=>tleShow(!tleOn);
+document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
+document.getElementById('m2close').onclick=()=>m2Show(false);
+document.getElementById('m2in').onclick=()=>{ m2Edge=0;
+  document.getElementById('m2in').classList.add('on');
+  document.getElementById('m2out').classList.remove('on'); m2Fit(); m2Draw(); };
+document.getElementById('m2out').onclick=()=>{ m2Edge=1;
+  document.getElementById('m2out').classList.add('on');
+  document.getElementById('m2in').classList.remove('on'); m2Fit(); m2Draw(); };
+document.getElementById('m2copy').onclick=e=>{
+  const t=JSON.stringify(tleLines[m2Edge].map(v=>gridToModel(v)));
+  console.log('track limit line (model coordinates):\n'+t);
+  copyFlash(e.currentTarget,t);
+};
+m2Init();
 document.getElementById('replaybtn').onclick=()=>{ TTREC.playing?replayStop():replayStart(); };
 document.getElementById('tledgeA').onclick=()=>{ tleEdge=0;
   document.getElementById('tledgeA').classList.add('on');
@@ -5913,6 +6126,17 @@ window.SIM={
   toModel(x,z){ return gridToModel(new THREE.Vector3(x,0,z)); },
   get marked(){ return [tleLines[0].length, tleLines[1].length]; },
   station2(x,z){ const st=tlStation(x,z); return st?{dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2)}:null; },
+  mapView(x,z,sc){    // centre the map on a spot, for testing and for jumping about
+    const c=m2El(); if(!c) return null;
+    m2Sc=sc; m2X=c.width/2-x*sc; m2Y=c.height/2-z*sc; m2Draw();
+    return {sc:m2Sc};
+  },
+  map2d(){ const c=m2El(); const pts=tleLines[m2Edge];
+    return { open:m2On, edge:m2Edge, points:pts.length, sc:m2Sc, drag:m2Drag, lastDrag:(window._m2last===undefined?-1:window._m2last), pan:m2Pan, downs:window._m2downs||0,
+             cw:c?c.width:0, ch:c?c.height:0 }; },
+  map2dPoint(i){ const pts=tleLines[m2Edge], p=pts[i]; if(!p) return null;
+    return { x:+p.x.toFixed(2), z:+p.z.toFixed(2),
+             sx:p.x*m2Sc+m2X, sy:p.z*m2Sc+m2Y }; },
   scan(s0,s1){
     // walk out from the racing line and report where the surface changes
     const out=[];
@@ -6229,6 +6453,14 @@ function frame(now){
      that tells you where you are and what you are about to drive. It drifts
      in slowly, and hands the view to the car at GO, so the cut happens on the
      word rather than a second either side of it. */
+  /* Editing the limits: the circuit from straight above, through the same
+     renderer, with the line drawn over it on the overlay canvas. */
+  if(m2On){
+    m2Sync();
+    skyDome.position.set(m2Cam.position.x, 0, m2Cam.position.z);
+    renderer.render(scene, m2Cam);
+    return;
+  }
   /* The wide shot: high over the middle of the circuit, turning slowly, with
      the haze wound back so the far side of the valley is actually there. It
      begins above the grid so the move carries you from where you are out over
@@ -6497,7 +6729,16 @@ function lapBookRefresh(){
     +'<span class="lap-label">'+(i===0?'Fastest lap':'Recorded lap')+'</span>'
     +'<b class="lap-time">'+ttFmt(lap.t)+'</b></div>').join('');
   empty.style.display=laps.length?'none':'';
-  if(play){ play.disabled=!TTREC.best; play.style.opacity=TTREC.best?'1':'.45'; }
+  /* A disabled button that says nothing is a button that looks broken. A lap
+     time set before laps were being recorded has no replay to show, so say
+     that instead of just going grey. */
+  if(play){
+    play.disabled=!TTREC.best;
+    play.style.opacity=TTREC.best?'1':'.45';
+    play.textContent = TTREC.best ? 'Watch fastest lap ↗'
+                     : (laps.length ? 'No recording for that lap — set a new best'
+                                    : 'Drive a lap first');
+  }
 }
 function openLapBook(){
   lapBookRefresh();
