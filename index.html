@@ -6947,7 +6947,13 @@ function closeCustomizer(){
   customizerOn=false; customizerStage.visible=false;
   const el=document.getElementById('customizer'); if(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
   document.body.classList.remove('customizer-open');
-  if(!booted) bootEl.classList.remove('gone');
+  /* Always back to the home screen. This used to put the home screen back only
+     if you had never been on the circuit, so once you had driven, closing the
+     customiser dropped you onto the track instead -- mid-session, wherever the
+     car happened to be. You opened it from home, so home is where closing it
+     takes you. */
+  bootEl.classList.remove('gone');
+  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
 }
 
 const homeSettings=document.getElementById('home-settings');
