@@ -547,6 +547,7 @@
   <div id="lapbook-empty">No recorded laps yet. Enter qualifying and set a time.</div>
   <div id="lapbook-actions">
     <button id="lapbook-replay">Watch fastest lap ↗</button>
+    <button id="lapbook-delete">Delete lap</button>
     <button id="lapbook-back">Back to home</button>
   </div>
   </section>
@@ -4556,6 +4557,18 @@ function recLoad(){
   replayBtn();
 }
 recLoad();
+/* Deleting a lap takes everything that lap left behind: the time, the split
+   times the delta is measured against, and the recording. Half a deletion is
+   worse than none -- a time with no recording is exactly the state that made
+   the watch button look broken. */
+function lapDelete(){
+  TT.best=null; TT.bestSplits=null; TT.last=0;
+  TTREC.best=null; TTREC.history=[];
+  try{ localStorage.removeItem(TT_KEY); localStorage.removeItem(TT_SPLITS_KEY);
+       localStorage.removeItem(REPLAY_KEY); }catch(e){}
+  ttHUD(); replayBtn(); homeReplayUI();
+  if(typeof lapBookRefresh==='function') lapBookRefresh();
+}
 function replayBtn(){
   const b=document.getElementById('replaybtn');
   if(!b) return;
@@ -4571,11 +4584,28 @@ function replayStart(){
   startPhase='go';
   replayBtn();
 }
+/* Stopping a replay puts you back on the home screen rather than on the grid.
+   You came here to watch a lap, not to drive one, so the way out is the way
+   you came in. The circuit stays loaded behind it, so going again is instant. */
 function replayStop(){
   TTREC.playing=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   replayBtn();
-  ttStart();                           // back to the line, ready to go again
+  TT.live=false;
+  document.body.classList.remove('cinema');
+  const b=document.getElementById('boot');
+  if(b) b.classList.remove('gone');
+  // startTrack hid the entry button on the way in; it is the way back in too
+  if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
+  homeReplayUI();
+}
+/* And going back in from the home screen with the circuit already loaded: no
+   reloading, no second startTrack, just the lights again. */
+function enterCircuit(){
+  const b=document.getElementById('boot');
+  if(b) b.classList.add('gone');
+  if(TTREC.playing) return;
+  ttStart();
 }
 /* One step of the replay, in place of drive(). */
 function replayStep(dt){
@@ -4598,6 +4628,11 @@ function replayStep(dt){
   while(turned<-Math.PI) turned+=2*Math.PI;
   carState.speed=a[4]+(b[4]-a[4])*k;
   PLAYER.steerAng=a[5]+(b[5]-a[5])*k;
+  /* Keep the station pointer moving. It is normally advanced by the time
+     trial, which stands down during a replay -- and the TV director works out
+     which camera the car is at from that pointer, so with it frozen the
+     director sat on its first shot for the whole lap. */
+  tlStation(carState.wx, carState.wz);
   const el=document.getElementById('replayt');
   if(el) el.textContent=ttFmt(TTREC.pt);
   // the car is presented exactly as when it was driven: wheels, body, sound
@@ -6735,6 +6770,9 @@ function lapBookRefresh(){
   if(play){
     play.disabled=!TTREC.best;
     play.style.opacity=TTREC.best?'1':'.45';
+    const del=document.getElementById('lapbook-delete');
+    if(del){ del.disabled=!(laps.length||TTREC.best);
+             del.style.opacity=del.disabled?'.45':'1'; }
     play.textContent = TTREC.best ? 'Watch fastest lap ↗'
                      : (laps.length ? 'No recording for that lap — set a new best'
                                     : 'Drive a lap first');
@@ -6791,6 +6829,15 @@ document.getElementById('customize-home').onclick=openCustomizer;
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
+document.getElementById('lapbook-delete').onclick=e=>{
+  const b=e.currentTarget;
+  /* Two presses, because there is no getting it back. The second press is the
+     confirmation, and it goes away again if you leave it alone. */
+  if(b.dataset.armed){ b.dataset.armed=''; lapDelete(); b.textContent='Deleted'; 
+    setTimeout(()=>{ b.textContent='Delete lap'; }, 1600); return; }
+  b.dataset.armed='1'; b.textContent='Sure? Press again';
+  setTimeout(()=>{ if(b.dataset.armed){ b.dataset.armed=''; b.textContent='Delete lap'; } }, 3200);
+};
 document.getElementById('lapbook-replay').onclick=()=>{
   if(!TTREC.best) return;
   closeLapBook();
@@ -6948,7 +6995,10 @@ function startTrack(id){
 }
 
 Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
-  btn.addEventListener('click',()=>startTrack(btn.dataset.track));
+  btn.addEventListener('click',()=>{
+    if(booted) enterCircuit();          // already loaded: just go back in
+    else startTrack(btn.dataset.track);
+  });
 });
 
 
