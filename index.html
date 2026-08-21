@@ -60,6 +60,12 @@
               padding:6px 10px;cursor:pointer}
   #gridtoggle:hover{background:rgba(255,255,255,.12)}
   #gridtoggle.hide{display:none}
+  #joybtn{position:fixed;left:18px;top:114px;z-index:8;font-family:var(--mono);
+              font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
+              background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:3px;
+              padding:6px 10px;cursor:pointer}
+  #joybtn:hover{background:rgba(255,255,255,.12)}
+  #joybtn.on{background:rgba(120,220,140,.18);border-color:rgba(120,220,140,.55);color:#c9ffd6}
   /* --------------------------------------------- track limits, by hand */
 
   /* ------------------------------------------ track limits, seen from above */
@@ -568,8 +574,9 @@
 <div id="vignette"></div>
 
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">McLaren MCL39</span></div>
-<div class="hud" id="status">Camera <em id="camname">Nose cam</em><br>Aids <em id="aname">On</em><br>Detail <em id="dname">Full</em><br>Frames <em id="fname">60</em></div>
+<div class="hud" id="status">Camera <em id="camname">Nose cam</em><br>Aids <em id="aname">On</em><br>Detail <em id="dname">Full</em><br>Frames <em id="fname">60</em><br>Joystick <em id="jname">Not connected</em></div>
 <button id="gridtoggle" style="display:none">Editor</button>
+<button id="joybtn">Connect Joystick</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
   <div id="m2hint">Drag a yellow point to move the limit · drag the background to pan · scroll to zoom</div>
@@ -4304,6 +4311,106 @@ addEventListener('keyup',e=>{
   if(tn==='INPUT'||tn==='SELECT'||tn==='TEXTAREA') return;
   keys[e.key.toLowerCase()]=false;});
 
+/* ---------------------------------------------------------- Arduino joystick
+   An analog 2-axis stick + button (the Elegoo starter kit's module) over USB
+   serial, read with the Web Serial API -- Chrome/Edge on desktop, nothing
+   else supports it. No server, no companion app: the browser talks to the
+   board directly once arduino/joystick_controller.ino is on it, at 115200
+   baud, sending "x,accel,brake,click\n" -- x is the raw 0-1023 steering
+   reading, the other three are 0/1 button states.
+
+   Steering only comes off the stick now; two separate pushbuttons drive the
+   pedals, which is why they read as plain on/off rather than the proportional
+   push the Y axis gave. A button is not a potentiometer -- there is nothing
+   to be gentle with.
+
+   This is not a second way of driving. It builds the same {thr,brk,steer}
+   shape the keyboard does and stepCar() already accepts -- steer has always
+   been a real number there, not just -1/0/1, since that is what the AI's
+   pure-pursuit output already was. Whichever input produced the number, the
+   physics downstream are identical. */
+let joyPort=null, joyConnected=false, joyX=512, joyAccel=false, joyBrake=false, joyBtn=false;
+let joyCx=512, joyLastMsg=0, joyBtnPrev=false;
+const JOY_INVERT_X=true;                        // flipped: left/right were backwards on this stick
+const JOY_DEAD=40, JOY_RANGE=470;               // deadzone and travel, in raw ADC counts
+
+function joyAxis(raw, center, invert){
+  let d=raw-center;
+  if(Math.abs(d)<JOY_DEAD) return 0;
+  d -= Math.sign(d)*JOY_DEAD;
+  // divided by what is left of the travel after the deadzone comes out, not
+  // the full travel -- dividing by JOY_RANGE alone undershoots at full
+  // deflection, so a stick pushed to its physical limit never quite reaches 1
+  const v=clamp(d/(JOY_RANGE-JOY_DEAD),-1,1);
+  return invert?-v:v;
+}
+function joyStale(){ return !joyConnected || performance.now()-joyLastMsg>500; }
+
+async function joyReadLoop(port){
+  const decoder=new TextDecoderStream();
+  const closed=port.readable.pipeTo(decoder.writable).catch(()=>{});
+  const reader=decoder.readable.getReader();
+  let buf='';
+  try{
+    while(true){
+      const {value,done}=await reader.read();
+      if(done) break;
+      buf+=value;
+      let nl;
+      while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+        const parts=line.split(',');
+        if(parts.length<4) continue;
+        const x=+parts[0], a=+parts[1], br=+parts[2], b=+parts[3];
+        if(!Number.isFinite(x)) continue;
+        joyX=x; joyAccel=a===1; joyBrake=br===1; joyBtn=b===1; joyLastMsg=performance.now();
+      }
+    }
+  }catch(e){ /* board unplugged mid-read */ }
+  reader.releaseLock();
+  await closed;
+  joyConnected=false; joyPort=null;
+  if(joyWriteTimer){ clearInterval(joyWriteTimer); joyWriteTimer=null; }
+  if(joyWriter){ joyWriter.releaseLock(); joyWriter=null; }
+  updateStatus();
+}
+function joyRecenter(){ joyCx=joyX; }
+
+/* The lap-time display. One direction of the same connection, the other way:
+   TT.t is the live clock this game already keeps (TT.live tells you whether
+   a timed lap is actually running), sent out as plain milliseconds every
+   100 ms so the board can drive its own display without needing to know
+   anything about how the game formats a time -- it just gets a number and
+   decides how to show it. */
+let joyWriter=null, joyWriteTimer=null;
+const _joyEnc=new TextEncoder();
+function joySendLapTime(){
+  if(!joyWriter) return;
+  const ms=Math.max(0, Math.round((TT.live?TT.t:0)*1000));
+  joyWriter.write(_joyEnc.encode(ms+'\n')).catch(()=>{});
+}
+async function joyConnect(){
+  if(!navigator.serial){ console.warn('Web Serial not available -- use Chrome or Edge, on desktop'); return; }
+  if(joyConnected){ joyRecenter(); return; }        // already on: click again to recentre
+  try{
+    const port = joyPort || await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    joyPort=port; joyConnected=true; joyLastMsg=performance.now();
+    joyReadLoop(port);
+    joyWriter=port.writable.getWriter();
+    joyWriteTimer=setInterval(joySendLapTime,100);
+    // the stick is assumed to be at rest right when the port opens -- refined
+    // instantly by clicking Connect again once it is plugged in properly
+    setTimeout(joyRecenter, 300);
+    updateStatus();
+  }catch(e){ console.warn('joystick connect failed or was cancelled', e); }
+}
+// a previously-granted port can be reopened without asking again
+if(navigator.serial){
+  navigator.serial.getPorts().then(ports=>{ if(ports.length) joyPort=ports[0]; }).catch(()=>{});
+}
+document.getElementById('joybtn').addEventListener('click',joyConnect);
+
 /* Camera rig. Cockpit p is a point in the car model's own space (metres
    before the fit-to-5.6 m scale). Chase rides the centreline behind the car. */
 /* How hard the view leans with the ground. Above 1 so a descent is opened
@@ -4330,6 +4437,11 @@ function updateStatus(){
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const dn=document.getElementById('dname'); if(dn) dn.textContent = DETAILS[detailLevel].name;
+  const jn=document.getElementById('jname');
+  if(jn) jn.textContent = !navigator.serial ? 'Unsupported browser'
+                         : joyConnected ? 'Connected (click again to recentre)' : 'Not connected';
+  const jb=document.getElementById('joybtn');
+  if(jb) jb.classList.toggle('on', joyConnected);
 }
 /* Full detail by default, and nothing downgrades it behind your back -- the
    old adaptive check dropped the scene to Low a couple of seconds after load
@@ -6679,8 +6791,8 @@ function placeCar(C, dt, t){
 function drive(dt){
   // up/down arrows now trim the seat height, so they are no longer throttle
   // and brake -- W and S are the drive controls
-  const thr = keys['w'];
-  const brk = keys['s'];
+  let thr = keys['w'];
+  let brk = keys['s'];
   const lft = keys['a']||keys['arrowleft'];
   const rgt = keys['d']||keys['arrowright'];
 
@@ -6693,7 +6805,30 @@ function drive(dt){
      input and full lock arrived long before you meant it. Applying over about
      four tenths of a second makes a tap a small angle and lets you hold a
      partial one, while it still snaps back quicker than it goes on. */
-  const want = (lft?-1:0) + (rgt?1:0);
+  let want = (lft?-1:0) + (rgt?1:0);
+
+  /* The joystick overrides the keyboard's -1/0/1 with a real number when it
+     is connected and has said something in the last half second -- pulling
+     the cable falls back to the keyboard on its own, nothing to press.
+     Steering comes off the stick, proportional; accel and brake come off two
+     separate pushbuttons, so they are plain on/off -- a button is not a
+     potentiometer, there is nothing to be gentle with. */
+  let thrMag = thr?1:0, brkMag = brk?1:0;
+  if(!joyStale()){
+    want = joyAxis(joyX,joyCx,JOY_INVERT_X);
+    thrMag = joyAccel?1:0; brkMag = joyBrake?1:0;
+    thr = joyAccel; brk = joyBrake;
+    if(joyBtn && !joyBtnPrev){                        // stick click: same as R
+      if(TT.gates.length && trackRoot && FREEROAM){
+        const g=TT.gates[0];
+        carState.wx=g.x; carState.wz=g.z; carState.hdg=Math.atan2(g.dx,g.dz);
+        carState.speed=0; PLAYER.steerIn=0; PLAYER.steerAng=0;
+        PLAYER.groundY=g.y+RIDE; clearDebris();
+        ttStart(false);
+      } else resetToTrack();
+    }
+    joyBtnPrev=joyBtn;
+  }
   const kph=carState.speed*3.6;
 
   /* Pinned to the grid until the lights go out. The throttle is deliberately
@@ -6708,7 +6843,7 @@ function drive(dt){
       steerRack(PLAYER, want, 0, dt, AIDS);   // the wheel still turns on the grid
     }else{
       // the same call the preview car makes, with keys instead of a program
-      yawRate=stepCar(PLAYER, {thr:thr?1:0, brk:brk?1:0, steer:want}, dt);
+      yawRate=stepCar(PLAYER, {thr:thrMag, brk:brkMag, steer:want}, dt);
       if(onLoose) looseSpray += carState.speed*looseFrac*dt;
     }
   }else{
@@ -6717,7 +6852,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thr?1:0, brk?1:0, PLAYER.surf, dt);
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt);
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
