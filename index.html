@@ -7411,7 +7411,7 @@ const AI_WIN=6;                    // metres either side, for measuring curvatur
    at La Source by 0.25 m, and 1.30 goes off there and at Stavelot. This is the
    last clean one. */
 const AI_MARGIN=1.20;
-const AI={ n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
+const AI={ lat:0, want:0, speedK:1, mode:'clear', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
            car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
 
 function aiBuild(margin){
@@ -7486,13 +7486,86 @@ function aiVCorner(k){
   }
   return v;
 }
+/* A driver rather than a solver.
+
+   The profile above is what the car can do, and a lap driven exactly on it is
+   the giveaway: every corner taken at precisely the limit, every braking point
+   to the metre, the same every lap. Nobody drives like that. Two things are
+   done to it, both of which are how a quick driver is actually slower than the
+   maths.
+
+   Corners are not all got equally right. Each one gets its own share of the
+   limit, drawn from a seeded hash of its index -- so this corner is taken
+   almost perfectly and that one is left a couple of tenths on, and it is the
+   same corners every lap, the way a driver has corners they are good at.
+
+   And the brakes go on earlier than they have to, everywhere. Braking at the
+   last possible metre is the hardest thing on a lap to do repeatably, so the
+   backward pass runs on a fraction of the real 46 m/s^2: the car arrives at the
+   same apex speed, having started slowing sooner and less hard. Corners the
+   driver is being careful with get braked for earlier still, and that carries
+   back up the straight in front of them rather than stopping at the corner --
+   the whole point of an early brake is that it happens before the corner. */
+/* Swept against the theoretical lap, which the driven lap tracks to within half
+   a second: pace alone at 0.88 is +9.43 s and the brakes at 0.70 take it to
+   +9.96, which is the ten that was asked for. Seventy percent of the brakes is
+   the part you can see -- it starts slowing well before it needs to and rolls
+   into the corner rather than standing on the pedal at the last metre. */
+const AI_PACE={ pace:0.86, spread:0.07, brake:0.85, brakeSpread:0.10, seed:7, reach:260 };
+const aiHash=x=>{ let h=Math.imul(x^0x9e3779b9, 0x85ebca6b); h^=h>>>13;
+                  h=Math.imul(h,0xc2b2ae35); h^=h>>>16; return (h>>>0)/4294967296; };
+/* The corners, as contiguous runs of real curvature, and what this driver makes
+   of each of them. */
+function aiCorners(k, thresh){
+  const n=AI.n, out=[]; let i=0;
+  while(i<n){
+    if(k[i]>thresh){
+      let j=i; while(j<n && k[j]>thresh) j++;
+      if(j-i>=8) out.push([i,j]);
+      i=j;
+    } else i++;
+  }
+  return out;
+}
+function aiPaceFields(k){
+  const n=AI.n, P=AI_PACE;
+  const vf=new Float64Array(n).fill(1);            // share of the limit per corner
+  const bf=new Float64Array(n).fill(1);            // share of the brakes on the way in
+  const corners=aiCorners(k, 1/220);
+  corners.forEach(([a,b],c)=>{
+    const rv=aiHash(P.seed*1013+c*131), rb=aiHash(P.seed*7919+c*271);
+    const fv=1-P.spread*rv, fb=1-P.brakeSpread*rb;
+    for(let q=a;q<b;q++) vf[q]=Math.min(vf[q],fv);
+    /* Backwards up the road in front of the corner, so the early brake is early.
+       Written into the stations approaching it, not into the corner itself. */
+    const reach=Math.round(P.reach/AI.ds);
+    for(let q=0;q<reach;q++){
+      const i=((a-q)%n+n)%n;
+      bf[i]=Math.min(bf[i],fb);
+    }
+  });
+  AI.corners=corners.length;
+  return {vf,bf};
+}
 function aiProfile(k, margin){
-  const n=AI.n, ds=AI.ds, v=new Float64Array(n);
-  for(let i=0;i<n;i++) v[i]=Math.min(MAXSPEED, aiVCorner(k[i]/margin));
+  const n=AI.n, ds=AI.ds, v=new Float64Array(n), P=AI_PACE;
+  const {vf,bf}=aiPaceFields(k);
+  /* Pace is how much of the grip the driver asks for in a corner, so it is
+     applied in proportion to how much of a corner this is. Scaling every
+     station by it -- which is what this did first -- also scales the straights,
+     because a straight's limit is the car's top speed, and the AI came out
+     47 kph down the Kemmel with no corner involved. Being careful through
+     Pouhon does not make the car slower on the straight to Les Combes. */
+  const K0=1/1500, K1=1/600;               // straight, and unarguably a corner
+  for(let i=0;i<n;i++){
+    const w=clamp((k[i]-K0)/(K1-K0),0,1);
+    const f=1-(1-P.pace*vf[i])*w;
+    v[i]=Math.min(MAXSPEED, aiVCorner(k[i]/margin)*f);
+  }
   for(let pass=0;pass<2;pass++){                 // twice, so the lap wraps cleanly
     for(let i=n-1;i>=0;i--){                     // brake, backwards from each apex
-      const j=(i+1)%n;
-      v[i]=Math.min(v[i], Math.sqrt(v[j]*v[j]+2*46*ds));
+      const j=(i+1)%n, B=46*P.brake*bf[i];
+      v[i]=Math.min(v[i], Math.sqrt(v[j]*v[j]+2*B*ds));
     }
     for(let i=0;i<n;i++){                        // power, forwards out of each
       const j=(i+1)%n, a=26.0*(1-(v[i]/MAXSPEED)**2);
@@ -7514,6 +7587,104 @@ function aiLocate(x,z){
     for(let i=0;i<n;i++){ const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2; if(q<bd){bd=q;bi=i;} }
   }
   AI.i=bi; return {i:bi, d:Math.sqrt(bd)};
+}
+/* Traffic.
+
+   The line is where the car wants to be, and another car on it is the one
+   reason to be somewhere else. Everything here is an offset from the line --
+   metres to the right of it -- rather than a second path, so the AI keeps its
+   speed profile, its braking points and its limits, and only ever slides
+   sideways off the line it already knows.
+
+   Which side is decided by where the other car is, not by a rule about
+   overtaking on the left: it moves to the opposite side of the road from you,
+   and if that side has no room at this point of the circuit it takes the other.
+   Room comes from the same survey the track limits use, so a pass cannot put it
+   outside the white line to make room for you.
+
+   Three situations, and the difference between them is who is quicker:
+
+   - You are behind and catching. It moves off the line and eases enough to make
+     the pass definite rather than a long argument down a straight.
+   - You are ahead and slower. It moves off the line and keeps its pace, which
+     is the fastest pass available to something that cannot go through you.
+   - It is closing on you and not yet alongside. It sits behind at your speed
+     until the offset has actually opened, so it never drives through the back
+     of your car while the move is still happening. */
+const AI_TRAF={ look:75, side:3.4, ease:4.0, yieldK:0.90, clear:2.6, ahead:70 };
+function aiPlayerRel(){
+  if(!AI.n || !booted) return null;
+  const n=AI.n, px=carState.wx, pz=carState.wz;
+  let bi=AI._pi||0, bd=Infinity;
+  for(let d=-120;d<=120;d++){
+    const i=((bi+d)%n+n)%n;
+    const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2;
+    if(q<bd){ bd=q; bi=i; }
+  }
+  if(bd>90*90){
+    for(let i=0;i<n;i++){ const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2; if(q<bd){bd=q;bi=i;} }
+  }
+  AI._pi=bi;
+  // signed gap along the lap: +ve means the player is up the road from the AI
+  let d=(bi-AI.i)*AI.ds;
+  if(d>AI.len/2) d-=AI.len;
+  if(d<-AI.len/2) d+=AI.len;
+  const j=(bi+1)%n;
+  const tx=AI.x[j]-AI.x[bi], tz=AI.z[j]-AI.z[bi], tl=Math.hypot(tx,tz)||1;
+  const lat=((px-AI.x[bi])*(tz/tl) - (pz-AI.z[bi])*(tx/tl));   // +ve = right of the line
+  return {i:bi, gap:d, lat, kph:carState.speed*3.6,
+          apart:Math.hypot(px-AI.car.st.wx, pz-AI.car.st.wz)};
+}
+/* How much room there is either side of the line here, from the survey. */
+function aiRoom(i, side){
+  const st=tlStation(AI.x[i], AI.z[i]);
+  if(!st) return 6;
+  return Math.max(0, (side>0?st.dR:st.dL) - 1.3);   // half a car, and a little
+}
+/* And how much there is for the next stretch of it, which is the number that
+   matters: the room where the car is now says nothing about the room where the
+   move puts it. Measured over the distance a pass actually takes, it stopped
+   the AI hanging three metres off the line into Les Combes, where the road
+   narrows -- which is how it ended up 0.43 m outside the white line while
+   getting past a stopped car. */
+function aiRoomAhead(side, metres){
+  const n=AI.n, step=Math.max(1,Math.round(4/AI.ds));
+  let r=99;
+  for(let d=0; d<Math.round(metres/AI.ds); d+=step)
+    r=Math.min(r, aiRoom((AI.i+d)%n, side));
+  return r;
+}
+function aiTraffic(dt){
+  const T=AI_TRAF, C=AI.car;
+  const rel=aiPlayerRel();
+  AI.mode='clear'; AI.want=0; AI.speedK=1;
+  if(rel && Math.abs(rel.gap)<T.look){
+    const mine=C.st.speed*3.6, theirs=rel.kph;
+    const behind=rel.gap<0;
+    // away from you: the racing line is left free for whoever is quicker
+    let side=rel.lat>=0?-1:1;
+    if(aiRoom(AI.i, side)<T.clear && aiRoom(AI.i,-side)>=T.clear) side=-side;
+    const room=Math.min(T.side, aiRoomAhead(side, T.ahead));
+    if(behind && theirs>mine+2){                 // you are catching: let it happen
+      AI.mode='yield'; AI.want=side*room; AI.speedK=T.yieldK;
+    } else if(!behind && mine>theirs+2){         // you are in the way: go by
+      AI.mode='pass'; AI.want=side*room;
+      /* Not through the back of you. Until the offset has opened enough to be
+         a car's width clear, it can be no quicker than you are. */
+      const clear=Math.abs(AI.lat-rel.lat)>T.clear;
+      if(rel.gap<14 && !clear) AI.speedK=Math.min(1, (theirs/Math.max(1,mine)));
+    } else if(rel.apart<12){                     // side by side: hold the offset
+      AI.mode='hold'; AI.want=side*room;
+    }
+  }
+  const step=T.ease*dt;
+  AI.lat += clamp(AI.want-AI.lat, -step, step);
+  /* And whatever it is doing, it is pulled back inside the white line here --
+     the offset is eased, so a road that narrows faster than the ease can answer
+     would otherwise carry it out. */
+  const lim=aiRoom(AI.i, AI.lat>0?1:-1);
+  AI.lat=clamp(AI.lat, -lim, lim);
+  if(Math.abs(AI.lat)<0.02) AI.lat=0;
 }
 /* Pure pursuit for the steering: aim at a point down the line and turn along
    the arc that reaches it. The lookahead grows with speed, or a car doing 300
@@ -7546,7 +7717,16 @@ function aiSteer(C, dt){
      long one understeers, so the cap is gone. */
   const look=clamp(T.look0+v*T.lookK, T.lookMin, T.lookMax);
   const j=(AI.i+Math.round(look/AI.ds))%AI.n;
-  const dx=AI.x[j]-st.wx, dz=AI.z[j]-st.wz;
+  /* Aimed at the line, or beside it. The offset is carried into the target
+     point rather than added to the steering, so every other thing that reads
+     the line -- the speed for it, the room beside it -- is unchanged. */
+  let ax=AI.x[j], az=AI.z[j];
+  if(AI.lat){
+    const j2=(j+1)%AI.n;
+    const tx=AI.x[j2]-AI.x[j], tz=AI.z[j2]-AI.z[j], tl=Math.hypot(tx,tz)||1;
+    ax+= (tz/tl)*AI.lat; az+= -(tx/tl)*AI.lat;
+  }
+  const dx=ax-st.wx, dz=az-st.wz;
   const dist=Math.hypot(dx,dz)||1;
   // heading error, wrapped: +ve means the target is to the left
   let a=Math.atan2(dx,dz)-st.hdg;
@@ -7580,7 +7760,7 @@ function aiPedals(C){
   const v=C.st.speed;
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
   const j=(AI.i+Math.round(la/AI.ds))%AI.n;
-  const tgt=Math.min(AI.v[j], AI.v[AI.i]+2);
+  const tgt=Math.min(AI.v[j], AI.v[AI.i]+2)*(AI.speedK||1);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
   return {thr:0, brk:clamp(-a/46,0,1)};
@@ -7637,6 +7817,7 @@ function aiStep(dt, t){
     AI.room = stn ? (AI.off>0 ? stn.dR : stn.dL) : 99;
     AI.outside = Math.abs(AI.off) - AI.room; }
   if(loc.d>AI.worst) AI.worst=loc.d;
+  aiTraffic(dt);
   const ped=aiPedals(C);
   stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(C,dt)}, dt);
   placeCar(C, dt, t);
@@ -7677,8 +7858,10 @@ window.SIM={
   aiStart(i,flying,margin){ aiSpawn(); aiBuild(margin); aiPlace(i||0,flying);
       AI.on=true; AI.laps=[]; return !!AI.car; },
   aiStop(){ AI.on=false; },
-  get ai(){ return AI.car?{on:AI.on, i:AI.i, s:+(AI.i*AI.ds).toFixed(1),
+  get ai(){ return AI.car?{on:AI.on, i:AI.i, x:+AI.car.st.wx.toFixed(1), z:+AI.car.st.wz.toFixed(1), s:+(AI.i*AI.ds).toFixed(1),
       kph:+(AI.car.st.speed*3.6).toFixed(1), tgt:+(AI.v[AI.i]*3.6).toFixed(1),
+      mode:AI.mode||'clear', lat:+(AI.lat||0).toFixed(2), want:+(AI.want||0).toFixed(2),
+      speedK:+(AI.speedK||1).toFixed(2),
       err:+(AI.err||0).toFixed(2), off:+(AI.off||0).toFixed(2),
       room:+(AI.room||0).toFixed(2), out:+(AI.outside||0).toFixed(2),
       worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
@@ -7709,6 +7892,7 @@ window.SIM={
       y:+AI.obj.position.y.toFixed(2), z:+AI.obj.position.z.toFixed(1)}:null; },
   aiTrace(){ const t=AI.trace||[]; return {n:t.length,
       fields:['t','s','kph','target','err','off','outside','steer','surf'], p:t}; },
+  aiPace(o){ Object.assign(AI_PACE,o||{}); return {...AI_PACE}; },
   aiTune(o){ Object.assign(AI_TUNE,o||{}); return {...AI_TUNE}; },
   aiRun(s0, flying, margin){ aiSpawn(); aiBuild(margin); aiPlace(Math.round(s0/AI.ds), flying!==false);
       AI.on=true; AI.laps=[]; AI.worst=0; AI.trace=[]; AI._next=0; return true; },
