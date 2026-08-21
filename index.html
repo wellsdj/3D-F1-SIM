@@ -4304,6 +4304,9 @@ addEventListener('keydown',e=>{
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
   if(k==='escape' && AIR.on) airMode(false);
+  /* J sends the AI car out, and stops it. It drives the hand-clicked line at
+     the speed the profile solves for the player's own car. */
+  if(k==='j' && FREEROAM && !TTREC.playing && !NET.watching) aiToggle();
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
 });
 addEventListener('keyup',e=>{
@@ -7262,6 +7265,290 @@ function airInit(){
 }
 airInit();
 
+/* ---------------------------------------------------------------------------
+   The AI driver.
+
+   It drives the line that was clicked by hand -- SPA_LINE, the same curve the
+   gates and the track-limit stations are built off -- and it works out its own
+   speed for it. There is no recorded speed anywhere in this: the path says
+   where, the car's own numbers say how fast.
+
+   How fast follows from the car, which is unusually easy to solve here because
+   this car has no friction ellipse. Braking is a flat 46 m/s^2 whatever the
+   steering is doing, and the cornering ceiling does not care about the pedals.
+   So the quickest way round a known path is the textbook one: at every metre,
+   the fastest the car could hold that radius; then a backward pass so it
+   arrives at each apex having braked as late as 46 m/s^2 allows; then a forward
+   pass so it leaves on whatever the engine has at that speed.
+
+   The cornering ceiling is the interesting term. It is not a constant -- it is
+   the smaller of the grip ceiling, A_GRIP*turnBoost(kph), which rises with
+   speed the way downforce does, and the arc full lock can actually describe at
+   that speed, which falls. Below about 130 kph the lock is what binds, above it
+   the grip is, and the profile has to solve for speed on both sides because
+   each side depends on the answer.
+
+   Curvature is measured over a window rather than between neighbours. The line
+   is a smooth curve through 207 clicked points sampled every metre, so three
+   adjacent samples on a straight describe a 200 m circle out of pure noise. A
+   circle through three points a few metres apart is still exact through a
+   steady arc, which is what corners mostly are.  */
+const AI_STEP=1.0;                 // metres between stations on the line
+const AI_WIN=6;                    // metres either side, for measuring curvature
+/* How much of the theoretical limit the profile asks for. Above 1 because the
+   curvature it is built on is the worst of a window rather than the value at a
+   point, which is deliberately pessimistic -- so the honest number is the one
+   that was measured rather than the one that was derived. Swept over eight
+   corners: 1.20 stays inside the white line everywhere, 1.25 puts a wheel out
+   at La Source by 0.25 m, and 1.30 goes off there and at Stavelot. This is the
+   last clean one. */
+const AI_MARGIN=1.20;
+const AI={ n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
+           car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
+
+function aiBuild(margin){
+  if(!TT.curve) return false;
+  const L=TT.len, n=Math.max(16,Math.round(L/AI_STEP));
+  const P=new THREE.Vector3();
+  AI.n=n; AI.len=L; AI.ds=L/n;
+  AI.x=new Float64Array(n); AI.y=new Float64Array(n); AI.z=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    TT.curve.getPointAt(i/n,P);
+    const g=groundAt(P.x,P.z,1e9);
+    AI.x[i]=P.x; AI.y[i]=g.hit?g.y:P.y; AI.z[i]=P.z;
+  }
+  AI.k=aiCurvature(AI_WIN);
+  AI.ks=aiSigned(AI_WIN);
+  AI.v=aiProfile(AI.k, margin||AI_MARGIN);
+  return true;
+}
+/* One over the radius of the circle through the points a window either side --
+   exact for an arc of any radius, and blind to the metre-scale wobble that a
+   three-point estimate reads as a corner. */
+/* The same curvature, but which way it bends -- and in the sign convention the
+   steering already uses, taken from the heading change along the line rather
+   than from a cross product, so it cannot disagree with pure pursuit. */
+function aiSigned(win){
+  const n=AI.n, out=new Float64Array(n);
+  const hdg=i=>{ const j=(i+1)%n; return Math.atan2(AI.x[j]-AI.x[i], AI.z[j]-AI.z[i]); };
+  for(let i=0;i<n;i++){
+    const a=(i-win+n)%n, c=(i+win)%n;
+    let d=hdg(c)-hdg(a);
+    while(d>Math.PI) d-=2*Math.PI;
+    while(d<-Math.PI) d+=2*Math.PI;
+    out[i]=d/(2*win*AI.ds);            // rad per metre = signed 1/R
+  }
+  return out;
+}
+function aiCurvature(win){
+  const n=AI.n, k=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    const a=(i-win+n)%n, c=(i+win)%n;
+    const ax=AI.x[a],az=AI.z[a], bx=AI.x[i],bz=AI.z[i], cx=AI.x[c],cz=AI.z[c];
+    const A=Math.hypot(bx-ax,bz-az), B=Math.hypot(cx-bx,cz-bz), C=Math.hypot(cx-ax,cz-az);
+    const area=Math.abs((bx-ax)*(cz-az)-(cx-ax)*(bz-az))/2;
+    k[i]=(A*B*C>1e-9)?4*area/(A*B*C):0;
+  }
+  /* Then the worst of the neighbourhood, not the average of it. A corner whose
+     radius tightens has to be entered at the speed of its tightest part, and a
+     mean would hand back the speed of its easiest. */
+  const out=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    let m=0;
+    for(let j=-win;j<=win;j++) m=Math.max(m,k[(i+j+n)%n]);
+    out[i]=m;
+  }
+  return out;
+}
+/* The lateral acceleration this car can actually produce at this speed: the
+   grip ceiling and the arc full lock describes, whichever is less. Straight out
+   of yawFor and lockAt -- if either of those changes this follows. */
+function aiALat(v){
+  const kph=v*3.6;
+  const grip=A_GRIP*turnBoost(kph);
+  const dTyre=STEER_LOCK*lockAt(kph)/STEER_RATIO;
+  return Math.min(grip, v*v*Math.tan(dTyre)/WHEELBASE);
+}
+function aiVCorner(k){
+  if(k<1e-6) return MAXSPEED;
+  let v=MAXSPEED;
+  for(let i=0;i<40;i++){          // aLat depends on v, so it is solved, not read
+    const t=Math.sqrt(aiALat(v)/k);
+    v=Math.min(MAXSPEED, v+(t-v)*0.5);
+  }
+  return v;
+}
+function aiProfile(k, margin){
+  const n=AI.n, ds=AI.ds, v=new Float64Array(n);
+  for(let i=0;i<n;i++) v[i]=Math.min(MAXSPEED, aiVCorner(k[i]/margin));
+  for(let pass=0;pass<2;pass++){                 // twice, so the lap wraps cleanly
+    for(let i=n-1;i>=0;i--){                     // brake, backwards from each apex
+      const j=(i+1)%n;
+      v[i]=Math.min(v[i], Math.sqrt(v[j]*v[j]+2*46*ds));
+    }
+    for(let i=0;i<n;i++){                        // power, forwards out of each
+      const j=(i+1)%n, a=26.0*(1-(v[i]/MAXSPEED)**2);
+      v[j]=Math.min(v[j], Math.sqrt(v[i]*v[i]+2*a*ds));
+    }
+  }
+  return v;
+}
+/* Where on the line the car is. Searched forward from where it was, because it
+   is going forwards, with a full sweep only if it has been put somewhere else. */
+function aiLocate(x,z){
+  const n=AI.n; let bi=AI.i, bd=Infinity;
+  for(let d=-8;d<=60;d++){
+    const i=((AI.i+d)%n+n)%n;
+    const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2;
+    if(q<bd){ bd=q; bi=i; }
+  }
+  if(bd>60*60){
+    for(let i=0;i<n;i++){ const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2; if(q<bd){bd=q;bi=i;} }
+  }
+  AI.i=bi; return {i:bi, d:Math.sqrt(bd)};
+}
+/* Pure pursuit for the steering: aim at a point down the line and turn along
+   the arc that reaches it. The lookahead grows with speed, or a car doing 300
+   would be steering at something a tenth of a second away and sawing at it.
+
+   The command is then led, because the rack does not answer instantly: the
+   input ramps toward what it is asked for over about a quarter of a second, so
+   asking for exactly the angle needed means always holding a little less than
+   it. Leading by the outstanding error is what a driver does with their hands
+   and it costs nothing to write down. */
+/* The knobs, in one place, because finding these was a matter of driving
+   sections over and over and reading back where the car ended up. */
+/* ff is zero, and the code for it is left in because the finding is worth
+   keeping: adding the line's own curvature as a feed-forward term made the car
+   worse in every section it was tried in -- 0 bad sections became 3, and the
+   mean worst-off-line went from 1.72 m to 2.26 m at a quarter strength. Pure
+   pursuit already produces exactly the steady-state curvature needed to hold an
+   arc; a second copy of it is not anticipation, it is turning twice as hard as
+   the corner asks and then correcting. */
+const AI_TUNE={ look0:5, lookK:0.32, lookMin:8, lookMax:42, lead:1.6, ff:0.0, ffAt:0.12 };
+function aiSteer(C, dt){
+  const st=C.st, v=st.speed;
+  const T=AI_TUNE;
+  /* Straight speed-scaled lookahead. Capping it to a fraction of the corner
+     radius was tried, on the theory that aiming twenty metres up the road
+     through a twenty-metre hairpin points the car at the exit while it is still
+     at the entry: at 0.85 R it changed nothing measurable (1.71 m against
+     1.72 m over eight corners) and at 0.55 R it threw the car twelve metres off
+     the line at the Bus Stop. A short lookahead destabilises far more than a
+     long one understeers, so the cap is gone. */
+  const look=clamp(T.look0+v*T.lookK, T.lookMin, T.lookMax);
+  const j=(AI.i+Math.round(look/AI.ds))%AI.n;
+  const dx=AI.x[j]-st.wx, dz=AI.z[j]-st.wz;
+  const dist=Math.hypot(dx,dz)||1;
+  // heading error, wrapped: +ve means the target is to the left
+  let a=Math.atan2(dx,dz)-st.hdg;
+  while(a>Math.PI) a-=2*Math.PI;
+  while(a<-Math.PI) a+=2*Math.PI;
+  const kpp=2*Math.sin(a)/dist;                 // curvature of the arc to it
+  const dTyre=Math.atan(WHEELBASE*kpp);
+  const lockF=Math.max(0.05,C.lockF);
+  let want=-dTyre*STEER_RATIO/(STEER_LOCK*lockF);
+  /* Feed-forward. Pure pursuit only ever answers the error it can already see,
+     and the rack takes about a quarter of a second to deliver an angle, so at
+     300 kph the car is thirty metres late to every corner and enters it from
+     the outside. The line's own curvature a fraction of a second ahead is known
+     exactly -- it was measured to build the speed profile -- so the wheel can be
+     turning before the error exists. */
+  if(T.ff>0){
+    const f=(AI.i+Math.round(Math.max(2,v*T.ffAt)/AI.ds))%AI.n;
+    const dFF=Math.atan(WHEELBASE*AI.ks[f]);
+    want += -dFF*STEER_RATIO/(STEER_LOCK*lockF)*T.ff;
+  }
+  want=clamp(want,-1,1);
+  want=clamp(want+(want-C.steerIn)*T.lead, -1, 1);
+  return want;
+}
+/* And the pedals: whatever acceleration gets the car from the speed it has to
+   the speed the profile wants a little further on, expressed as a fraction of
+   what the engine or the brakes can give. Feed-forward, not a chase -- the
+   profile already knows where the braking points are, so the car brakes on
+   arrival at one rather than on noticing it is too fast. */
+function aiPedals(C){
+  const v=C.st.speed;
+  const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
+  const j=(AI.i+Math.round(la/AI.ds))%AI.n;
+  const tgt=Math.min(AI.v[j], AI.v[AI.i]+2);
+  const a=(tgt*tgt-v*v)/(2*la);
+  if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
+  return {thr:0, brk:clamp(-a/46,0,1)};
+}
+function aiSpawn(){
+  if(AI.car||!carObj) return false;
+  const g=new THREE.Group(); scene.add(g);
+  const m=carObj.clone(true);
+  g.add(m); AI.obj=g;
+  AI.car=makeCar(g,false);                      // no aids: it steers with a number
+  AI.car.gripMul=1;                             // the player's grip, exactly
+  return true;
+}
+function aiPlace(i, flying){
+  if(!AI.car) return;
+  const st=AI.car.st, n=AI.n;
+  i=((i|0)%n+n)%n; AI.i=i;
+  st.wx=AI.x[i]; st.wz=AI.z[i];
+  const j=(i+1)%n;
+  st.hdg=Math.atan2(AI.x[j]-AI.x[i], AI.z[j]-AI.z[i]);
+  st.speed=flying?AI.v[i]:0; AI.car.steerIn=0; AI.car.steerAng=0; AI.car.slipAng=0;
+  AI.car.groundY=AI.y[i]+RIDE;
+  /* Prime the surface at the spawn. Without this the first few frames report
+     no surface at all -- probeCar has not run yet -- which reads in a trace as
+     the car starting off the asphalt when it is sitting on the racing line. */
+  probeCar(st.wx, st.wz, st.hdg, AI.y[i], AI.car.surf);
+  AI.t=0; AI.lap=0; AI.worst=0; AI._prev=i;
+}
+function aiToggle(){
+  if(AI.on){ AI.on=false; if(AI.obj) AI.obj.visible=false; return false; }
+  if(!AI.car){ if(!aiSpawn()) return false; }
+  if(!AI.n) aiBuild();
+  AI.obj.visible=true;
+  /* Put out just ahead of the player, at the speed the line carries there, so
+     it arrives already going rather than accelerating from a standstill in
+     front of you. */
+  const loc=aiLocate(carState.wx, carState.wz);
+  aiPlace((loc.i+40)%AI.n, true);
+  AI.on=true;
+  return true;
+}
+function aiStep(dt, t){
+  if(!AI.on||!AI.car) return;
+  const C=AI.car, st=C.st;
+  const loc=aiLocate(st.wx,st.wz);
+  AI.err=loc.d;
+  /* Signed, and against the room the survey says is there. Distance from the
+     line means nothing on its own -- a metre off at Blanchimont is nothing and
+     a metre off at the Bus Stop is in the wall. */
+  { const i=loc.i, j=(i+1)%AI.n;
+    const tx=AI.x[j]-AI.x[i], tz=AI.z[j]-AI.z[i], tl=Math.hypot(tx,tz)||1;
+    AI.off=((st.wx-AI.x[i])*(tz/tl) - (st.wz-AI.z[i])*(tx/tl));  // +ve = right
+    const stn=tlStation(st.wx,st.wz);
+    AI.room = stn ? (AI.off>0 ? stn.dR : stn.dL) : 99;
+    AI.outside = Math.abs(AI.off) - AI.room; }
+  if(loc.d>AI.worst) AI.worst=loc.d;
+  const ped=aiPedals(C);
+  stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(C,dt)}, dt);
+  placeCar(C, dt, t);
+  AI.t+=dt;
+  /* Recorded in here rather than polled from outside: a headless browser asking
+     for the state every frame runs the world at a tenth of real time, and the
+     answer to "where exactly did it lose the line" needs every metre of it. */
+  if(AI.trace && AI.t>=(AI._next||0)){
+    AI._next=AI.t+0.05;
+    AI.trace.push([+AI.t.toFixed(2), +(AI.i*AI.ds).toFixed(1), +(st.speed*3.6).toFixed(1),
+                   +(AI.v[AI.i]*3.6).toFixed(1), +AI.err.toFixed(2), +AI.off.toFixed(2),
+                   +AI.outside.toFixed(2), +C.steerAng.toFixed(3),
+                   C.surf.ok?(C.surf.grass?2:C.surf.loose?3:1):0]);
+    if(AI.trace.length>40000) AI.trace.shift();
+  }
+  // a lap is complete when the station index wraps past where it started
+  if(AI._prev>AI.n*0.9 && AI.i<AI.n*0.1){ AI.laps.push(+AI.t.toFixed(2)); AI.t=0; }
+  AI._prev=AI.i;
+}
+
 window.SIM={
   get air(){ return {on:AIR.on, lines:AIR.lines.length, drawing:AIR.drawing,
                      pts:AIR.lines.map(L=>L.p.length), lens:AIR.lines.map(L=>L.len||0),
@@ -7275,6 +7562,45 @@ window.SIM={
     airEndStroke(); return true;
   },
   airBundle(){ return airBundle(); },
+  aiBuild(margin){ const ok=aiBuild(margin); return ok?{n:AI.n, len:+AI.len.toFixed(1),
+      lap:+(function(){let t=0;for(let i=0;i<AI.n;i++){const j=(i+1)%AI.n;
+        t+=2*AI.ds/(AI.v[i]+AI.v[j]);}return t;})().toFixed(2),
+      top:+(Math.max(...AI.v)*3.6).toFixed(0), min:+(Math.min(...AI.v)*3.6).toFixed(0)}:null; },
+  aiStart(i,flying,margin){ aiSpawn(); aiBuild(margin); aiPlace(i||0,flying);
+      AI.on=true; AI.laps=[]; return !!AI.car; },
+  aiStop(){ AI.on=false; },
+  get ai(){ return AI.car?{on:AI.on, i:AI.i, s:+(AI.i*AI.ds).toFixed(1),
+      kph:+(AI.car.st.speed*3.6).toFixed(1), tgt:+(AI.v[AI.i]*3.6).toFixed(1),
+      err:+(AI.err||0).toFixed(2), off:+(AI.off||0).toFixed(2),
+      room:+(AI.room||0).toFixed(2), out:+(AI.outside||0).toFixed(2),
+      worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
+      laps:AI.laps.slice(), surf:{...AI.car.surf,y:undefined},
+      steer:+AI.car.steerAng.toFixed(3)}:null; },
+  aiObj(){ return AI.obj?{visible:AI.obj.visible, parts:AI.obj.children.length,
+      inScene:!!AI.obj.parent, x:+AI.obj.position.x.toFixed(1),
+      y:+AI.obj.position.y.toFixed(2), z:+AI.obj.position.z.toFixed(1)}:null; },
+  aiTrace(){ const t=AI.trace||[]; return {n:t.length,
+      fields:['t','s','kph','target','err','off','outside','steer','surf'], p:t}; },
+  aiTune(o){ Object.assign(AI_TUNE,o||{}); return {...AI_TUNE}; },
+  aiRun(s0, flying, margin){ aiSpawn(); aiBuild(margin); aiPlace(Math.round(s0/AI.ds), flying!==false);
+      AI.on=true; AI.laps=[]; AI.worst=0; AI.trace=[]; AI._next=0; return true; },
+  aiProfileAt(s){ const i=Math.round(s/AI.ds)%AI.n;
+      return {s, kph:+(AI.v[i]*3.6).toFixed(1), R:+(1/Math.max(1e-9,AI.k[i])).toFixed(0)}; },
+  /* The lap as numbers: the hand-clicked line sampled every metre, with the
+     ground under each point and the room either side of it. Dumped once so the
+     speed profile can be worked out and argued with offline, rather than
+     rebooting a circuit for every attempt. */
+  dumpLine(step){
+    const L=TT.len, n=Math.round(L/(step||1)), P=new THREE.Vector3(), out=[];
+    for(let i=0;i<n;i++){
+      TT.curve.getPointAt((i/n)%1,P);
+      const g=groundAt(P.x,P.z,1e9);
+      const st=tlStation(P.x,P.z);
+      out.push([+P.x.toFixed(2), +(g.hit?g.y:P.y).toFixed(2), +P.z.toFixed(2),
+                st?+st.dR.toFixed(2):0, st?+st.dL.toFixed(2):0]);
+    }
+    return {len:+L.toFixed(1), step:L/n, n, fields:['x','y','z','dR','dL'], p:out};
+  },
   airAlign(u){            // does the overlay agree with what the renderer draws?
     const P=TT.curve.getPointAt(u); const g=groundAt(P.x,P.z,1e9);
     const v=new THREE.Vector3(P.x, g.hit?g.y:0, P.z).project(airCam);
@@ -7549,7 +7875,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { if(!AIR.on) ttStep(dt); drive(dt); netSend(t); }
+  else { if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
