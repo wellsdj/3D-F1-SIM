@@ -7341,7 +7341,12 @@ function frame(now){
     m2Sync();
     skyDome.position.set(m2Cam.position.x, 0, m2Cam.position.z);
     centerNightStars(m2Cam);
+    /* Fog is tuned for the low cockpit camera. From 4000 m above the model it
+       turns the barrier editor into a blurred colour wash, especially at
+       sunset. Keep the editor crisp, then restore the driving fog unchanged. */
+    const _m2fog=scene.fog; scene.fog=null;
     renderer.render(scene, m2Cam);
+    scene.fog=_m2fog;
     return;
   }
   /* The wide shot: high over the middle of the circuit, turning slowly, with
