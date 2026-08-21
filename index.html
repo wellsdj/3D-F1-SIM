@@ -121,6 +121,53 @@
   #tvtagname{font-size:15px;font-weight:600;color:#fff}
   #tvtagof{display:block;font-size:9px;letter-spacing:.24em;opacity:.55;margin-top:2px}
   body.cinema #tvtag{opacity:0}
+  /* Recording takes for the AI driver. A mode you switch on, a map you
+     teleport around with, and two marks -- start recording, stop recording --
+     that bracket one run through one corner. Nothing here is saved to the
+     browser: a take is held in memory until you copy it out. */
+  #airtag{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:32;
+          display:none;font-family:var(--mono);font-size:10px;letter-spacing:.22em;
+          text-transform:uppercase;color:var(--paper);background:rgba(10,13,19,.82);
+          border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:7px 16px;
+          white-space:nowrap}
+  #airtag.on{display:block}
+  #airtag b{color:#fff;font-weight:600}
+  #airtag .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+               background:#ff3b30;margin-right:8px;vertical-align:-1px;
+               animation:airblink 1s steps(2,end) infinite}
+  #airtag.idle .dot{background:#ffd21e;animation:none}
+  @keyframes airblink{50%{opacity:.15}}
+  #airwrap{position:fixed;inset:0;z-index:31;display:none}
+  #airwrap.on{display:block}
+  #airhint{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+           font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+           text-transform:uppercase;color:var(--paper);opacity:.75;
+           background:rgba(10,13,19,.8);border-radius:999px;padding:8px 18px}
+  #airpanel{position:fixed;right:18px;top:64px;z-index:33;display:none;width:290px;
+            font-family:var(--mono);color:var(--paper);background:rgba(10,13,19,.92);
+            border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:16px}
+  #airpanel.on{display:block}
+  #airpanel h4{margin:0 0 10px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+               color:#fff;font-weight:600}
+  #airstats{font-size:10px;line-height:1.7;letter-spacing:.06em;opacity:.8;margin-bottom:12px}
+  #airstats b{color:#ffd21e;font-weight:600}
+  #airpanel label{display:block;font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+                  opacity:.55;margin:9px 0 4px}
+  #airpanel input,#airpanel select{width:100%;box-sizing:border-box;font-family:var(--mono);
+            font-size:11px;color:#fff;background:rgba(255,255,255,.07);
+            border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:7px 8px}
+  #airbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px}
+  #airpanel button{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+            text-transform:uppercase;color:var(--paper);cursor:pointer;
+            background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);
+            border-radius:6px;padding:9px 4px}
+  #airpanel button:hover{background:rgba(255,255,255,.16)}
+  #airpanel button.key{background:#ffd21e;border-color:#ffd21e;color:#0a0d13;font-weight:600}
+  #airpanel button.wide{grid-column:1/-1}
+  #airnote{font-size:9px;letter-spacing:.06em;line-height:1.6;opacity:.5;
+           text-transform:none;margin-top:12px}
+  #airmsg{font-size:9px;letter-spacing:.08em;color:#ffd21e;min-height:12px;margin-top:8px;
+          text-transform:none}
   #netbar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9;
           display:none;align-items:center;gap:12px;font-family:var(--mono);
           color:var(--paper);background:rgba(10,13,19,.8);
@@ -557,6 +604,29 @@
   <div id="netmsg"></div>
 </div>
 <div id="tvtag"><span id="tvtagname">CAM 01</span><small id="tvtagof">of 20</small></div>
+<div id="airtag"><span class="dot"></span><b id="airtagname">Recording mode</b>
+  <span id="airtagsub"></span></div>
+<div id="airwrap">
+  <canvas id="aircanvas" width="1600" height="1000"></canvas>
+  <div id="airhint">Click anywhere on the circuit to teleport there &middot; drag to pan &middot; scroll to zoom &middot; P or Esc to close</div>
+</div>
+<div id="airpanel">
+  <h4 id="airtitle">Recording finished</h4>
+  <div id="airstats"></div>
+  <label>Corner</label>
+  <input id="aircorner" list="aircorners" placeholder="Eau Rouge" autocomplete="off" spellcheck="false">
+  <datalist id="aircorners"></datalist>
+  <label>Line</label>
+  <select id="airkind"></select>
+  <div id="airbtns">
+    <button id="airsave" class="key wide">Keep this take</button>
+    <button id="airagain">Record again</button>
+    <button id="airdrop">Discard</button>
+    <button id="aircopy" class="wide">Copy everything held</button>
+  </div>
+  <div id="airmsg"></div>
+  <div id="airnote">Held in this session only &mdash; nothing is written to the browser. Copy before you reload.</div>
+</div>
 <div id="netbar"><span class="ttlbl">Watching</span><b id="netbarcode">------</b>
   <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
@@ -4214,6 +4284,11 @@ function setSound(name, offset){
 /* --------------------------------------------------------------- controls */
 const keys=Object.create(null);
 addEventListener('keydown',e=>{
+  /* Typing into a field is not driving. The recorder panel put the first text
+     input in front of the player, and without this every letter of "Eau Rouge"
+     was also a control -- the E, the U and the R all do something. */
+  const tn=(e.target&&e.target.tagName)||'';
+  if(tn==='INPUT'||tn==='SELECT'||tn==='TEXTAREA') return;
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
@@ -4240,9 +4315,21 @@ addEventListener('keydown',e=>{
     } else resetToTrack();
   }
   if(k==='g') armStart();                            // back to the grid, new sequence
+  /* Recording takes for the AI. K is the mode, P is the teleport map, B starts
+     and stops a take -- and all three do nothing at all unless the mode is on,
+     so a normal session cannot fall into it by accident. */
+  if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
+  if(AIR.on){
+    if(k==='p') airMapShow(!AIR.map);
+    if(k==='b'){ AIR.rec?airRecStop(false):airRecStart(); }
+    if(k==='escape' && AIR.map) airMapShow(false);
+  }
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
 });
-addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+addEventListener('keyup',e=>{
+  const tn=(e.target&&e.target.tagName)||'';
+  if(tn==='INPUT'||tn==='SELECT'||tn==='TEXTAREA') return;
+  keys[e.key.toLowerCase()]=false;});
 
 /* Camera rig. Cockpit p is a point in the car model's own space (metres
    before the fit-to-5.6 m scale). Chase rides the centreline behind the car. */
@@ -6772,7 +6859,350 @@ function presentCar(dt, thr, brk, gridded, yawRate){
    headless browser can start a preview and read back what the car is doing
    metre by metre, which is the only way to answer "why is it slow there"
    without sitting in it. Read-only, a few getters, no cost when unused. */
+/* ---------------------------------------------------------------------------
+   Recording takes for the AI driver.
+
+   The AI is going to be driven by lines the player recorded himself, not by a
+   solver: several passes through each corner -- the racing line, and the
+   compromised lines you take when there is another car beside you -- stitched
+   together at run time. This is the tool that captures them.
+
+   Three things it needs, and nothing else. A mode you can switch on so the
+   time trial gets out of the way. A way to get to the corner you want to work
+   on without driving there, which is the map: the circuit from straight above,
+   click and you are put down on that spot facing the right way. And a start
+   mark and a stop mark, so a take is exactly the section you meant.
+
+   What comes out is deliberately not the raw capture. It samples at 30 Hz
+   while you drive, then resamples to one point per metre on the way out --
+   which is both far smaller to hand over and the shape the stitching wants,
+   since matching two takes means matching them in space, not in time.
+
+   Nothing is written to localStorage. The takes live in this tab until they
+   are copied out, which is what was asked for: the data is meant to come to
+   me, not to accumulate silently in the browser.  */
+const AIR_HZ=30;                       // capture rate; the export is by distance
+const AIR_SPACING=1.0;                 // metres between exported points
+const AIR_KINDS=[
+  ['line',    'Racing line'],
+  ['wide-in', 'Wide entry'],
+  ['wide-out','Wide exit / running wide'],
+  ['inside',  'Defensive inside'],
+  ['dive',    'Late-braking dive'],
+  ['yield',   'Offline, letting a car through']
+];
+const AIR_CORNERS=['La Source','Eau Rouge','Raidillon','Kemmel','Les Combes','Malmedy',
+  'Rivage','Bruxelles','Speakers Corner','Pouhon','Fagnes','Campus','Stavelot',
+  'Paul Frere','Blanchimont','Bus Stop'];
+const AIR={on:false, rec:false, map:false, t0:0, next:0, frames:[], take:null,
+           takes:[], corner:'', kind:'line'};
+let airSc=0.16, airX=0, airY=0, airPan=false, airLX=0, airLY=0, airMoved=0;
+const airCam=new THREE.OrthographicCamera(-100,100,100,-100,1,20000);
+const airEl=()=>document.getElementById('aircanvas');
+
+function airSync(){
+  const c=airEl(); if(!c) return;
+  const wx0=(0-airX)/airSc, wx1=(c.width-airX)/airSc;
+  const wz0=(0-airY)/airSc, wz1=(c.height-airY)/airSc;
+  const cx=(wx0+wx1)/2, cz=(wz0+wz1)/2;
+  airCam.left=-(wx1-wx0)/2; airCam.right=(wx1-wx0)/2;
+  airCam.top=(wz1-wz0)/2;   airCam.bottom=-(wz1-wz0)/2;
+  airCam.near=1; airCam.far=12000;
+  airCam.position.set(cx,4000,cz);
+  airCam.up.set(0,0,-1);
+  airCam.lookAt(cx,0,cz);
+  airCam.updateProjectionMatrix(); airCam.updateMatrixWorld();
+}
+const airsx=x=>x*airSc+airX, airsy=z=>z*airSc+airY;
+const airwx=sx=>(sx-airX)/airSc, airwz=sy=>(sy-airY)/airSc;
+
+function airFit(){
+  const c=airEl(); if(!c||!TT.curve) return;
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+  const P=new THREE.Vector3();
+  for(let u=0;u<=1.0001;u+=1/300){
+    TT.curve.getPointAt(Math.min(u,1),P);
+    if(P.x<x0)x0=P.x; if(P.x>x1)x1=P.x; if(P.z<z0)z0=P.z; if(P.z>z1)z1=P.z;
+  }
+  airSc=Math.min(c.width/(x1-x0+300), c.height/(z1-z0+300));
+  airX=c.width/2-((x0+x1)/2)*airSc;
+  airY=c.height/2-((z0+z1)/2)*airSc;
+}
+function airMapShow(on){
+  AIR.map=on&&AIR.on;
+  const w=document.getElementById('airwrap');
+  if(w) w.classList.toggle('on',AIR.map);
+  if(AIR.map){
+    const c=airEl();
+    if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
+           c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
+    airFit(); airDraw();
+  }
+  airTag();
+}
+function airDraw(){
+  const c=airEl(); if(!c) return;
+  airSync();
+  const g=c.getContext('2d');
+  g.clearRect(0,0,c.width,c.height);
+  if(TT.curve){                                  // the lap, so you can see the shape
+    g.strokeStyle='rgba(255,210,30,.45)'; g.lineWidth=2;
+    g.beginPath();
+    const P=new THREE.Vector3();
+    for(let u=0;u<=1.0001;u+=1/600){
+      TT.curve.getPointAt(Math.min(u,1),P);
+      const x=airsx(P.x), y=airsy(P.z);
+      u===0?g.moveTo(x,y):g.lineTo(x,y);
+    }
+    g.stroke();
+  }
+  // where the car is now, and which way it is pointing
+  const cx=airsx(carState.wx), cy=airsy(carState.wz);
+  g.save(); g.translate(cx,cy); g.rotate(-carState.hdg);
+  g.fillStyle='#fff'; g.beginPath();
+  g.moveTo(0,-9); g.lineTo(6,7); g.lineTo(0,3.5); g.lineTo(-6,7);
+  g.closePath(); g.fill();
+  g.restore();
+}
+/* Which way the track runs where you put the car down. Taken from the lap
+   curve rather than from the model, so a teleport faces you down the road even
+   in the middle of a corner -- being dropped in facing a barrier was the thing
+   that made the first version of this useless. */
+function airHeadingAt(x,z){
+  if(!TT.curve) return carState.hdg;
+  const P=new THREE.Vector3(); let bu=0, bd=1e18;
+  for(let i=0;i<=1200;i++){
+    const u=i/1200; TT.curve.getPointAt(u,P);
+    const d=(P.x-x)*(P.x-x)+(P.z-z)*(P.z-z);
+    if(d<bd){ bd=d; bu=u; }
+  }
+  const T=TT.curve.getTangentAt(bu);
+  return Math.atan2(T.x,T.z);
+}
+function airPlace(x,z){
+  const g=groundAt(x,z,1e9);
+  if(!g.hit) return false;
+  carState.wx=x; carState.wz=z; carState.hdg=airHeadingAt(x,z);
+  carState.speed=0; carState.psi=0; carState.n=0;
+  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
+  PLAYER.groundY=g.y+RIDE;
+  carGroup.position.set(x,PLAYER.groundY,z);
+  clearDebris();
+  return true;
+}
+function airMode(on){
+  AIR.on=on;
+  if(on){
+    /* Out of the way of the time trial. A take is a piece of a corner driven
+       over and over from a standing teleport, which is not a lap, and leaving
+       the countdown and the gates running meant a banner every few seconds. */
+    TT.live=false; TT.cd=0; TT.drone=0; TT.void=false;
+    startPhase='go'; TTREC.on=false;
+    document.body.classList.remove('cinema');
+  } else {
+    /* Leaving throws away a take that was never kept -- otherwise the next
+       session opens with the tail end of the last one still in hand -- but
+       everything already kept stays, because it has not been copied out yet. */
+    airRecStop(true); AIR.take=null; AIR.frames=[];
+    airMapShow(false); airPanel(false);
+  }
+  airTag();
+}
+function airRecStart(){
+  AIR.frames=[]; AIR.t0=t; AIR.next=0; AIR.rec=true;
+  airPanel(false); airTag();
+}
+function airStep(dt){
+  if(!AIR.rec) return;
+  const et=t-AIR.t0;
+  if(et<AIR.next) return;
+  AIR.next=et+1/AIR_HZ;
+  AIR.frames.push([+et.toFixed(3), +carState.wx.toFixed(2), +carState.wz.toFixed(2),
+                   +carState.hdg.toFixed(4), +carState.speed.toFixed(2),
+                   +PLAYER.steerAng.toFixed(4), keys['w']?1:0, keys['s']?1:0]);
+}
+/* One point per metre. The capture is even in time, so the fast half of a
+   corner is thinly sampled and the slow half densely -- the opposite of what
+   is wanted for a path. Walking it out by distance fixes the density and makes
+   two takes of the same corner directly comparable, which is what stitching
+   them together will need. Speed and steering are interpolated along the
+   segment they fall in; heading is unwrapped first so a take that crosses the
+   back of the circle does not average to pointing the wrong way. */
+function airResample(f){
+  if(f.length<2) return null;
+  const hdg=[f[0][3]];
+  for(let i=1;i<f.length;i++){
+    let d=f[i][3]-f[i-1][3];
+    while(d>Math.PI) d-=2*Math.PI;
+    while(d<-Math.PI) d+=2*Math.PI;
+    hdg.push(hdg[i-1]+d);
+  }
+  const s=[0];
+  for(let i=1;i<f.length;i++)
+    s.push(s[i-1]+Math.hypot(f[i][1]-f[i-1][1], f[i][2]-f[i-1][2]));
+  const L=s[s.length-1];
+  if(L<2) return null;
+  const out=[]; let i=1;
+  for(let d=0; d<=L+1e-6; d+=AIR_SPACING){
+    while(i<s.length-1 && s[i]<d) i++;
+    const a=f[i-1], b=f[i];
+    const span=s[i]-s[i-1];
+    const k=span>1e-6?clamp((d-s[i-1])/span,0,1):0;
+    const lerp=(p,q)=>p+(q-p)*k;
+    let h=lerp(hdg[i-1],hdg[i]);
+    while(h>Math.PI) h-=2*Math.PI;
+    while(h<-Math.PI) h+=2*Math.PI;
+    out.push([+lerp(a[1],b[1]).toFixed(2), +lerp(a[2],b[2]).toFixed(2),
+              +lerp(a[4],b[4]).toFixed(2), +h.toFixed(3),
+              +lerp(a[5],b[5]).toFixed(3), k<0.5?a[6]:b[6], k<0.5?a[7]:b[7]]);
+  }
+  return {len:+L.toFixed(1), dur:+(f[f.length-1][0]-f[0][0]).toFixed(2),
+          vmax:+(Math.max(...f.map(r=>r[4]))*3.6).toFixed(1),
+          vmin:+(Math.min(...f.map(r=>r[4]))*3.6).toFixed(1),
+          p:out};
+}
+function airRecStop(quiet){
+  if(!AIR.rec) return;
+  AIR.rec=false;
+  const r=airResample(AIR.frames);
+  AIR.take=r;
+  airTag();
+  if(quiet||!r) return;
+  airPanel(true);
+}
+function airTag(){
+  const el=document.getElementById('airtag'); if(!el) return;
+  el.classList.toggle('on',AIR.on);
+  el.classList.toggle('idle',!AIR.rec);
+  const n=document.getElementById('airtagname'), sb=document.getElementById('airtagsub');
+  if(AIR.rec){
+    const et=t-AIR.t0;
+    n.textContent='Recording';
+    sb.textContent='· '+et.toFixed(1)+'s · B to stop';
+  } else if(AIR.map){
+    n.textContent='Teleport';
+    sb.textContent='· click the circuit';
+  } else {
+    n.textContent='Recording mode on';
+    sb.textContent='· B to record · P for the map · K to leave · '+AIR.takes.length+' held';
+  }
+}
+function airPanel(on){
+  const el=document.getElementById('airpanel'); if(!el) return;
+  el.classList.toggle('on',!!on);
+  if(!on) return;
+  const r=AIR.take;
+  const st=document.getElementById('airstats');
+  st.innerHTML = r
+    ? 'Length <b>'+r.len+' m</b><br>Time <b>'+r.dur+' s</b><br>'
+      +'Speed <b>'+r.vmin+'</b> to <b>'+r.vmax+' kph</b><br>Points <b>'+r.p.length+'</b>'
+    : 'Nothing captured &mdash; the car did not move far enough.';
+  document.getElementById('airsave').disabled=!r;
+  document.getElementById('aircorner').value=AIR.corner;
+  document.getElementById('airkind').value=AIR.kind;
+  airMsg('');
+}
+function airMsg(s){
+  const m=document.getElementById('airmsg'); if(m) m.textContent=s;
+}
+function airBundle(){
+  return { schema:'airline-1', track:(TRACK&&TRACK.id)||'spa22',
+           spacing:AIR_SPACING, fields:['x','z','speed','hdg','steer','thr','brk'],
+           units:{x:'m',z:'m',speed:'m/s',hdg:'rad',steer:'rad'},
+           takes:AIR.takes };
+}
+function airCopy(){
+  const n=AIR.takes.length;
+  if(!n){ airMsg('Nothing held yet.'); return; }
+  const txt=JSON.stringify(airBundle());
+  const done=()=>airMsg(n+' take'+(n===1?'':'s')+' copied · '+Math.round(txt.length/1024)+' KB');
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(done,()=>airMsg('Copy blocked — see the console'));
+  else airMsg('Copy blocked — see the console');
+  console.log(txt);
+}
+function airSave(){
+  const r=AIR.take; if(!r) return;
+  AIR.corner=(document.getElementById('aircorner').value||'').trim();
+  AIR.kind=document.getElementById('airkind').value;
+  const n=AIR.takes.filter(x=>x.corner===AIR.corner&&x.kind===AIR.kind).length+1;
+  AIR.takes.push({corner:AIR.corner||'unnamed', kind:AIR.kind, take:n,
+                  len:r.len, dur:r.dur, vmax:r.vmax, vmin:r.vmin, p:r.p});
+  AIR.take=null;
+  airMsg('Kept — '+(AIR.corner||'unnamed')+' · '+AIR.kind+' · take '+n
+         +' · '+AIR.takes.length+' held');
+  document.getElementById('airsave').disabled=true;
+  airTag();
+}
+/* The takes are in memory and nowhere else, which is what was asked for. That
+   makes a reload a way to lose an afternoon, so a reload has to be argued for
+   while any are still held. */
+addEventListener('beforeunload',e=>{
+  if(!AIR.takes.length) return;
+  e.preventDefault(); e.returnValue='';
+});
+function airInit(){
+  const sel=document.getElementById('airkind');
+  if(sel) sel.innerHTML=AIR_KINDS.map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('');
+  const dl=document.getElementById('aircorners');
+  if(dl) dl.innerHTML=AIR_CORNERS.map(c=>'<option value="'+c+'">').join('');
+  const c=airEl();
+  if(c){
+    const pos=e=>{ const b=c.getBoundingClientRect();
+      return [(e.clientX-b.left)*c.width/b.width,(e.clientY-b.top)*c.height/b.height]; };
+    c.addEventListener('pointerdown',e=>{
+      const [x,y]=pos(e); airPan=true; airLX=x; airLY=y; airMoved=0;
+      c.setPointerCapture(e.pointerId);
+    });
+    c.addEventListener('pointermove',e=>{
+      if(!airPan) return;
+      const [x,y]=pos(e);
+      airMoved+=Math.hypot(x-airLX,y-airLY);
+      airX+=x-airLX; airY+=y-airLY; airLX=x; airLY=y; airDraw();
+    });
+    c.addEventListener('pointerup',e=>{
+      const [x,y]=pos(e);
+      airPan=false;
+      /* A click is a drag that went nowhere. Four pixels of slack, because a
+         click with a trackpad is never perfectly still and losing the teleport
+         to a two-pixel wobble is maddening. */
+      if(airMoved<4){
+        if(airPlace(airwx(x),airwz(y))){ airMapShow(false); }
+        else airMsg('');
+      }
+    });
+    c.addEventListener('wheel',e=>{
+      e.preventDefault();
+      const [x,y]=pos(e);
+      const f=Math.exp(-e.deltaY*0.0016);
+      const wx=airwx(x), wz=airwz(y);
+      airSc=clamp(airSc*f,0.02,6);
+      airX=x-wx*airSc; airY=y-wz*airSc;
+      airDraw();
+    },{passive:false});
+  }
+  const b=(id,fn)=>{ const el=document.getElementById(id); if(el) el.onclick=fn; };
+  b('airsave',airSave);
+  b('aircopy',airCopy);
+  b('airagain',()=>{ airPanel(false); airRecStart(); });
+  b('airdrop',()=>{ AIR.take=null; AIR.frames=[]; airPanel(false); airTag(); });
+}
+
+airInit();
+
 window.SIM={
+  get air(){ return {on:AIR.on, rec:AIR.rec, map:AIR.map, frames:AIR.frames.length,
+                     take:AIR.take?{len:AIR.take.len,dur:AIR.take.dur,pts:AIR.take.p.length}:null,
+                     held:AIR.takes.length,
+                     panel:document.getElementById('airpanel').classList.contains('on'),
+                     tag:document.getElementById('airtag').classList.contains('on')}; },
+  airKey(k){ const e=new KeyboardEvent('keydown',{key:k}); dispatchEvent(e); },
+  airClickMap(x,z){ return airPlace(x,z); },
+  airLine(u){ const P=TT.curve.getPointAt(u), T=TT.curve.getTangentAt(u);
+              return {x:P.x,z:P.z,hdg:Math.atan2(T.x,T.z)}; },
+  airSave(c,k){ const ci=document.getElementById('aircorner'), ki=document.getElementById('airkind');
+                if(c!==undefined) ci.value=c; if(k!==undefined) ki.value=k; airSave(); return AIR.takes.length; },
+  airBundle(){ return airBundle(); },
   get ready(){ return !!(HF.bins && carObj); },
   get player(){ return {kph:carState.speed*3.6, x:carState.wx, z:carState.wz,
                         hdg:carState.hdg, groundY:PLAYER.groundY,
@@ -7038,7 +7468,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { ttStep(dt); drive(dt); netSend(t); }
+  else { if(!AIR.on) ttStep(dt); drive(dt); airStep(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
@@ -7212,6 +7642,15 @@ function frame(now){
      word rather than a second either side of it. */
   /* Editing the limits: the circuit from straight above, through the same
      renderer, with the line drawn over it on the overlay canvas. */
+  /* The teleport map. Same trick as the limits editor: the circuit from
+     straight above through the same renderer, with the overlay drawn on top. */
+  if(AIR.rec && (_stepCount%15)===0) airTag();
+  if(AIR.map){
+    airSync(); airDraw();
+    skyDome.position.set(airCam.position.x,0,airCam.position.z);
+    renderer.render(scene,airCam);
+    return;
+  }
   if(m2On){
     m2Sync();
     skyDome.position.set(m2Cam.position.x, 0, m2Cam.position.z);
