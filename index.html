@@ -60,6 +60,9 @@
               padding:6px 10px;cursor:pointer}
   #gridtoggle:hover{background:rgba(255,255,255,.12)}
   #gridtoggle.hide{display:none}
+  #barbtn{position:fixed;right:18px;top:76px;z-index:8;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+           color:#dfe7f1;background:rgba(5,10,16,.72);border:1px solid rgba(236,234,228,.22);border-radius:4px;padding:9px 12px;cursor:pointer}
+  #barbtn:hover{background:rgba(255,176,32,.16);border-color:#ffb020}
   /* --------------------------------------------- track limits, by hand */
 
   /* ------------------------------------------ track limits, seen from above */
@@ -564,6 +567,9 @@
   <div id="m2bar">
     <button id="m2in">Inside</button>
     <button id="m2out" class="on">Outside</button>
+    <button id="m2barrier">Barrier path</button>
+    <button id="m2barrierundo">Undo</button>
+    <button id="m2barrierclear">Clear</button>
     <span id="m2info"></span>
     <button id="m2copy">Copy</button>
     <button id="m2close">Done</button>
@@ -580,6 +586,7 @@
   <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
 <button id="tlbtn">Track limits</button>
+<button id="barbtn">Barriers</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
 <div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b></div>
 <div id="tlpanel">
@@ -3867,6 +3874,31 @@ function hitBarrier(vIn){
   const n=clamp(Math.round(vIn*0.75),1,8);
   for(let i=0;i<n;i++) spawnPiece(vIn);
 }
+let customBarrierCooldown=0;
+function customBarrierResolve(st,dt){
+  if(!barrierSegments.length){ customBarrierCooldown=Math.max(0,customBarrierCooldown-dt); return; }
+  customBarrierCooldown=Math.max(0,customBarrierCooldown-dt);
+  const vx=Math.sin(st.hdg)*st.speed, vz=Math.cos(st.hdg)*st.speed;
+  for(const s of barrierSegments){
+    const dx=s.bx-s.ax,dz=s.bz-s.az, l2=dx*dx+dz*dz;
+    const t=clamp(((st.wx-s.ax)*dx+(st.wz-s.az)*dz)/Math.max(l2,1e-6),0,1);
+    const qx=s.ax+dx*t,qz=s.az+dz*t, ex=st.wx-qx,ez=st.wz-qz, d=Math.hypot(ex,ez);
+    const radius=CAR_HALF_W+0.65;
+    if(d>radius) continue;
+    let nx=ex/d,nz=ez/d;
+    if(!isFinite(nx)||!isFinite(nz)){ nx=s.nx; nz=s.nz; }
+    const into=vx*nx+vz*nz;
+    if(into>=0 && d>CAR_HALF_W*.6) continue;
+    st.wx=qx+nx*(radius+.03); st.wz=qz+nz*(radius+.03);
+    if(customBarrierCooldown<=0){
+      const rvx=vx-2*into*nx, rvz=vz-2*into*nz;
+      st.hdg=Math.atan2(rvx,rvz); st.speed=Math.max(0.8,st.speed*(into< -1.2?.34:.62));
+      hitBarrier(Math.abs(into)); customBarrierCooldown=.22;
+    } else st.speed*=.96;
+    return true;
+  }
+  return false;
+}
 function clearDebris(){
   _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1);
   _dmtx.compose(_dv,_dq,_ds);
@@ -5054,6 +5086,9 @@ function clearGround(v,pad){
    what the car is judged against, and Copy hands you the numbers to keep. */
 let m2Vis=[];
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
+let m2BarrierMode=false, m2BarrierPan=false, m2Moved=0;
+let barrierLines=[], barrierPts=[], barrierGroup=null, barrierSegments=[], barrierLoaded=false;
+const BAR_KEY='f1sim.barriers.v1';
 const m2El=()=>document.getElementById('m2canvas');
 
 const m2Cam=new THREE.OrthographicCamera(-100,100,100,-100,1,20000);
@@ -5078,6 +5113,7 @@ function m2Sync(){
 }
 function m2Show(on){
   m2On=on;
+  if(on && m2BarrierMode) barRestore();
   const w=document.getElementById('m2wrap');
   if(w) w.classList.toggle('on',on);
   if(on){
@@ -5089,7 +5125,9 @@ function m2Show(on){
   }
 }
 function m2Fit(){
-  const pts=tleLines[m2Edge].length?tleLines[m2Edge]:tleLines[0];
+  const pts=m2BarrierMode
+    ? (barrierLines.flat().length?barrierLines.flat():(tleLines[0]||[]))
+    : (tleLines[m2Edge].length?tleLines[m2Edge]:tleLines[0]);
   if(!pts.length) return;
   let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
   for(const p of pts){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.z<z0)z0=p.z; if(p.z>z1)z1=p.z; }
@@ -5110,6 +5148,24 @@ function m2Draw(){
      from directly overhead by the same renderer that draws the game. The line
      is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
+
+  if(m2BarrierMode){
+    const drawLine=(pts,color,width,closed=false)=>{
+      if(pts.length<2) return;
+      g.strokeStyle=color; g.lineWidth=width; g.lineJoin='round'; g.lineCap='round';
+      g.beginPath(); pts.forEach((p,i)=>{ const x=m2sx(p.x),y=m2sy(p.z); i?g.lineTo(x,y):g.moveTo(x,y); });
+      if(closed) g.closePath(); g.stroke();
+    };
+    barrierLines.forEach(l=>drawLine(l,'#ff3b30',7));
+    drawLine(barrierPts,'#ffd21e',5);
+    const all=barrierLines.flat().concat(barrierPts);
+    all.forEach((p,i)=>{ const x=m2sx(p.x),y=m2sy(p.z); g.beginPath(); g.arc(x,y,6,0,Math.PI*2);
+      g.fillStyle=i>=all.length-barrierPts.length?'#fff':'#ffd21e'; g.fill();
+      g.strokeStyle='rgba(0,0,0,.7)'; g.lineWidth=1.5; g.stroke(); });
+    const info=document.getElementById('m2info');
+    if(info) info.textContent='Barrier path · '+barrierLines.length+' lines · '+barrierPts.length+' new points';
+    return;
+  }
 
   // the racing line, faint, so you can see which way round the circuit goes
   if(TT.curve){
@@ -5181,12 +5237,18 @@ function m2Init(){
   c.addEventListener('pointerdown',e=>{
     window._m2downs=(window._m2downs||0)+1;
     const [x,y]=pos(e);
+    if(m2BarrierMode){ m2BarrierPan=true; m2Moved=0; m2LX=x; m2LY=y; c.setPointerCapture(e.pointerId); return; }
     m2Drag=m2Hit(x,y);
     if(m2Drag<0){ m2Pan=true; m2LX=x; m2LY=y; }
     c.setPointerCapture(e.pointerId); m2Draw();
   });
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
+    if(m2BarrierMode && m2BarrierPan){
+      const dx=x-m2LX,dy=y-m2LY; m2Moved+=Math.abs(dx)+Math.abs(dy);
+      if(m2Moved>8){ m2X+=dx; m2Y+=dy; m2LX=x; m2LY=y; m2Draw(); }
+      return;
+    }
     if(m2Drag>=0){
       const p=tleLines[m2Edge][m2Drag];
       p.x=m2wx(x); p.z=m2wz(y);
@@ -5196,7 +5258,12 @@ function m2Init(){
       m2X+=x-m2LX; m2Y+=y-m2LY; m2LX=x; m2LY=y; m2Draw();
     }
   });
-  c.addEventListener('pointerup',()=>{
+  c.addEventListener('pointerup',e=>{
+    if(m2BarrierMode){
+      const [x,y]=pos(e);
+      if(m2Moved<8){ const p=new THREE.Vector3(m2wx(x),0,m2wz(y)); const g=groundAt(p.x,p.z,1e9); p.y=g.hit?g.y:0; barrierPts.push(p); m2Draw(); }
+      m2BarrierPan=false; return;
+    }
     if(m2Drag>=0){
       window._m2last=m2Drag;
       const p=tleLines[m2Edge][m2Drag];
@@ -5214,6 +5281,38 @@ function m2Init(){
     m2X=x-wx*m2Sc; m2Y=y-wz*m2Sc;
     m2Draw();
   },{passive:false});
+  c.addEventListener('dblclick',e=>{
+    if(!m2BarrierMode||barrierPts.length<2) return;
+    e.preventDefault(); barrierLines.push(barrierPts); barrierPts=[]; barSave(); barBuild(); m2Draw();
+  });
+}
+
+function barSave(){
+  if(!trackRoot) return;
+  try{ localStorage.setItem(BAR_KEY,JSON.stringify({lines:barrierLines.map(l=>l.map(gridToModel))})); }catch(e){}
+}
+function barRestore(){
+  if(barrierLoaded||!trackRoot) return;
+  barrierLoaded=true;
+  try{
+    const d=JSON.parse(localStorage.getItem(BAR_KEY)||'null');
+    if(d&&Array.isArray(d.lines)) barrierLines=d.lines.filter(l=>Array.isArray(l)&&l.length>1).map(l=>l.map(editModelToWorld));
+  }catch(e){}
+  barBuild();
+}
+function barBuild(){
+  if(barrierGroup){ scene.remove(barrierGroup); barrierGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();}); }
+  barrierGroup=new THREE.Group(); scene.add(barrierGroup); barrierSegments=[];
+  const mat=new THREE.MeshStandardMaterial({map:texBarrier,side:THREE.DoubleSide,roughness:.68,metalness:.08});
+  barrierLines.forEach(line=>line.slice(0,-1).forEach((a,i)=>{
+    const b=line[i+1], dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz); if(len<.2)return;
+    const h=1.15, geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array([a.x,a.y+.05,a.z,b.x,b.y+.05,b.z,a.x,a.y+h,a.z,b.x,b.y+h,b.z]),3));
+    geo.setAttribute('uv',new THREE.BufferAttribute(new Float32Array([0,0,1,0,0,1,1,1]),2));
+    geo.setIndex([0,1,2,2,1,3]); geo.computeVertexNormals();
+    const mesh=new THREE.Mesh(geo,mat); mesh.userData.casts=true; mesh.castShadow=true; mesh.receiveShadow=true; barrierGroup.add(mesh);
+    barrierSegments.push({ax:a.x,az:a.z,bx:b.x,bz:b.z,nx:-dz/len,nz:dx/len});
+  }));
 }
 
 
@@ -5979,8 +6078,11 @@ function tlWheelOn(lx,lz){
   return TL_TOL===TL_OFF || (off <= st.dR+TL_TOL && -off <= st.dL+TL_TOL);
 }
 tlLoad(); tlSet(TL_TOL);
-document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
-document.getElementById('m2close').onclick=()=>m2Show(false);
+document.getElementById('tlbtn').onclick=()=>{ m2BarrierMode=false; document.getElementById('m2hint').textContent='Drag a yellow point to move the limit · drag the background to pan · scroll to zoom'; m2Show(!m2On); };
+document.getElementById('barbtn').onclick=()=>{ m2BarrierMode=true; barRestore(); m2Show(true);
+  document.getElementById('m2hint').textContent='Click to place barrier points · double-click to finish a line · drag background to pan · scroll to zoom';
+  document.getElementById('m2barrier').classList.add('on'); m2Fit(); m2Draw(); };
+document.getElementById('m2close').onclick=()=>{ m2BarrierMode=false; m2Show(false); };
 document.getElementById('homebtn').onclick=goHome;
 document.getElementById('netbtn').onclick=()=>controllerPanelToggle();
 document.getElementById('controller-close').onclick=()=>controllerPanelToggle(false);
@@ -5998,10 +6100,16 @@ document.getElementById('m2out').onclick=()=>{ m2Edge=1;
   document.getElementById('m2out').classList.add('on');
   document.getElementById('m2in').classList.remove('on'); m2Fit(); m2Draw(); };
 document.getElementById('m2copy').onclick=e=>{
+  if(m2BarrierMode){ const t=JSON.stringify(barrierLines.map(l=>l.map(gridToModel))); console.log('barriers (model coordinates):\n'+t); copyFlash(e.currentTarget,t); return; }
   const t=JSON.stringify(tleLines[m2Edge].map(v=>gridToModel(v)));
   console.log('track limit line (model coordinates):\n'+t);
   copyFlash(e.currentTarget,t);
 };
+document.getElementById('m2barrier').onclick=()=>{ m2BarrierMode=true; barRestore();
+  document.getElementById('m2hint').textContent='Click to place barrier points · double-click to finish a line · drag background to pan · scroll to zoom';
+  document.getElementById('m2barrier').classList.add('on'); m2Fit(); m2Draw(); };
+document.getElementById('m2barrierundo').onclick=()=>{ if(barrierPts.length) barrierPts.pop(); else barrierLines.pop(); barSave(); barBuild(); m2Draw(); };
+document.getElementById('m2barrierclear').onclick=()=>{ barrierPts=[]; barrierLines=[]; barSave(); barBuild(); m2Draw(); };
 m2Init();
 document.getElementById('replaybtn').onclick=()=>{ TTREC.playing?replayStop():replayStart(); };
 document.getElementById('tledgeA').onclick=()=>{ tleEdge=0;
@@ -6682,6 +6790,7 @@ function drive(dt){
     }else{
       // the same call the preview car makes, with keys instead of a program
       yawRate=stepCar(PLAYER, {thr:thr?1:0, brk:brk?1:0, steer:want}, dt);
+      customBarrierResolve(carState,dt);
       if(onLoose) looseSpray += carState.speed*looseFrac*dt;
     }
   }else{
@@ -7862,6 +7971,7 @@ function startTrack(id){
       carGroup.position.set(0, PLAYER.groundY, 0);
       console.log('spawn: explicit, at model '+sx+', '+sz+' facing '+sdeg+' deg');
       buildWorld();
+      barRestore();
       editRestore();          // gate positions come off the hand-clicked lap
       tleLoad();
       recLoad();
@@ -7936,6 +8046,7 @@ function startTrack(id){
     carGroup.position.set(0, PLAYER.groundY, 0);
 
     buildWorld();
+    barRestore();
   }, ev=>{
     if(ev.lengthComputable){
       const pct=Math.round(ev.loaded/ev.total*100);
