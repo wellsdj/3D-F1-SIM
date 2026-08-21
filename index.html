@@ -4343,16 +4343,22 @@ addEventListener('keyup',e=>{
    serial, read with the Web Serial API -- Chrome/Edge on desktop, nothing
    else supports it. No server, no companion app: the browser talks to the
    board directly once arduino/joystick_controller.ino is on it, at 115200
-   baud, sending "x,y,btn\n" (raw 0-1023 ADC values, btn 1 = pressed).
+   baud, sending "x,accel,brake,click\n" -- x is the raw 0-1023 steering
+   reading, the other three are 0/1 button states.
+
+   Steering only comes off the stick now; two separate pushbuttons drive the
+   pedals, which is why they read as plain on/off rather than the proportional
+   push the Y axis gave. A button is not a potentiometer -- there is nothing
+   to be gentle with.
 
    This is not a second way of driving. It builds the same {thr,brk,steer}
    shape the keyboard does and stepCar() already accepts -- steer has always
    been a real number there, not just -1/0/1, since that is what the AI's
    pure-pursuit output already was. Whichever input produced the number, the
    physics downstream are identical. */
-let joyPort=null, joyConnected=false, joyX=512, joyY=512, joyBtn=false;
-let joyCx=512, joyCy=512, joyLastMsg=0, joyBtnPrev=false;
-const JOY_INVERT_X=true, JOY_INVERT_Y=false;    // X flipped: left/right were backwards on this stick
+let joyPort=null, joyConnected=false, joyX=512, joyAccel=false, joyBrake=false, joyBtn=false;
+let joyCx=512, joyLastMsg=0, joyBtnPrev=false;
+const JOY_INVERT_X=true;                        // flipped: left/right were backwards on this stick
 const JOY_DEAD=40, JOY_RANGE=470;               // deadzone and travel, in raw ADC counts
 
 function joyAxis(raw, center, invert){
@@ -4381,10 +4387,10 @@ async function joyReadLoop(port){
       while((nl=buf.indexOf('\n'))>=0){
         const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
         const parts=line.split(',');
-        if(parts.length<2) continue;
-        const x=+parts[0], y=+parts[1], b=+parts[2];
-        if(!Number.isFinite(x)||!Number.isFinite(y)) continue;
-        joyX=x; joyY=y; joyBtn=b===1; joyLastMsg=performance.now();
+        if(parts.length<4) continue;
+        const x=+parts[0], a=+parts[1], br=+parts[2], b=+parts[3];
+        if(!Number.isFinite(x)) continue;
+        joyX=x; joyAccel=a===1; joyBrake=br===1; joyBtn=b===1; joyLastMsg=performance.now();
       }
     }
   }catch(e){ /* board unplugged mid-read */ }
@@ -4393,7 +4399,7 @@ async function joyReadLoop(port){
   joyConnected=false; joyPort=null;
   updateStatus();
 }
-function joyRecenter(){ joyCx=joyX; joyCy=joyY; }
+function joyRecenter(){ joyCx=joyX; }
 async function joyConnect(){
   if(!navigator.serial){ console.warn('Web Serial not available -- use Chrome or Edge, on desktop'); return; }
   if(joyConnected){ joyRecenter(); return; }        // already on: click again to recentre
@@ -6812,15 +6818,15 @@ function drive(dt){
 
   /* The joystick overrides the keyboard's -1/0/1 with a real number when it
      is connected and has said something in the last half second -- pulling
-     the cable falls back to the keyboard on its own, nothing to press. thrMag
-     and brkMag carry the actual push, not just on/off, so a gentle push is a
-     gentle push. Forward is throttle, back is brake, off the one Y axis. */
+     the cable falls back to the keyboard on its own, nothing to press.
+     Steering comes off the stick, proportional; accel and brake come off two
+     separate pushbuttons, so they are plain on/off -- a button is not a
+     potentiometer, there is nothing to be gentle with. */
   let thrMag = thr?1:0, brkMag = brk?1:0;
   if(!joyStale()){
-    const x=joyAxis(joyX,joyCx,JOY_INVERT_X), y=joyAxis(joyY,joyCy,JOY_INVERT_Y);
-    want = x;
-    thrMag = clamp(y,0,1); brkMag = clamp(-y,0,1);
-    thr = thrMag>0; brk = brkMag>0;
+    want = joyAxis(joyX,joyCx,JOY_INVERT_X);
+    thrMag = joyAccel?1:0; brkMag = joyBrake?1:0;
+    thr = joyAccel; brk = joyBrake;
     if(joyBtn && !joyBtnPrev){                        // stick click: same as R
       if(TT.gates.length && trackRoot && FREEROAM){
         const g=TT.gates[0];
