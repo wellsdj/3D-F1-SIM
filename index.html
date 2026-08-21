@@ -2185,11 +2185,12 @@ scene.add(skyDome);
    live just inside the sky dome and follow the camera, so they read as distant
    stars rather than drifting particles. They are kept above the horizon and
    rendered without depth writes so the sky remains a clean backdrop. */
-const starPositions=new Float32Array(220*3);
+const NIGHT_STAR_COUNT=520;
+const starPositions=new Float32Array(NIGHT_STAR_COUNT*3);
 const starRand=mulberry32(20260820);
-for(let i=0;i<220;i++){
+for(let i=0;i<NIGHT_STAR_COUNT;i++){
   const az=starRand()*Math.PI*2;
-  const y=.10+starRand()*.86;
+  const y=.04+starRand()*.92;
   const r=Math.sqrt(Math.max(0,1-y*y));
   const radius=3200+starRand()*140;
   starPositions[i*3]=Math.cos(az)*r*radius;
@@ -2199,7 +2200,7 @@ for(let i=0;i<220;i++){
 const starGeo=new THREE.BufferGeometry();
 starGeo.setAttribute('position',new THREE.BufferAttribute(starPositions,3));
 const nightStars=new THREE.Points(starGeo,new THREE.PointsMaterial({
-  color:0xd9e7ff,size:1.35,sizeAttenuation:false,transparent:true,opacity:.78,
+  color:0xe4efff,size:1.5,sizeAttenuation:false,transparent:true,opacity:.94,
   depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending
 }));
 nightStars.frustumCulled=false;
