@@ -376,6 +376,15 @@
   #bestlapsbtn:hover:after{transform:translate(4px,-50%)}
   #bestlapsbtn span{display:block;margin-top:5px;font-size:9px;letter-spacing:.1em;opacity:.48;text-transform:none}
 
+  /* Generated action art: each home action has its own visual cue while a
+     left-side navy wash keeps the labels crisp and consistent. */
+  #pick button{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.78) 38%,rgba(7,13,22,.2) 100%),url('home-race.webp') center/cover}
+  #pick button:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-race.webp') center/cover}
+  #bestlapsbtn{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.78) 38%,rgba(7,13,22,.2) 100%),url('home-best-laps.webp') center/cover}
+  #bestlapsbtn:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-best-laps.webp') center/cover}
+  #netbtn{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.78) 38%,rgba(7,13,22,.2) 100%),url('home-controller.webp') center/cover}
+  #netbtn:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-controller.webp') center/cover}
+
   /* The home-only settings control stays quiet until it is needed. Hovering
      the cog is the desktop affordance; .open keeps it usable on touch screens. */
   #home-settings{position:absolute;right:clamp(24px,4vw,64px);top:clamp(24px,4vw,58px);z-index:6;font-family:var(--mono)}
@@ -411,6 +420,8 @@
                   box-shadow:0 14px 36px rgba(0,0,0,.26);transition:transform .18s ease,background .18s ease,border-color .18s ease}
   #customize-home:hover{transform:translateY(-3px);background:rgba(255,176,32,.16);border-color:#ffb020}
   #customize-home span{display:block;margin-top:5px;font-size:8px;letter-spacing:.08em;opacity:.48;text-transform:none}
+  #customize-home{background:linear-gradient(90deg,rgba(7,13,22,.95),rgba(7,13,22,.62)),url('home-customise.webp') center/cover}
+  #customize-home:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.56)),url('home-customise.webp') center/cover}
 
   /* ---------------------------------------------------------- lap book */
   #lapbook{position:fixed;inset:0;z-index:14;display:none;padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px);
@@ -671,7 +682,7 @@
   </div>
   <div id="home-actions">
     <div id="pick">
-      <button data-track="spa22"><b>Enter qualifying <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
+      <button data-track="spa22"><b>Race <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
     </div>
     <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
     <button id="netbtn" type="button"><b>Connect controller</b><span>PS5 / Xbox · shoulder controls</span></button>
