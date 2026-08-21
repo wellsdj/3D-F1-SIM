@@ -87,17 +87,33 @@
   #m2hint{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:2;
           font-family:var(--mono);font-size:10px;letter-spacing:.1em;opacity:.45;
           color:#dfe7f1;text-transform:none}
+  /* ----------------------------------------------------- controller on home */
+  #netbtn{position:relative;right:auto;bottom:auto;z-index:2;display:block;width:100%;
+          font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-align:left;
+          text-transform:uppercase;color:var(--paper);cursor:pointer;background:rgba(8,14,22,.48);
+          border:1px solid rgba(236,234,228,.18);border-radius:3px;padding:14px 20px;
+          backdrop-filter:blur(6px);transition:transform .18s ease,background .18s ease,border-color .18s ease}
+  #netbtn:hover{transform:translateX(6px);background:rgba(255,176,32,.13);border-color:#ffb020}
+  #netbtn b{display:block;font-size:11px;letter-spacing:.16em}
+  #netbtn span{display:block;margin-top:5px;font-size:9px;letter-spacing:.08em;opacity:.48;text-transform:none}
+  #netbtn.on{display:block}
+  #controller-panel{display:none;gap:9px;width:100%;padding:12px 14px;text-align:left;
+                    color:#dfe7f1;background:rgba(5,10,16,.82);border:1px solid rgba(236,234,228,.18);
+                    border-radius:5px;font-family:var(--mono);box-shadow:0 16px 36px rgba(0,0,0,.24)}
+  #controller-panel.on{display:grid}
+  #controller-panel .controller-kicker{font-size:8px;letter-spacing:.24em;text-transform:uppercase;color:#ffb020}
+  #controller-status{font-size:10px;letter-spacing:.06em;line-height:1.5}
+  #controller-map{display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;font-size:9px;letter-spacing:.05em;opacity:.66}
+  #controller-map b{color:#f4f7fb;font-weight:500}
+  #controller-close{justify-self:start;font:inherit;font-size:9px;letter-spacing:.13em;text-transform:uppercase;
+                    color:#dfe7f1;cursor:pointer;background:rgba(255,255,255,.06);
+                    border:1px solid rgba(255,255,255,.14);border-radius:4px;padding:7px 10px}
+  #controller-close:hover{background:rgba(255,255,255,.14)}
+
   /* Shown only while you are on the circuit, and it goes away for the opening
      shots along with the rest of the overlay. */
 
   /* -------------------------------------------------- watching another driver */
-  /* Bottom right, out of the speedometer's corner. */
-  #netbtn{position:fixed;right:18px;bottom:18px;z-index:9;display:none;
-          font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
-          color:var(--paper);cursor:pointer;background:rgba(10,13,19,.68);
-          border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:8px 12px;
-          backdrop-filter:blur(6px)}
-  #netbtn.on{display:block} #netbtn:hover{background:rgba(255,255,255,.16)}
   #netwrap{position:fixed;right:18px;bottom:56px;z-index:9;display:none;
            font-family:var(--mono);color:var(--paper);opacity:.9;text-align:right}
   #netwrap.on{display:block}
@@ -588,7 +604,6 @@
     <button id="m2close">Done</button>
   </div>
 </div>
-<button id="netbtn">Watch a driver</button>
 <div id="netwrap"><span class="ttlbl">Your code</span><b id="netcode">……</b></div>
 <div id="netpanel">
   <div class="ttlbl">Watch a driver</div>
@@ -722,6 +737,13 @@
       <button data-track="spa22"><b>Enter qualifying <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
     </div>
     <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
+    <button id="netbtn" type="button"><b>Connect controller</b><span>PS5 / Xbox · shoulder controls</span></button>
+    <div id="controller-panel" aria-hidden="true">
+      <div class="controller-kicker">Controller link</div>
+      <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
+      <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick ←</b> steer left</span><span><b>Left stick →</b> steer right</span></div>
+      <button id="controller-close" type="button">Close</button>
+    </div>
   </div>
   <button id="customize-home">Customise your car <span>Open the garage ↗</span></button>
   <div id="bar"><i></i></div>
@@ -5380,6 +5402,44 @@ const NET={ peer:null, code:null, conns:[], tries:0, next:0,
             watching:null, buf:[], t0:0, base:0, live:false, log:[] };
 function netLog(m){ NET.log.push(m); if(NET.log.length>12) NET.log.shift(); }
 
+/* ----------------------------------------------------------- game controller
+   Standard-mapped PS5 and Xbox pads expose the same button order: LB/L1 is 4,
+   RB/R1 is 5, and the left stick's horizontal axis is 0. The stick is kept
+   analog for steering; only its vertical axis is intentionally ignored. */
+let controllerPad=null, controllerAccel=false, controllerBrake=false, controllerSteer=0;
+const controllerPanelEl=document.getElementById('controller-panel');
+const controllerStatusEl=document.getElementById('controller-status');
+function controllerStatus(text){ if(controllerStatusEl) controllerStatusEl.textContent=text; }
+function controllerPoll(){
+  if(!navigator.getGamepads){ controllerStatus('Gamepad controls are not available in this browser.'); return; }
+  let pads=[];
+  try{ pads=Array.from(navigator.getGamepads()||[]).filter(Boolean); }catch(_){ pads=[]; }
+  if(!controllerPad||!pads.some(p=>p.index===controllerPad.index)) controllerPad=pads[0]||null;
+  if(!controllerPad){ controllerAccel=false; controllerBrake=false; controllerSteer=0; return; }
+  const pressed=i=>!!(controllerPad.buttons&&controllerPad.buttons[i]&&controllerPad.buttons[i].pressed);
+  controllerAccel=pressed(5); // RB / R1
+  controllerBrake=pressed(4); // LB / L1
+  const axis=Number(controllerPad.axes&&controllerPad.axes[0])||0;
+  controllerSteer=Math.abs(axis)>.12?clamp(axis,-1,1):0;
+  controllerStatus((controllerPad.id||'Controller')+' connected · ready to drive');
+}
+addEventListener('gamepadconnected',e=>{
+  controllerPad=e.gamepad;
+  controllerStatus((e.gamepad.id||'Controller')+' connected · ready to drive');
+});
+addEventListener('gamepaddisconnected',e=>{
+  if(controllerPad&&e.gamepad.index===controllerPad.index) controllerPad=null;
+  controllerAccel=false; controllerBrake=false; controllerSteer=0;
+  controllerStatus('Controller disconnected · press any button to reconnect.');
+});
+function controllerPanelToggle(force){
+  if(!controllerPanelEl) return;
+  const open=force===undefined?!controllerPanelEl.classList.contains('on'):!!force;
+  controllerPanelEl.classList.toggle('on',open);
+  controllerPanelEl.setAttribute('aria-hidden',open?'false':'true');
+  if(open){ controllerStatus('Press any button on a PS5 or Xbox controller.'); controllerPoll(); }
+}
+
 function netCode(){
   let s='';
   for(let i=0;i<6;i++) s+=NET_ALPHA[Math.floor(Math.random()*NET_ALPHA.length)];
@@ -6157,7 +6217,8 @@ tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
 document.getElementById('m2close').onclick=()=>m2Show(false);
 document.getElementById('homebtn').onclick=goHome;
-document.getElementById('netbtn').onclick=()=>netPanel(!document.getElementById('netpanel').classList.contains('on'));
+document.getElementById('netbtn').onclick=()=>controllerPanelToggle();
+document.getElementById('controller-close').onclick=()=>controllerPanelToggle(false);
 document.getElementById('netcancel').onclick=()=>netPanel(false);
 document.getElementById('netgo').onclick=()=>netWatch(document.getElementById('netinput').value);
 document.getElementById('netstop').onclick=()=>netStopWatch('');
@@ -6825,8 +6886,11 @@ function placeCar(C, dt, t){
 function drive(dt){
   // up/down arrows now trim the seat height, so they are no longer throttle
   // and brake -- W and S are the drive controls
-  let thr = keys['w'];
-  let brk = keys['s'];
+  /* Three ways in, and they do not fight: the keyboard, a PS5 or Xbox pad over
+     the Gamepad API, and the Arduino stick over Web Serial. These two stay let
+     rather than const because the serial stick reassigns them below. */
+  let thr = keys['w']||controllerAccel;
+  let brk = keys['s']||controllerBrake;
   const lft = keys['a']||keys['arrowleft'];
   const rgt = keys['d']||keys['arrowright'];
 
@@ -6840,6 +6904,8 @@ function drive(dt){
      four tenths of a second makes a tap a small angle and lets you hold a
      partial one, while it still snaps back quicker than it goes on. */
   let want = (lft?-1:0) + (rgt?1:0);
+  // a pad that is being held wins over the keyboard's -1/0/1
+  if(controllerSteer!==0) want = controllerSteer;
 
   /* The joystick overrides the keyboard's -1/0/1 with a real number when it
      is connected and has said something in the last half second -- pulling
@@ -7926,7 +7992,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
+  else { controllerPoll(); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
