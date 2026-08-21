@@ -7411,7 +7411,7 @@ const AI_WIN=6;                    // metres either side, for measuring curvatur
    at La Source by 0.25 m, and 1.30 goes off there and at Stavelot. This is the
    last clean one. */
 const AI_MARGIN=1.20;
-const AI={ lat:0, want:0, speedK:1, mode:'clear', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
+const AI={ lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
            car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
 
 function aiBuild(margin){
@@ -7428,6 +7428,7 @@ function aiBuild(margin){
   AI.k=aiCurvature(AI_WIN);
   AI.ks=aiSigned(AI_WIN);
   AI.v=aiProfile(AI.k, margin||AI_MARGIN);
+  aiBuildLines(margin);
   return true;
 }
 /* One over the radius of the circle through the points a window either side --
@@ -7574,6 +7575,137 @@ function aiProfile(k, margin){
   }
   return v;
 }
+/* Three lines, not one.
+
+   The racing line is the hand-clicked one and it stays exactly as it was. The
+   other two are built off it the same way its speed was: as geometry first,
+   measured, and then solved for what the car can carry round that shape.
+
+   An offset field is a number of metres to the right of the racing line at
+   every station. Through a corner the inside line sits toward the inside of
+   that corner and the outside line toward the outside, which side being read
+   off the sign of the curvature. Between corners the field is smoothed over a
+   long window, and that is what puts the car on the correct side of a straight
+   without anything having to say so: coming out of a right-hander onto the
+   straight before a left-hander, the inside field walks the car across from one
+   side to the other over a couple of hundred metres, which is what moving over
+   to defend looks like from the outside.
+
+   Each line then gets its own speed profile, because they are not the same
+   shape. The inside line through a corner is a tighter radius and is genuinely
+   slower; the outside line is longer. Handing a car the racing line's speeds and
+   the inside line's geometry is how an AI ends up in the gravel defending, so
+   the curvature is re-measured on the actual points of each line and solved
+   from there. */
+/* off was 3.2 m, which is most of a car's width off the racing line and left
+   nothing for the fact that the car does not track a line perfectly: driven end
+   to end, both alternate lines put a wheel over the white line in about forty
+   samples of two thousand. 2.4 m with a wider keep-back does the same job --
+   it is still a clear car's width of separation -- and stays inside. */
+const AI_LINES={ off:2.4, smooth:45, win:6, keep:1.8, window:25, reach:220, ramp:140 };
+function aiNormal(i){
+  const j=(i+1)%AI.n;
+  const tx=AI.x[j]-AI.x[i], tz=AI.z[j]-AI.z[i], tl=Math.hypot(tx,tz)||1;
+  return {nx:tz/tl, nz:-tx/tl};                 // +ve = right of the line
+}
+/* The offset field is built from the corner it is going to, not from a blur of
+   the curvature under the car.
+
+   Smoothing the curvature over a long window was the first attempt and it fails
+   exactly where defending matters most: at a chicane the inside flips sign
+   twice in a couple of hundred metres, the average of that is nothing, and the
+   car defended into Les Combes by sitting precisely on the racing line. Which
+   is not defending.
+
+   So every station is assigned the next corner within reach -- the one it is
+   about to arrive at, or the one it is in -- and takes that corner's inside or
+   outside. The weight ramps up over the approach, so the car walks across the
+   straight and is already there when the corner starts, which is what moving
+   over to defend looks like. A short blur afterwards takes the corners out of
+   the field itself, because a kink in the field is curvature the profile would
+   otherwise have to solve for. */
+function aiOffsetField(which){
+  const n=AI.n, dirAt=new Float64Array(n), wAt=new Float64Array(n);
+  const corners=aiCorners(AI.k, 1/600);
+  for(const [a,b] of corners){
+    let sum=0;
+    for(let i=a;i<b;i++) sum+=AI.ks[i%n];
+    const turn=Math.sign(sum)||1;
+    for(let i=a;i<b;i++){ dirAt[i%n]=turn; wAt[i%n]=1; }
+    // and backwards up the approach, so it is there before the corner is
+    const reach=Math.round(AI_LINES.reach/AI.ds), ramp=Math.round(AI_LINES.ramp/AI.ds);
+    for(let q=1;q<=reach;q++){
+      const i=((a-q)%n+n)%n;
+      if(wAt[i]>0) continue;                    // a nearer corner already owns it
+      dirAt[i]=turn;
+      wAt[i]=clamp((reach-q)/Math.max(1,ramp),0,1);
+    }
+  }
+  const raw=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    const dir = which==='in' ? -dirAt[i] : dirAt[i];
+    raw[i]=dir*AI_LINES.off*wAt[i];
+  }
+  const blur=(arr,metres)=>{
+    const half=Math.max(1,Math.round(metres/AI.ds)), out=new Float64Array(n);
+    let sum=0;
+    for(let k=-half;k<=half;k++) sum+=arr[((k)%n+n)%n];
+    for(let i=0;i<n;i++){
+      out[i]=sum/(2*half+1);
+      sum-=arr[((i-half)%n+n)%n];
+      sum+=arr[((i+half+1)%n+n)%n];
+    }
+    return out;
+  };
+  const fit=arr=>{
+    for(let i=0;i<n;i++){
+      const lim=aiRoomNear(i, arr[i]>0?1:-1, AI_LINES.window);
+      arr[i]=clamp(arr[i], -lim, lim);
+    }
+    return arr;
+  };
+  /* Smoothed, fitted, smoothed, fitted. Fitting once at the end leaves a hard
+     edge wherever the circuit narrows, the edge is curvature, and the profile
+     solved for it by slowing the car to 40 kph in the middle of a corner it
+     should have taken at a hundred. Alternating converges on a field that is
+     both smooth and inside the road. */
+  let f=fit(blur(raw, AI_LINES.smooth));
+  f=fit(blur(f, 20));
+  return f;
+}
+/* The curvature of a line that is an offset from the racing line, measured on
+   its own points rather than inherited. */
+function aiCurvatureOffset(field, win){
+  const n=AI.n, X=new Float64Array(n), Z=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    const nn=aiNormal(i);
+    X[i]=AI.x[i]+nn.nx*field[i]; Z[i]=AI.z[i]+nn.nz*field[i];
+  }
+  const k=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    const a=(i-win+n)%n, c=(i+win)%n;
+    const A=Math.hypot(X[i]-X[a],Z[i]-Z[a]), B=Math.hypot(X[c]-X[i],Z[c]-Z[i]),
+          C=Math.hypot(X[c]-X[a],Z[c]-Z[a]);
+    const area=Math.abs((X[i]-X[a])*(Z[c]-Z[a])-(X[c]-X[a])*(Z[i]-Z[a]))/2;
+    k[i]=(A*B*C>1e-9)?4*area/(A*B*C):0;
+  }
+  const out=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    let m=0;
+    for(let j=-win;j<=win;j++) m=Math.max(m,k[(i+j+n)%n]);
+    out[i]=m;
+  }
+  return out;
+}
+function aiBuildLines(margin){
+  AI.field={ race:new Float64Array(AI.n) };
+  AI.vline={ race:AI.v };
+  for(const which of ['in','out']){
+    const f=aiOffsetField(which);
+    AI.field[which]=f;
+    AI.vline[which]=aiProfile(aiCurvatureOffset(f, AI_LINES.win), margin||AI_MARGIN);
+  }
+}
 /* Where on the line the car is. Searched forward from where it was, because it
    is going forwards, with a full sweep only if it has been put somewhere else. */
 function aiLocate(x,z){
@@ -7611,7 +7743,10 @@ function aiLocate(x,z){
    - It is closing on you and not yet alongside. It sits behind at your speed
      until the offset has actually opened, so it never drives through the back
      of your car while the move is still happening. */
-const AI_TRAF={ look:75, side:3.4, ease:4.0, yieldK:0.90, clear:2.6, ahead:70 };
+/* blue: quicker than this and it is not a fight, it stands aside. race: it
+   counts you as gaining if you are within this of its own speed, so it defends
+   against someone reeling it in rather than only against someone already past. */
+const AI_TRAF={ look:75, ease:4.0, yieldK:0.90, clear:2.6, blue:25, race:8, hold:1.25 };
 function aiPlayerRel(){
   if(!AI.n || !booted) return null;
   const n=AI.n, px=carState.wx, pz=carState.wz;
@@ -7636,10 +7771,21 @@ function aiPlayerRel(){
           apart:Math.hypot(px-AI.car.st.wx, pz-AI.car.st.wz)};
 }
 /* How much room there is either side of the line here, from the survey. */
-function aiRoom(i, side){
+function aiRoom(i, side, keep){
   const st=tlStation(AI.x[i], AI.z[i]);
   if(!st) return 6;
-  return Math.max(0, (side>0?st.dR:st.dL) - 1.3);   // half a car, and a little
+  return Math.max(0, (side>0?st.dR:st.dL) - (keep||1.3));   // half a car, and a little
+}
+/* The least room there is on this side anywhere near here. A line is planned
+   metres in advance and driven with a lag, so an offset that fits at this
+   station and not at the one twenty metres later is an offset that puts a wheel
+   out twenty metres later. */
+function aiRoomNear(i, side, span){
+  const n=AI.n, step=Math.max(1,Math.round(4/AI.ds));
+  let r=99;
+  for(let d=-span; d<=span; d+=step*AI.ds)
+    r=Math.min(r, aiRoom(((i+Math.round(d/AI.ds))%n+n)%n, side, AI_LINES.keep));
+  return r;
 }
 /* And how much there is for the next stretch of it, which is the number that
    matters: the room where the car is now says nothing about the room where the
@@ -7654,29 +7800,76 @@ function aiRoomAhead(side, metres){
     r=Math.min(r, aiRoom((AI.i+d)%n, side));
   return r;
 }
+/* Which of the three lines to be on, and why.
+
+   Clear road is the racing line, always. The other two are for when there is
+   another car close enough to matter, and which one is picked comes off where
+   you are rather than off a rule about overtaking sides:
+
+   - You are behind and gaining, but not enormously quicker: it defends. That is
+     the inside line, and because the inside field walks across the straight
+     before the corner, defending starts on the straight -- it is on the inside
+     by the time you get there, which is the whole point.
+   - You are enormously quicker: it is not a fight, it is a blue flag. It moves
+     off the line, eases, and lets you go.
+   - You are alongside or ahead: it takes the line you are not on. Inside if you
+     are outside, outside if you are inside.
+
+   Each line carries its own speeds, so defending into a corner is genuinely
+   slower than not defending -- which is the cost of defending, and it should be
+   there. */
 function aiTraffic(dt){
   const T=AI_TRAF, C=AI.car;
   const rel=aiPlayerRel();
-  AI.mode='clear'; AI.want=0; AI.speedK=1;
-  if(rel && Math.abs(rel.gap)<T.look){
+  AI.mode='clear'; AI.line='race'; AI.speedK=1;
+  if(rel && Math.abs(rel.gap)<T.look && AI.field){
     const mine=C.st.speed*3.6, theirs=rel.kph;
+    /* How much quicker you are, averaged over about half a second rather than
+       read off this frame. Instantaneously, a car that has not braked yet is
+       forty kph quicker at every braking point, and deciding on that had the AI
+       standing aside in the middle of a corner it was in the process of
+       defending -- then going back to defending when the brakes came off. */
+    AI._dv = (AI._dv||0) + ((theirs-mine)-(AI._dv||0))*(1-Math.exp(-dt/0.55));
+    const dv=AI._dv;
+    /* Standing aside is for someone quicker than this car really is, which is
+       not the same as quicker than it is going while it defends. Measured
+       against its own speed, defending cancelled itself: the moment it took the
+       slower line to cover the inside, the car behind was suddenly twenty-five
+       kph quicker, that read as a blue flag, and it pulled over and let them
+       past. The reference is the racing line's pace at this point of the
+       circuit -- what it would be doing if you were not there. */
+    AI._dvRace = (AI._dvRace||0)
+      + ((theirs-AI.v[AI.i]*3.6)-(AI._dvRace||0))*(1-Math.exp(-dt/0.55));
     const behind=rel.gap<0;
-    // away from you: the racing line is left free for whoever is quicker
-    let side=rel.lat>=0?-1:1;
-    if(aiRoom(AI.i, side)<T.clear && aiRoom(AI.i,-side)>=T.clear) side=-side;
-    const room=Math.min(T.side, aiRoomAhead(side, T.ahead));
-    if(behind && theirs>mine+2){                 // you are catching: let it happen
-      AI.mode='yield'; AI.want=side*room; AI.speedK=T.yieldK;
-    } else if(!behind && mine>theirs+2){         // you are in the way: go by
-      AI.mode='pass'; AI.want=side*room;
-      /* Not through the back of you. Until the offset has opened enough to be
-         a car's width clear, it can be no quicker than you are. */
+    // which way the inside is here, including on the approach to the corner
+    const inDir=Math.sign(AI.field.in[AI.i])||1;
+    const youInside=Math.abs(rel.lat)>0.8 && Math.sign(rel.lat)===inDir;
+    if(behind && AI._dvRace>T.blue){             // far quicker: let it go
+      AI.mode='yield'; AI.line=youInside?'in':'out'; AI.speedK=T.yieldK;
+    } else if(behind && dv>-T.race){             // gaining, or matching: defend
+      AI.mode='defend'; AI.line='in';
+    } else if(!behind && dv<-2){                 // you are in the way: go by
+      AI.mode='pass'; AI.line=youInside?'out':'in';
       const clear=Math.abs(AI.lat-rel.lat)>T.clear;
-      if(rel.gap<14 && !clear) AI.speedK=Math.min(1, (theirs/Math.max(1,mine)));
-    } else if(rel.apart<12){                     // side by side: hold the offset
-      AI.mode='hold'; AI.want=side*room;
+      if(rel.gap<14 && !clear) AI.speedK=Math.min(1, theirs/Math.max(1,mine));
+    } else if(rel.apart<14){                     // side by side: take the other line
+      AI.mode='hold'; AI.line=youInside?'out':'in';
     }
   }
+  /* Committed to, not re-decided every frame. Sampled frame by frame the choice
+     flickered -- in, out, in again inside a second -- and a car that changes its
+     mind sixty times a second weaves instead of racing. A line is held for a
+     second and a bit unless the situation changes category, and standing aside
+     for someone far quicker is allowed to interrupt immediately. */
+  if(AI.line!==AI._lineWas){
+    if(AI.mode!=='yield' && (AI._lineHeld||0)>0 && AI.line!=='race'){
+      AI.line=AI._lineWas;                      // not yet: keep the one it is on
+    } else { AI._lineWas=AI.line; AI._lineHeld=AI_TRAF.hold; }
+  }
+  AI._lineHeld=Math.max(0,(AI._lineHeld||0)-dt);
+  if(AI.forced){ AI.line=AI.forced; AI.mode='forced'; AI.speedK=1; }
+  AI.want=AI.field?AI.field[AI.line][AI.i]:0;
+  AI.vAct=(AI.vline&&AI.vline[AI.line])||AI.v;
   const step=T.ease*dt;
   AI.lat += clamp(AI.want-AI.lat, -step, step);
   /* And whatever it is doing, it is pulled back inside the white line here --
@@ -7760,7 +7953,8 @@ function aiPedals(C){
   const v=C.st.speed;
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
   const j=(AI.i+Math.round(la/AI.ds))%AI.n;
-  const tgt=Math.min(AI.v[j], AI.v[AI.i]+2)*(AI.speedK||1);
+  const V=AI.vAct||AI.v;                        // the speeds for the line it is on
+  const tgt=Math.min(V[j], V[AI.i]+2)*(AI.speedK||1);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
   return {thr:0, brk:clamp(-a/46,0,1)};
@@ -7860,8 +8054,9 @@ window.SIM={
   aiStop(){ AI.on=false; },
   get ai(){ return AI.car?{on:AI.on, i:AI.i, x:+AI.car.st.wx.toFixed(1), z:+AI.car.st.wz.toFixed(1), s:+(AI.i*AI.ds).toFixed(1),
       kph:+(AI.car.st.speed*3.6).toFixed(1), tgt:+(AI.v[AI.i]*3.6).toFixed(1),
-      mode:AI.mode||'clear', lat:+(AI.lat||0).toFixed(2), want:+(AI.want||0).toFixed(2),
-      speedK:+(AI.speedK||1).toFixed(2),
+      mode:AI.mode||'clear', line:AI.line||'race',
+      lat:+(AI.lat||0).toFixed(2), want:+(AI.want||0).toFixed(2),
+      speedK:+(AI.speedK||1).toFixed(2), dv:+((AI._dv)||0).toFixed(1), dvRace:+((AI._dvRace)||0).toFixed(1),
       err:+(AI.err||0).toFixed(2), off:+(AI.off||0).toFixed(2),
       room:+(AI.room||0).toFixed(2), out:+(AI.outside||0).toFixed(2),
       worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
@@ -7892,6 +8087,23 @@ window.SIM={
       y:+AI.obj.position.y.toFixed(2), z:+AI.obj.position.z.toFixed(1)}:null; },
   aiTrace(){ const t=AI.trace||[]; return {n:t.length,
       fields:['t','s','kph','target','err','off','outside','steer','surf'], p:t}; },
+  /* Pin the AI to one of the three lines, for driving each of them end to end
+     without needing a second car to provoke it. */
+  aiForce(line){ AI.forced=line||null; return AI.forced; },
+  aiLines(){
+    if(!AI.field) return null;
+    const out={};
+    for(const k of Object.keys(AI.field)){
+      const f=AI.field[k], v=AI.vline[k];
+      let mx=0, sum=0, t=0;
+      for(let i=0;i<AI.n;i++){ const a=Math.abs(f[i]); if(a>mx) mx=a; sum+=a;
+        const j=(i+1)%AI.n; t+=2*AI.ds/(v[i]+v[j]); }
+      out[k]={maxOffset:+mx.toFixed(2), meanOffset:+(sum/AI.n).toFixed(2),
+              lap:+t.toFixed(2), top:+(Math.max(...v)*3.6).toFixed(0),
+              min:+(Math.min(...v)*3.6).toFixed(0)};
+    }
+    return out;
+  },
   aiPace(o){ Object.assign(AI_PACE,o||{}); return {...AI_PACE}; },
   aiTune(o){ Object.assign(AI_TUNE,o||{}); return {...AI_TUNE}; },
   aiRun(s0, flying, margin){ aiSpawn(); aiBuild(margin); aiPlace(Math.round(s0/AI.ds), flying!==false);
