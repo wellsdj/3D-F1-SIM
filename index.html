@@ -2276,15 +2276,39 @@ function texture(src, srgb, rw, rh){
   const t=new THREE.Texture();
   t.userData={clones:[]};   // r128 does not create userData on Texture
   const img=new Image();
-  img.onload=()=>{
-    t.image=img; t.needsUpdate=true;
-    // clones made before the image arrived are still empty -- fill them now
-    for(const c of (t.userData.clones||[])){ c.image=img; c.needsUpdate=true; }
+  let tries=0, finished=false;
+  const finish=()=>{
+    if(finished) return;
+    finished=true;
     loaded++;
     bar.style.width=Math.round(loaded/pending*100)+'%';
     if(loaded>=pending) ready();
   };
-  img.src=src;
+  img.onload=()=>{
+    t.image=img; t.needsUpdate=true;
+    // clones made before the image arrived are still empty -- fill them now
+    for(const c of (t.userData.clones||[])){ c.image=img; c.needsUpdate=true; }
+    finish();
+  };
+  img.onerror=()=>{
+    /* A single dropped texture used to leave `loaded < pending` forever, so
+       the home screen stayed on its boot layer and even a refresh appeared
+       broken. Retry a couple of times for transient CDN failures, then let
+       the rest of the app boot with a neutral texture instead of deadlocking
+       the shared asset counter. */
+    if(tries<2){
+      tries++;
+      setTimeout(load,250*tries);
+      return;
+    }
+    console.warn('texture failed to load; continuing without '+src);
+    finish();
+  };
+  const load=()=>{
+    const retry=tries?'?retry='+tries:'';
+    img.src=src+(src.includes('?')?'&':'')+retry;
+  };
+  load();
   t.wrapS = rw||THREE.RepeatWrapping;
   t.wrapT = rh||THREE.RepeatWrapping;
   t.anisotropy = MAXANISO;
@@ -2306,8 +2330,8 @@ function cloneTex(t){
    fetched here; ready() already waits on the pending/loaded counters. */
 pending++;
 Promise.all([
-  fetch('trees.json').then(r=>r.json()),
-  fetch(ASSETS.geo).then(r=>r.arrayBuffer())
+  fetch('trees.json').then(r=>{ if(!r.ok) throw new Error('trees.json '+r.status); return r.json(); }),
+  fetch(ASSETS.geo).then(r=>{ if(!r.ok) throw new Error(ASSETS.geo+' '+r.status); return r.arrayBuffer(); })
 ]).then(([man,buf])=>{
   ASSETS.geoManifest=man; GEO_BUF=buf;
   loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
@@ -3261,9 +3285,21 @@ applyTimeOfDay('midday');
    remain bright without throwing a hard shadow across the car. */
 (function loadPodium(){
   pending++;
+  let settled=false, timer=0;
+  const finish=()=>{
+    if(settled) return;
+    settled=true; clearTimeout(timer);
+    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
+    if(loaded>=pending) ready();
+  };
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  timer=setTimeout(()=>{
+    console.warn('podium timed out; continuing without the garage room');
+    finish();
+  },30000);
   loader.load(ASSETS.podium,gltf=>{
+    if(settled) return;
     const root=gltf.scene;
     root.rotation.x=-Math.PI/2;
     root.scale.setScalar(1.55);
@@ -3291,11 +3327,10 @@ applyTimeOfDay('midday');
       });
     });
     customizerStage.add(root); podiumRoot=root;
-    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
-    if(loaded>=pending) ready();
+    finish();
   },undefined,err=>{
     console.error('podium failed to load',err);
-    loaded++; if(loaded>=pending) ready();
+    finish();
   });
 })();
 /* Contact patches and low points of the bodywork, in carGroup space, measured
@@ -3313,9 +3348,21 @@ const WHEELBASE=3.60;
 
 (function loadCar(){
   pending++;
+  let settled=false, timer=0;
+  const finish=()=>{
+    if(settled) return;
+    settled=true; clearTimeout(timer);
+    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
+    if(loaded>=pending) ready();
+  };
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  timer=setTimeout(()=>{
+    console.warn('car timed out; continuing without the preview car');
+    finish();
+  },30000);
   loader.load(ASSETS.car, gltf=>{
+    if(settled) return;
     const car=gltf.scene;
     car.updateMatrixWorld(true);
     const b0=new THREE.Box3().setFromObject(car);
@@ -3434,11 +3481,10 @@ const WHEELBASE=3.60;
     console.log('car footprint: wheelbase '+CAR_WB.toFixed(2)+' m, track '+CAR_TR.toFixed(2)
                 +' m, ride offset '+RIDE.toFixed(3)+' m, '+CARLOW.length+' low points');
     carGroup.position.y=RIDE;           // wheels exactly on the deck
-    loaded++; bar.style.width=Math.round(loaded/pending*100)+'%';
-    if(loaded>=pending) ready();
+    finish();
   }, undefined, err=>{
     console.error('car failed to load',err);
-    loaded++; if(loaded>=pending) ready();
+    finish();
   });
 })();
 
