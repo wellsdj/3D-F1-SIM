@@ -113,6 +113,14 @@
   #netpanel button:hover{background:rgba(255,255,255,.16)}
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
+  /* Which camera you are looking through, the way a broadcast marks it. */
+  #tvtag{position:fixed;left:20px;top:20px;z-index:8;display:none;
+         font-family:var(--mono);color:var(--paper);letter-spacing:.18em;
+         text-transform:uppercase;text-shadow:0 2px 10px rgba(0,0,0,.85)}
+  #tvtag.on{display:block}
+  #tvtagname{font-size:15px;font-weight:600;color:#fff}
+  #tvtagof{display:block;font-size:9px;letter-spacing:.24em;opacity:.55;margin-top:2px}
+  body.cinema #tvtag{opacity:0}
   #netbar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9;
           display:none;align-items:center;gap:12px;font-family:var(--mono);
           color:var(--paper);background:rgba(10,13,19,.8);
@@ -548,6 +556,7 @@
   <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
   <div id="netmsg"></div>
 </div>
+<div id="tvtag"><span id="tvtagname">CAM 01</span><small id="tvtagof">of 20</small></div>
 <div id="netbar"><span class="ttlbl">Watching</span><b id="netbarcode">------</b>
   <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
@@ -4208,7 +4217,8 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
-  if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
+  if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus();
+    const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on'); }
   if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v' && !(TT.live&&TT.drone>0)){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
@@ -4248,7 +4258,11 @@ const CAMS=[
      gone: this was the only place anybody left them, so it is the seat now. */
   {name:'Nose cam', p:[0,0.94,0.49], fov:70, zoom:10, shake:1.30},
   {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35},
-  {name:'TV',      tv:true, fov:40, zoom:0, shake:0}
+  /* p and chase are the fallback: the trackside cameras are built a few
+     seconds after the circuit loads, and pressing C into TV before then used
+     to drop through to the cockpit branch, which reads a mount point this
+     entry did not have -- and threw on every frame until they appeared. */
+  {name:'TV',      tv:true, chase:true, back:9.5, up:3.15, p:[0,0.94,0.49], fov:40, zoom:8, shake:0}
 ];
 let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
@@ -4792,7 +4806,7 @@ function replayLiveryApply(value){
   for(const k of ['body','ring','wing','rims']) carStyle[k]=l[k];
   carPaint=l.body;
   for(const k of ['body','ring','wing','rims']) styleApply(k,l[k],false);
-  styleMark(); paintMark();
+  styleMark();          // paintMark went with the old home-screen swatches
   return true;
 }
 function replayMetadataBegin(){
@@ -5351,9 +5365,24 @@ function netPanel(on){
    The aim is eased rather than snapped. A camera that tracks a car perfectly
    looks computed; one that lags it by a hair looks operated. */
 const TV_N=20, TV_SPECIAL_EVERY=4;
-let tvCams=[], tvShot=null, tvCut=0, tvSeq=0;
+let tvCams=[], tvShot=null, tvCut=0, tvSeq=0, tvFov=0;
 const _tvAim=new THREE.Vector3(), _tvTo=new THREE.Vector3(), _tvP=new THREE.Vector3();
 
+/* Can this camera see that point? A ray from the lens, and anything of the
+   circuit in the way closer than the target counts as blocked. */
+const _tvRay=new THREE.Raycaster(), _tvDir=new THREE.Vector3(), _tvOrg=new THREE.Vector3();
+function tvClear(cam, aim){
+  if(!trackRoot) return true;
+  _tvOrg.set(cam.x,cam.y,cam.z);
+  _tvDir.set(aim.x-cam.x, aim.y-cam.y, aim.z-cam.z);
+  const dist=_tvDir.length();
+  if(dist<1) return false;
+  _tvDir.divideScalar(dist);
+  _tvRay.set(_tvOrg,_tvDir);
+  _tvRay.far=dist-1.2;                       // stop short of the car itself
+  const hits=_tvRay.intersectObject(trackRoot,true);
+  return hits.length===0;
+}
 function tvBuild(curve,L){
   tvCams=[];
   if(!curve||!L) return;
@@ -5368,12 +5397,31 @@ function tvBuild(curve,L){
     /* Every third one is a close, low camera: the car fills the frame and is
        gone again, which is the shot that sells the speed on a straight. */
     const close=(k%3===2);
-    const out=close ? 13+ (k%2)*4 : 30+(k%4)*9;
-    const up =close ? 2.2 : 9+(k%3)*4.5;
-    const x=P.x+ox*out, z=P.z+oz*out;
-    const g=groundAt(x,z,1e9);
-    tvCams.push({ x, y:(g.hit?g.y:P.y)+up, z, s:u*L, close,
-                  fx:dx, fz:dz });
+    /* A camera position is only worth having if it can see the car. Several of
+       these landed behind a treeline: the car arrives, and the shot is a wall
+       of pine. So each one is tried and checked -- a ray from the lens to the
+       car's head height, and if anything of the circuit's own scenery is in
+       the way, the next placement is tried instead. The other side of the road
+       first, since that is usually clear when this side is not, then higher,
+       then further back. The first one that can see the car wins; if none can,
+       the highest is kept, because looking over the trees beats looking into
+       them. */
+    const aim=new THREE.Vector3(P.x,(groundAt(P.x,P.z,1e9).y||P.y)+1.1,P.z);
+    const tries=[];
+    for(const side of [1,-1]){
+      for(const [out,up] of (close? [[13,2.2],[16,3.4],[20,7]] : [[30,9],[38,13],[46,20],[52,30]])){
+        tries.push({ox:ox*side, oz:oz*side, out, up});
+      }
+    }
+    let best=null, highest=null;
+    for(const t of tries){
+      const x=P.x+t.ox*t.out, z=P.z+t.oz*t.out;
+      const g=groundAt(x,z,1e9);
+      const cam={ x, y:(g.hit?g.y:P.y)+t.up, z, s:u*L, close, fx:dx, fz:dz };
+      if(!highest||cam.y>highest.y) highest=cam;
+      if(tvClear(cam,aim)){ best=cam; break; }
+    }
+    tvCams.push(best||highest);
   }
   console.log('tv: '+tvCams.length+' trackside cameras');
 }
@@ -5390,6 +5438,12 @@ function tvNearest(s){
   return bi;
 }
 function tvPick(t){
+  /* A cut is a cut: the new camera looks where the car is now, not where the
+     last one had eased its way to. Without this every change of shot began
+     with a swing across the scene, which is a large part of what looked
+     glitchy. */
+  _tvAim.set(0,0,0);
+  tvFov=0;
   tvSeq++;
   // count them, so a test can prove the picture is not being cut to ribbons
   NET.cuts=(NET.cuts||0)+1;
@@ -5406,6 +5460,24 @@ function tvPick(t){
    works this out every frame for the delta, so it costs nothing here. */
 function tvCarS(){ return tlSt.length ? (tlIdx/tlSt.length)*TT.len : 0; }
 
+/* The tag in the corner: which of the twenty you are watching, or the name of
+   the shot when it is not one of them. */
+function tvTag(){
+  const el=document.getElementById('tvtag');
+  if(!el) return;
+  const on = CAMS[camMode] && CAMS[camMode].tv && tvShot && !document.body.classList.contains('cinema');
+  el.classList.toggle('on', !!on);
+  if(!on) return;
+  const names={heli:'Helicopter', airbox:'Airbox', nose:'Nose', fixed:'Tracking'};
+  const nm=document.getElementById('tvtagname'), of=document.getElementById('tvtagof');
+  if(tvShot.kind==='track'){
+    if(nm) nm.textContent='Cam '+String(tvShot.i+1).padStart(2,'0');
+    if(of) of.textContent='of '+tvCams.length;
+  } else {
+    if(nm) nm.textContent=names[tvShot.kind]||tvShot.kind;
+    if(of) of.textContent='onboard · cam '+String(tvShot.i+1).padStart(2,'0');
+  }
+}
 function tvUpdate(t,dt){
   if(!tvCams.length){ return false; }
   const s=tvCarS();
@@ -5457,10 +5529,15 @@ function tvUpdate(t,dt){
     camera.position.set(c.x,c.y,c.z);
     camera.lookAt(_tvAim);
     const d=Math.hypot(c.x-car.x, c.z-car.z);
-    // the lens: keep the car about a sixth of the frame, within reason
-    camera.fov=clamp(2*Math.atan(17/Math.max(d,8))*180/Math.PI, 9, 52);
+    // the lens: keep the car about a sixth of the frame, within reason, and
+    // eased -- a car closing fast changes the distance quickly, and a focal
+    // length chasing it frame by frame reads as the picture pumping
+    const want=clamp(2*Math.atan(17/Math.max(d,8))*180/Math.PI, 9, 52);
+    tvFov = tvFov ? tvFov+(want-tvFov)*(1-Math.pow(0.02,dt)) : want;
+    camera.fov=tvFov;
   }
   camera.up.set(0,1,0);
+  tvTag();
   return true;
 }
 
@@ -6885,6 +6962,23 @@ window.SIM={
     out.sort((a,b)=>b.tris-a.tris);
     return {total:out.reduce((a,q)=>a+q.tris,0), count:out.length, top:out.slice(0,16)};
   },
+  diag(){
+    let err=null;
+    try{ ttBuild(); }catch(e){ err=String(e&&e.stack||e).split('\n').slice(0,3).join(' | '); }
+    return { spaLine:(typeof SPA_LINE!=='undefined')?SPA_LINE.length:'missing',
+             trackRoot:!!trackRoot, gates:TT.gates.length, curve:!!TT.curve,
+             len:TT.len||0, stations:tlSt.length, cams:tvCams.length, err };
+  },
+  tvCheck(){
+    const out={total:tvCams.length, clear:0, blocked:[]};
+    tvCams.forEach((c,i)=>{
+      const g=groundAt(c.x,c.z,1e9);
+      const P=new THREE.Vector3(); TT.curve.getPointAt((i/tvCams.length)%1,P);
+      const aim=new THREE.Vector3(P.x,(groundAt(P.x,P.z,1e9).y||P.y)+1.1,P.z);
+      if(tvClear(c,aim)) out.clear++; else out.blocked.push(i+1);
+    });
+    return out;
+  },
   tv(){ return {cams:tvCams.length, cuts:NET.cuts||0, shot:tvShot&&tvShot.kind, i:tvShot&&tvShot.i,
                 camY:tvShot&&tvShot.kind==='track'&&tvCams[tvShot.i]?+tvCams[tvShot.i].y.toFixed(1):null}; },
   fakeLap(kph){        // a lap at a believable speed, recorded the way a real one is
@@ -6909,7 +7003,9 @@ window.SIM={
                     have:!!TTREC.best, frames:TTREC.best?TTREC.best.f.length:0,
                     x:+carState.wx.toFixed(1), z:+carState.wz.toFixed(1),
                     kph:Math.round(carState.speed*3.6)}; },
-  setCam(i){ camMode=i%CAMS.length; orbit=false; freeLook=false; updateStatus(); return CAMS[camMode].name; },
+  setCam(i){ camMode=i%CAMS.length; orbit=false; freeLook=false; updateStatus();
+             const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on');
+             return CAMS[camMode].name; },
   prof(){
     const f=Math.max(1,PROF.frames), i=renderer.info;
     const r={ frames:PROF.frames, fps:+_simFps.toFixed(1),
