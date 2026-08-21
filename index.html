@@ -611,7 +611,6 @@
     &middot; right-drag or shift-drag to pan &middot; scroll to zoom &middot; K or Esc to leave</div>
   <div id="airmsg"></div>
 </div>
-</div>
 <div id="netbar"><span class="ttlbl">Watching</span><b id="netbarcode">------</b>
   <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
@@ -704,6 +703,8 @@
           <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
+          <div class="ctrl-row"><kbd>J</kbd><span>Send the AI car out &mdash; and stop it</span></div>
+          <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
       </div>
@@ -5873,10 +5874,28 @@ function tlMeasure(curve,L){
      from both keeps what was measured, so a half-marked circuit is still
      drivable. */
   tlApply(tlSt);
+  /* A floor, applied last because the hand-marked lines are applied last.
+     The median filter above cannot see them, so wherever the nearest point on a
+     marked line lands close to the racing line -- a station matched to the
+     wrong stretch of edge, an edge drawn a little inside the paint -- the
+     survey ends up claiming the circuit is under a metre wide. Measured before
+     this went in: the narrowest station said 0.9 m across, and scanning the
+     racing line itself against the limits called a wheel off at 33 points of
+     3480, four wheels off at some of them. The racing line is on the circuit by
+     construction and the car is 1.9 m across, so a station that cannot fit the
+     car around the line is a bad measurement, not a narrow track. Nothing wider
+     than the floor is touched, and the median at Spa is 11 m. */
+  const TL_FLOOR=CAR_TR/2+0.45;
+  let floored=0;
+  for(const st of tlSt){
+    if(st.dR<TL_FLOOR){ st.dR=TL_FLOOR; floored++; }
+    if(st.dL<TL_FLOOR){ st.dL=TL_FLOOR; floored++; }
+  }
   const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
   console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
     +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
-    +' m, max '+w[w.length-1].toFixed(1)+' m');
+    +' m, max '+w[w.length-1].toFixed(1)+' m'
+    +(floored?', '+floored+' sides widened to the floor':''));
 }
 
 /* ------------------------------------------- track limits, marked by hand
@@ -5905,7 +5924,12 @@ const TLE_KEY='f1sim.tl.edges.spa22';
    arrived, however many times it was pushed. The saved copy now records the
    version it was drawn against, and a copy drawn against an older file is
    dropped -- the file is newer, and the file is the one that was fixed. */
-const TLE_VER=3;
+/* 4: the outside line Wells surveyed and sent through -- 492 points, snapped to
+   the model -- is in this file as SPA_EDGE_OUT, and browsers that had been used
+   to draw edges were still handing back their own ver-3 copy of the old one on
+   every load. That is the bug where a clean lap was deleted for track limits
+   that were not where the white line is. Bumping this drops those copies. */
+const TLE_VER=4;
 const TLE_COL=[0x33ddff, 0xffb020];
 
 function tleModel(v){ return gridToModel(v); }
@@ -7576,6 +7600,26 @@ window.SIM={
       worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
       laps:AI.laps.slice(), surf:{...AI.car.surf,y:undefined},
       steer:+AI.car.steerAng.toFixed(3)}:null; },
+  /* Walk the racing line and ask the track-limits test about every metre of it.
+     The line is by definition on the circuit, so anything it calls a violation
+     is the limits being wrong, not the driving. */
+  limitsScan(step){
+    const keep={x:carState.wx,z:carState.wz,h:carState.hdg};
+    const P=new THREE.Vector3(), T=new THREE.Vector3();
+    const n=Math.round(TT.len/(step||2)), bad=[];
+    let worst=0;
+    for(let i=0;i<n;i++){
+      TT.curve.getPointAt(i/n,P); TT.curve.getTangentAt(i/n,T);
+      carState.wx=P.x; carState.wz=P.z; carState.hdg=Math.atan2(T.x,T.z);
+      let on=0;
+      for(let w=0;w<CARPTS.length;w++) if(tlWheelOn(CARPTS[w].x,CARPTS[w].z)) on++;
+      if(on<CARPTS.length){ bad.push({s:Math.round(i*TT.len/n), on});
+                            if(CARPTS.length-on>worst) worst=CARPTS.length-on; }
+    }
+    carState.wx=keep.x; carState.wz=keep.z; carState.hdg=keep.h;
+    return {checked:n, wheelsOff:bad.length, worstWheelsOff:worst,
+            where:bad.slice(0,20).map(b=>b.s), edges:[tleLines[0].length,tleLines[1].length]};
+  },
   aiObj(){ return AI.obj?{visible:AI.obj.visible, parts:AI.obj.children.length,
       inScene:!!AI.obj.parent, x:+AI.obj.position.x.toFixed(1),
       y:+AI.obj.position.y.toFixed(2), z:+AI.obj.position.z.toFixed(1)}:null; },
@@ -7614,7 +7658,7 @@ window.SIM={
   get player(){ return {kph:carState.speed*3.6, x:carState.wx, z:carState.wz,
                         hdg:carState.hdg, groundY:PLAYER.groundY,
                         surf:{...PLAYER.surf, y:undefined}}; },
-  get lap(){ return {t:TT.t, best:TT.best, last:TT.last, gates:TT.hit.slice(), started:TT.started, drone:TT.drone, rad:TT.rad,
+  get lap(){ return {void:TT.void, why:TT.why, t:TT.t, best:TT.best, last:TT.last, gates:TT.hit.slice(), started:TT.started, drone:TT.drone, rad:TT.rad,
                      live:TT.live, cd:TT.cd, armed:TT.armed, n:TT.gates.length}; },
   gate(i){ const g=TT.gates[i]; return g?{x:g.x,y:g.y,z:g.z,hdg:Math.atan2(g.dx,g.dz)}:null; },
   place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
@@ -8328,7 +8372,10 @@ const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
 const qualifyingWeatherEl=document.getElementById('qualifying-weather');
 const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
-const QUALIFYING_LOAD_MIN_MS=10000;
+/* Was ten seconds, held deliberately so the intro clip had room to play. With
+   no clip in place that is ten seconds of staring at a status line for nothing,
+   which is exactly how it reads. Long enough now to not flash, and no longer. */
+const QUALIFYING_LOAD_MIN_MS=1200;
 let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
 let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false, qualifyingAllowsWeather=true;
 function qualifyingLoadSetStatus(text){
