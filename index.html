@@ -4352,7 +4352,7 @@ addEventListener('keyup',e=>{
    physics downstream are identical. */
 let joyPort=null, joyConnected=false, joyX=512, joyY=512, joyBtn=false;
 let joyCx=512, joyCy=512, joyLastMsg=0, joyBtnPrev=false;
-const JOY_INVERT_X=false, JOY_INVERT_Y=false;   // flip if an axis reads backwards
+const JOY_INVERT_X=true, JOY_INVERT_Y=false;    // X flipped: left/right were backwards on this stick
 const JOY_DEAD=40, JOY_RANGE=470;               // deadzone and travel, in raw ADC counts
 
 function joyAxis(raw, center, invert){
