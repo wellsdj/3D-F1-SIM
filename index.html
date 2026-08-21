@@ -2201,7 +2201,7 @@ const starGeo=new THREE.BufferGeometry();
 starGeo.setAttribute('position',new THREE.BufferAttribute(starPositions,3));
 const nightStars=new THREE.Points(starGeo,new THREE.PointsMaterial({
   color:0xe4efff,size:1.5,sizeAttenuation:false,transparent:true,opacity:.94,
-  depthTest:false,depthWrite:false,fog:false,blending:THREE.AdditiveBlending
+  depthTest:true,depthWrite:false,fog:false,blending:THREE.AdditiveBlending
 }));
 nightStars.frustumCulled=false;
 nightStars.renderOrder=2;
