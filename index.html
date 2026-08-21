@@ -447,6 +447,11 @@
                  width:48px;height:48px;border:1px solid rgba(236,234,228,.25);border-radius:50%;background:rgba(5,10,16,.48);
                  color:#f4f7fb;font:inherit;font-size:22px;cursor:pointer;transition:background .2s ease,transform .2s ease}
   .overlay-close:hover{background:rgba(255,176,32,.18);transform:rotate(90deg)}
+  #customizer-home{position:absolute;z-index:3;right:clamp(88px,9vw,150px);top:clamp(24px,4vw,58px);
+                   min-width:112px;padding:12px 16px;font:inherit;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+                   color:#f4f7fb;background:rgba(5,10,16,.58);border:1px solid rgba(236,234,228,.24);border-radius:5px;
+                   cursor:pointer;backdrop-filter:blur(8px);transition:transform .18s ease,background .18s ease,border-color .18s ease}
+  #customizer-home:hover{transform:translateY(-2px);background:rgba(255,176,32,.18);border-color:#ffb020}
   #lapbook-actions{position:relative;z-index:1;display:flex;gap:9px;margin-top:24px;flex-wrap:wrap}
   #lapbook-actions button{font:inherit;font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:#f4f7fb;cursor:pointer;
                           background:rgba(255,255,255,.07);border:1px solid rgba(236,234,228,.2);border-radius:4px;padding:12px 14px}
@@ -486,7 +491,8 @@
     #home-settings{right:18px;top:18px}#home-settings .cog{width:52px;height:52px;font-size:24px}#home-settings .settings-menu{top:62px;width:min(285px,calc(100vw - 36px))}
     #customize-home{right:18px;bottom:18px;width:min(calc(100% - 36px),360px);min-height:78px;padding:18px 22px 16px;font-size:11px}#lapbook{padding:92px 22px 34px}#lapbook h2,#customizer h2{font-size:clamp(42px,14vw,66px)}
     .lap-row{grid-template-columns:38px 1fr auto;gap:10px;padding:12px}.lap-row .lap-time{font-size:18px}
-    #customizer .custom-copy{padding:82px 22px 0}#customizer .custom-controls{left:18px;bottom:18px;width:calc(100% - 36px)}#customizer .custom-tag{display:none}}
+    #customizer .custom-copy{padding:82px 22px 0}#customizer .custom-controls{left:18px;bottom:18px;width:calc(100% - 36px)}#customizer .custom-tag{display:none}
+    #customizer-home{right:78px;top:18px;min-width:96px;padding:11px 12px;font-size:9px}}
 
   #settings p.note{margin:11px 2px 0;font-family:var(--mono);font-size:9.5px;
                    letter-spacing:.05em;opacity:.42;line-height:1.75;
@@ -732,6 +738,7 @@
 
 <section id="customizer" aria-hidden="true">
   <div id="customizer-stage"></div>
+  <button id="customizer-home" type="button" aria-label="Return to home">← Home</button>
   <button class="overlay-close" id="customizer-close" aria-label="Close car customiser">×</button>
   <div class="custom-copy">
     <div class="overlay-kicker">Garage 01 · Live spec</div>
@@ -4988,6 +4995,13 @@ function replayStart(){
   if(typeof qualifyingLoadHide==='function') qualifyingLoadHide(true);
   replayMetadataBegin();
   TTREC.playing=true; TTREC.pt=0; TTREC.i=0;
+  /* A replay starts at the beginning of the recorded lap, not wherever the
+     live director happened to be when the driver opened Best Laps. Clear its
+     old shot and seed the station index from the first recorded position so
+     TV mode cannot hold the last live frame while the replay is moving. */
+  tvReset();
+  if(TTREC.best.f[0]) tlStation(TTREC.best.f[0][1],TTREC.best.f[0][2]);
+  camMode=2; orbit=false; freeLook=false; updateStatus();
   TT.live=false;                       // the trial stands down while this runs
   netLabel();                          // and nobody can join a recording
   document.body.classList.remove('cinema');   // or the whole overlay stays faded out
@@ -5505,6 +5519,10 @@ function netPanel(on){
 const TV_N=20, TV_SPECIAL_EVERY=4;
 let tvCams=[], tvShot=null, tvCut=0, tvSeq=0;
 const _tvAim=new THREE.Vector3(), _tvTo=new THREE.Vector3(), _tvP=new THREE.Vector3();
+function tvReset(){
+  tvShot=null; tvCut=-1; tvSeq=0;
+  _tvAim.set(0,0,0); _tvTo.set(0,0,0);
+}
 
 function tvBuild(curve,L){
   tvCams=[];
@@ -7344,7 +7362,12 @@ function frame(now){
      On flat ground base is 0 and the framing is exactly what it was. */
   const camBase=FREEROAM?vGroup.position.y-RIDE:0;
 
-  if(C.tv && !orbit && !freeLook && FREEROAM && tvUpdate(t,dt)){
+  /* During a best-lap preview the director clock must be the replay clock.
+     The live simulation clock also advances while menus/loading screens are
+     open, so using it here made the director's shot age independently of the
+     car and eventually appear to pause or cut at the wrong time. */
+  const cameraClock=TTREC.playing?TTREC.pt:t;
+  if(C.tv && !orbit && !freeLook && FREEROAM && tvUpdate(cameraClock,dt)){
     camera.updateProjectionMatrix();
   }
   else if(orbit){
@@ -7805,6 +7828,7 @@ document.getElementById('customize-home').onclick=openCustomizer;
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
+document.getElementById('customizer-home').onclick=closeCustomizer;
 /* Dragging the stage. The overlay's own panels keep their clicks -- only a
    drag that starts on the empty part of the screen turns the car. */
 (function(){
