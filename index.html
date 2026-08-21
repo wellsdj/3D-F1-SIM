@@ -5747,7 +5747,10 @@ const TLE_KEY='f1sim.tl.edges.spa22';
    arrived, however many times it was pushed. The saved copy now records the
    version it was drawn against, and a copy drawn against an older file is
    dropped -- the file is newer, and the file is the one that was fixed. */
-const TLE_VER=3;
+/* The pasted SPA inside line is the canonical v4 geometry shipped in Git.
+   Bumping this invalidates v3 browser saves, which otherwise masked the
+   corrected coordinates and made the track-limit check appear broken. */
+const TLE_VER=4;
 const TLE_COL=[0x33ddff, 0xffb020];
 
 function tleModel(v){ return gridToModel(v); }
