@@ -1136,7 +1136,14 @@ const TRACKS={
   },
   spa22:{
     id:'spa22', name:'Spa 2022', sub:'Imported · free roam · full layout',
-    procedural:false, glb:'spa2022.glb', freeRoam:true, scenery:false,
+    /* The same circuit, meshopt-compressed: 77 MB to 21 MB. Positions and texture
+       coordinates are left as floats rather than quantised -- quantising them is
+       no smaller here, because the compression is doing the work, and this model
+       is what the height field, the racing line and the track limits are all
+       measured against, so its vertices are not something to trade away for
+       nothing. Only the normals are packed, at 12 bits, and those are lighting.
+       The decoder was already wired up for the car. */
+    procedural:false, glb:'spa2022-fast.glb', freeRoam:true, scenery:false,
     /* Where to start, in the model's own coordinates: [x, z, heading degrees].
        Measured by parking the car on the line rather than inferred from the
        geometry, which put it in a car park three times. With this set, none of
