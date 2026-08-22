@@ -2422,13 +2422,27 @@ function texture(src, srgb, rw, rh){
   const t=new THREE.Texture();
   t.userData={clones:[]};   // r128 does not create userData on Texture
   const img=new Image();
+  const count=()=>{
+    loaded++;
+    bar.style.width=Math.round(loaded/pending*100)+'%';
+    loadTick('Loaded '+loaded+' of '+pending);
+    if(loaded>=pending) ready();
+  };
   img.onload=()=>{
     t.image=img; t.needsUpdate=true;
     // clones made before the image arrived are still empty -- fill them now
     for(const c of (t.userData.clones||[])){ c.image=img; c.needsUpdate=true; }
-    loaded++;
-    bar.style.width=Math.round(loaded/pending*100)+'%';
-    if(loaded>=pending) ready();
+    count();
+  };
+  /* This is the forever-load. The boot waits for a fixed number of assets and
+     this counted only the ones that arrived, so a single texture that 404s or
+     drops -- one image out of seven -- left the count one short for the rest of
+     the session. No error, no console, nothing on screen changing: exactly what
+     "it loads forever" looks like. A texture that fails is still a texture that
+     is not coming, so it counts, and says so. */
+  img.onerror=()=>{
+    console.error('texture failed to load: '+src+' — continuing without it');
+    count();
   };
   img.src=src;
   t.wrapS = rw||THREE.RepeatWrapping;
@@ -3414,6 +3428,9 @@ const WHEELBASE=3.60;
   pending++;
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  /* Counted whatever happens. The boot waits for a fixed number of assets, so
+     one that errors and never calls back leaves the count one short forever --
+     which is a loading screen that never finishes and no error anywhere. */
   loader.load(ASSETS.car, gltf=>{
     const car=gltf.scene;
     car.updateMatrixWorld(true);
@@ -9568,6 +9585,17 @@ function frame(now){
    cannot be built until a track is chosen -- and for an imported one, not until
    its model has arrived and given up its centreline. */
 let booted=false, assetsDone=false, worldDone=false;
+/* Every stage of getting onto a circuit reports here. A load that is still
+   moving keeps resetting the clock; one that has stopped -- a dropped
+   connection, a texture that never answers, an asset the counter is still
+   waiting on -- runs it out and says where it stopped, instead of leaving a
+   status line that never changes and nothing in the console. */
+const LOAD_STALL_MS=25000;
+let loadLast=performance.now(), loadWhat='starting';
+function loadTick(what){
+  loadLast=performance.now();
+  if(what){ loadWhat=what; qualifyingLoadSetStatus(what); }
+}
 
 function applyTrackConstants(t){
   TRACK=t; FREEROAM=!!t.freeRoam;
@@ -9604,6 +9632,7 @@ function buildWorld(){
   buildStartLine();
   buildStartLights();
   worldDone=true;
+  loadTick('World built');
   maybeStart();
 }
 
@@ -9622,7 +9651,7 @@ function maybeStart(){
   runFrame();
   qualifyingLoadReady();
 }
-function ready(){ assetsDone=true; maybeStart(); }
+function ready(){ assetsDone=true; loadTick('Assets ready'); maybeStart(); }
 
 const bootEl=document.getElementById('boot');
 const pickEl=document.getElementById('pick');
@@ -9632,10 +9661,11 @@ const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
 const qualifyingWeatherEl=document.getElementById('qualifying-weather');
 const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
-/* Was ten seconds, held deliberately so the intro clip had room to play. With
-   no clip in place that is ten seconds of staring at a status line for nothing,
-   which is exactly how it reads. Long enough now to not flash, and no longer. */
-const QUALIFYING_LOAD_MIN_MS=1200;
+/* Nothing. This was ten seconds, held so an intro clip had room to play, then
+   1.2 s so the screen would not flash. There is no clip, and a loading screen
+   that lingers after the thing it was waiting for is just a slower game. The
+   moment the circuit is ready, it goes. */
+const QUALIFYING_LOAD_MIN_MS=0;
 let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
 let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false, qualifyingAllowsWeather=true;
 function qualifyingLoadSetStatus(text){
@@ -9934,16 +9964,33 @@ function startTrack(id){
   qualifyingLoadSetStatus('Loading '+t.name);
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
+  /* A silent load is what "it loads forever" actually is. This had neither a
+     progress callback nor an error one, so twenty-one megabytes arriving slowly
+     and twenty-one megabytes never arriving looked identical: a status line that
+     never changed, with nothing in the console either. Now it counts the bytes
+     in, it says so when it fails, and a load that stops moving gives up rather
+     than spinning until the tab is closed. */
+  let gotBytes=0, done=false;
+  loadTick('Loading '+t.name);
+  const watchdog=setInterval(()=>{
+    if(booted){ clearInterval(watchdog); return; }
+    if(performance.now()-loadLast < LOAD_STALL_MS) return;
+    clearInterval(watchdog);
+    console.error('load stalled at "'+loadWhat+'" after '+(gotBytes/1048576).toFixed(1)+' MB');
+    qualifyingLoadFail('Stuck on "'+loadWhat+'" — nothing arrived for '
+                       +Math.round(LOAD_STALL_MS/1000)+'s');
+  }, 2000);
   loader.load(t.glb, gltf=>{
+    done=true; clearInterval(watchdog);
     const root=gltf.scene;
     bootMsg.textContent='Reading the circuit';
-    qualifyingLoadSetStatus('Reading the circuit');
+    loadTick('Reading the circuit');
     root.updateWorldMatrix(true,true);
 
     /* Nothing below is hand-derived per track: the road, the units and the
        grid slot all come out of the model, so a new circuit is just a file. */
     const rd = findRoadMesh(root);
-    if(!rd){ bootMsg.textContent='No road surface found in '+t.glb; return; }
+    if(!rd){ qualifyingLoadFail('No road surface found in '+t.glb); return; }
     console.log('road: '+Math.round(rd.area)+' m2 of surface, '+Math.round(rd.span)
                 +' across, filling '+(rd.fill*100).toFixed(1)+'% of its box');
 
@@ -9959,7 +10006,7 @@ function startTrack(id){
     } else console.log('model is already 1 unit = 1 metre');
 
     bootMsg.textContent='Finding the grid';
-    qualifyingLoadSetStatus('Finding the grid');
+    loadTick('Finding the grid');
     /* An explicit spawn beats anything derived, so it is checked first and
        short-circuits the rest. */
     if(t.spawnAt){
@@ -10062,11 +10109,12 @@ function startTrack(id){
 
     buildWorld();
   }, ev=>{
+    gotBytes=ev.loaded||0;
     if(ev.lengthComputable){
       const pct=Math.round(ev.loaded/ev.total*100);
       bootMsg.textContent='Loading '+t.name+' '+pct+'%';
-      qualifyingLoadSetStatus('Loading '+t.name+' '+pct+'%');
-    }
+      loadTick('Loading '+t.name+' '+pct+'%');
+    } else loadTick('Loading '+t.name+' '+(gotBytes/1048576).toFixed(1)+' MB');
   }, err=>{
     console.error('track load failed',err);
     bootMsg.textContent='Track failed to load';
