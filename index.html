@@ -392,7 +392,10 @@
   #lightsout.show{opacity:1;transform:translateX(-50%) scale(1)}
   #lightsout small{display:block;text-align:center;font-size:11px;letter-spacing:.4em;
              margin-top:10px;color:#37e06a;opacity:.9}
-  body.cinema #lights,body.cinema #gridcard,body.cinema #lightsout{opacity:0}
+  /* The grid card deliberately stays up through the drone shot: choosing how
+     hard the AI tries is part of arriving at the circuit, not something that
+     waits for the camera to finish. */
+  body.cinema #lights,body.cinema #lightsout{opacity:0}
   /* The lap card sits where the gantry hangs, and a clock reading zero is not
      what you are looking at on the grid anyway. It comes back at lights out. */
   body.racestart #tt,body.racestart #netwrap,body.racestart #netbtn{opacity:0;transition:opacity .3s ease}
@@ -826,6 +829,7 @@
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
           <div class="ctrl-row"><kbd>J</kbd><span>Start a race &mdash; grid, five lights, go</span></div>
+          <div class="ctrl-row"><kbd>G</kbd><span>Show the track limits on the road</span></div>
           <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
@@ -4437,7 +4441,7 @@ addEventListener('keydown',e=>{
       ttStart(false);                 // restart at the countdown, not the drone shots
     } else resetToTrack();
   }
-  if(k==='g') armStart();                            // back to the grid, new sequence
+  if(k==='g') limShow(!limOn);                       // where the limit actually is
   /* Drawing the AI's lines: K puts the circuit on screen from above and takes
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
@@ -8275,7 +8279,7 @@ function racePlace(car, slot){
     AI.lat=0; AI.want=0; AI._dv=0; AI._dvRace=0;
   }
 }
-function raceStart(){
+function raceStart(opts){
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
   if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
   if(RACE.on){ raceEnd(); return false; }
@@ -8290,7 +8294,12 @@ function raceStart(){
   /* Pinned by the same lever the other circuit's start uses: anything that is
      not 'go' holds the car on the line. */
   startPhase='hold'; startT=0; holdFor=1e9;
-  TT.live=false; TT.cd=0; TT.drone=0;
+  /* Coming in off the loading screen the drone shot is already running and is
+     worth keeping -- the grid card sits over it. Pressed by hand mid-session
+     there is no shot to keep, and the countdown has to be cleared or it would
+     run its own three-two-one under the lights. */
+  TT.cd=0;
+  if(!(opts&&opts.keepIntro)){ TT.live=false; TT.drone=0; }
   ttReset();
   setLights(0);
   raceEl('gridcard').classList.add('show');
@@ -8311,6 +8320,51 @@ function raceEnd(){
 }
 /* The sequence itself, on the world clock rather than on timers, so it cannot
    drift away from the cars it is holding. */
+/* ------------------------------------------------------------ the limit, seen
+   Not the lines as drawn, but the limit as enforced: every station's own edge,
+   after the drawn lines, the kerbs and the floor have all had their say. That
+   distinction is the whole point -- knowing where you drew a line does not tell
+   you where the car is being judged, and the only way to answer "why was that
+   lap deleted" is to be able to see the thing that deleted it. */
+let limOn=false, limGroup=null;
+function limShow(on){
+  limOn=on;
+  if(limGroup){ scene.remove(limGroup);
+    limGroup.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) o.material.dispose(); });
+    limGroup=null; }
+  if(!on || !tlSt.length) return;
+  limGroup=new THREE.Group(); scene.add(limGroup);
+  /* Ribbons rather than lines. A THREE.Line is one pixel wide however far away
+     it is, which at 300 kph is a thread you cannot see -- and the entire point
+     of this is being able to see, from the car, where the limit runs. These are
+     laid on the road like paint, a third of a metre across, lifted a few
+     centimetres and offset in depth so they do not fight with the tarmac. */
+  const W=0.34, LIFT=0.06;
+  for(const side of [1,-1]){
+    const n=tlSt.length, pos=new Float32Array((n+1)*2*3), idx=[];
+    for(let i=0;i<=n;i++){
+      const st=tlSt[i%n];
+      const r=(side>0?st.dR:st.dL)*side;
+      const x=st.x+st.rx*r, z=st.z+st.rz*r;
+      const g=groundAt(x,z,1e9), y=(g.hit?g.y:0)+LIFT;
+      const k=i*6;
+      pos[k  ]=x-st.rx*W*side; pos[k+1]=y; pos[k+2]=z-st.rz*W*side;
+      pos[k+3]=x+st.rx*W*side; pos[k+4]=y; pos[k+5]=z+st.rz*W*side;
+      if(i<n){ const v=i*2;
+        idx.push(v,v+1,v+2, v+1,v+3,v+2); }
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+    geo.setIndex(idx);
+    const mat=new THREE.MeshBasicMaterial({
+      color: side>0?0x33ddff:0xffd21e, transparent:true, opacity:0.85,
+      side:THREE.DoubleSide, depthWrite:false,
+      polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4 });
+    const m=new THREE.Mesh(geo,mat);
+    m.renderOrder=999;
+    limGroup.add(m);
+  }
+}
 function raceUI(){
   const sl=raceEl('paceslider'), num=raceEl('pacenum'), nm=raceEl('pacename');
   if(!sl) return;
@@ -8330,6 +8384,7 @@ function raceStep(dt){
        on the grid. */
     if(RACE.ready && RACE.t>=0.35){
       RACE.phase='lights'; RACE.t=0;
+      TT.drone=0; document.body.classList.remove('cinema');
       raceEl('gridcard').classList.remove('show');
       raceEl('lights').classList.add('show');
     }
@@ -8471,6 +8526,7 @@ window.SIM={
       fields:['t','s','kph','target','err','off','outside','steer','surf'], p:t}; },
   /* Pin the AI to one of the three lines, for driving each of them end to end
      without needing a second car to provoke it. */
+  limits(){ return {on:limOn, lines:limGroup?limGroup.children.length:0}; },
   race(){ return {on:RACE.on, phase:RACE.phase, t:+RACE.t.toFixed(2), hold:+RACE.hold.toFixed(2),
       lit:litCols, held:!!AI.hold, startPhase,
       ui:{grid:raceEl('gridcard').classList.contains('show'),
@@ -9280,6 +9336,11 @@ function qualifyingBegin(){
   }
   qualifyingLoadSetStatus('Starting '+TIME_OF_DAY[qualifyingWeatherChoice].label.toLowerCase()+' session');
   ttStart();
+  /* And straight onto the grid. Pressing a key to make a race happen was never
+     the idea: you come out of the loading screen into the drone shot with both
+     cars already on the grid and the pace card up, and the lights go when you
+     say so. */
+  raceStart({keepIntro:true});
 }
 function qualifyingChooseWeather(kind){
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
