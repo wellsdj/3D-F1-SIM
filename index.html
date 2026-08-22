@@ -7901,7 +7901,8 @@ function startTrack(id){
   qualifyingLoadSetStatus('Loading '+t.name);
   const loader=new THREE.GLTFLoader();
   if(self.MeshoptDecoder) loader.setMeshoptDecoder(self.MeshoptDecoder);
-  loader.load(t.glb, gltf=>{
+  let trackAttempts=0;
+  const loadTrack=()=>loader.load(trackAttempts ? t.glb+'?retry='+trackAttempts : t.glb, gltf=>{
     const root=gltf.scene;
     bootMsg.textContent='Reading the circuit';
     qualifyingLoadSetStatus('Reading the circuit');
@@ -8035,10 +8036,17 @@ function startTrack(id){
       qualifyingLoadSetStatus('Loading '+t.name+' '+pct+'%');
     }
   }, err=>{
+    if(trackAttempts++<2){
+      console.warn('track load retry '+trackAttempts,err);
+      qualifyingLoadSetStatus('Retrying '+t.name+'…');
+      setTimeout(loadTrack,350);
+      return;
+    }
     console.error('track load failed',err);
     bootMsg.textContent='Track failed to load';
     qualifyingLoadFail('Track failed to load');
   });
+  loadTrack();
 }
 
 Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
