@@ -71,6 +71,13 @@
   /* ------------------------------------------ track limits, seen from above */
   #m2wrap{position:fixed;inset:0;z-index:30;display:none}
   #m2wrap.on{display:block}
+  #m2brushwrap{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;
+        letter-spacing:.16em;text-transform:uppercase;color:var(--paper);opacity:.85}
+  #m2brushwrap b{color:var(--amber);font-weight:600;min-width:42px;display:inline-block}
+  #m2brush{-webkit-appearance:none;appearance:none;width:110px;height:3px;border-radius:999px;
+        background:linear-gradient(90deg,#3a4048,var(--amber));outline:none;cursor:pointer}
+  #m2brush::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+        background:#ffb020;box-shadow:0 2px 8px rgba(255,176,32,.6);cursor:pointer}
   #m2canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;
             touch-action:none}
   #m2bar{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:2;
@@ -695,6 +702,8 @@
     <button id="m2in">Inside</button>
     <button id="m2out" class="on">Outside</button>
     <span id="m2info"></span>
+    <label id="m2brushwrap">Brush <b id="m2brushval">25 m</b>
+      <input id="m2brush" type="range" min="0" max="120" step="5" value="25"></label>
     <button id="m2copy">Copy</button>
     <button id="m2close">Done</button>
   </div>
@@ -5318,6 +5327,7 @@ function clearGround(v,pad){
    Nothing here computes anything. It is a drawing tool -- what you drag is
    what the car is judged against, and Copy hands you the numbers to keep. */
 let m2Vis=[];
+let m2Brush=25;                  // metres of line either side that come with a drag
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
 const m2El=()=>document.getElementById('m2canvas');
 
@@ -5376,6 +5386,23 @@ function m2Draw(){
      is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
 
+  /* The limit as the game enforces it, thin and pale under everything else. The
+     line you drag is not quite the limit -- the floor under the width and the
+     kerb walk on surveyed stretches both have a say -- and dragging a line
+     while the thing you are trying to move is invisible is guesswork. */
+  if(typeof tlSt!=='undefined' && tlSt.length){
+    for(const side of [1,-1]){
+      g.strokeStyle=side>0?'rgba(51,221,255,.5)':'rgba(255,210,30,.5)';
+      g.lineWidth=1.5;
+      g.beginPath();
+      tlSt.forEach((st,i)=>{
+        const r=(side>0?st.dR:st.dL)*side;
+        const x=m2sx(st.x+st.rx*r), y=m2sy(st.z+st.rz*r);
+        i?g.lineTo(x,y):g.moveTo(x,y);
+      });
+      g.closePath(); g.stroke();
+    }
+  }
   // the racing line, faint, so you can see which way round the circuit goes
   if(TT.curve){
     g.strokeStyle='rgba(150,170,200,.34)'; g.lineWidth=1.5;
@@ -5439,6 +5466,26 @@ function m2Hit(sx,sy){
   }
   return best;
 }
+/* Everything downstream of moving a limit. The stations near it are remeasured
+   -- only near it, which is the difference between the editor feeling instant
+   and freezing for ten seconds -- and then anything that was built off those
+   stations is rebuilt: the ribbons on the road if they are up, and the AI's
+   room, since where it may put a car is measured off exactly this. */
+function m2Applied(p){
+  const brush=Math.max(30, m2Brush*2.5);
+  tlTouch(p.x,p.z);
+  if(m2Brush>0){                        // a brush moved a stretch, so redo the stretch
+    const line=tleLines[m2Edge], n=line.length;
+    for(let k=-n/2;k<n/2;k+=3){
+      const q=line[((m2Drag+k)%n+n)%n];
+      if(!q) continue;
+      if(Math.hypot(q.x-p.x,q.z-p.z)<=brush) tlTouch(q.x,q.z);
+    }
+  }
+  if(limOn) limShow(true);
+  if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
+  m2Draw();
+}
 function m2Init(){
   const c=m2El(); if(!c) return;
   const pos=e=>{ const b=c.getBoundingClientRect();
@@ -5453,8 +5500,29 @@ function m2Init(){
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
     if(m2Drag>=0){
-      const p=tleLines[m2Edge][m2Drag];
-      p.x=m2wx(x); p.z=m2wz(y);
+      const line=tleLines[m2Edge], p=line[m2Drag];
+      const nx=m2wx(x), nz=m2wz(y);
+      /* The whole point of a brush: the run of line either side comes with it,
+         falling off smoothly, so a limit is pushed in or out over a stretch
+         rather than being dragged into a sawtooth one handle at a time. Shift
+         holds it to the single point, for when a single point is what is
+         wrong. */
+      const dx=nx-p.x, dz=nz-p.z;
+      const R=e.shiftKey?0:m2Brush;
+      if(R>0){
+        const n=line.length;
+        for(let k=-n/2;k<n/2;k++){
+          const i=((m2Drag+k)%n+n)%n;
+          if(i===m2Drag) continue;
+          const q=line[i];
+          const d=Math.hypot(q.x-p.x, q.z-p.z);
+          if(d>R) continue;
+          const w=0.5+0.5*Math.cos(Math.PI*d/R);      // 1 at the middle, 0 at the edge
+          q.x+=dx*w; q.z+=dz*w;
+          const gq=groundAt(q.x,q.z,1e9); if(gq.hit) q.y=gq.y;
+        }
+      }
+      p.x=nx; p.z=nz;
       const g=groundAt(p.x,p.z,1e9); if(g.hit) p.y=g.y;   // keep it on the ground
       m2Draw();
     } else if(m2Pan){
@@ -5466,7 +5534,7 @@ function m2Init(){
       window._m2last=m2Drag;
       const p=tleLines[m2Edge][m2Drag];
       tleSave();                       // your work is on disk before anything else
-      if(p) tlTouch(p.x,p.z);          // and only the stations near it are redone
+      if(p) m2Applied(p);              // stations, the view of them, and the AI
     }
     m2Drag=-1; m2Pan=false; m2Draw();
   });
@@ -8500,6 +8568,24 @@ window.SIM={
   /* Walk the racing line and ask the track-limits test about every metre of it.
      The line is by definition on the circuit, so anything it calls a violation
      is the limits being wrong, not the driving. */
+  stationAt(s){ const st=tlSt[Math.round(s/TL_STEP)%tlSt.length];
+      return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:st.dR,dL:st.dL}:null; },
+  /* Grab the nearest handle to a world point and pull it out by so many metres,
+     exactly as a pointer would -- the same handler, so a test drives the tool
+     and not a copy of it. */
+  mapDrag(x,z,metres){
+    const line=tleLines[m2Edge];
+    let bi=0, bd=Infinity;
+    line.forEach((p,i)=>{ const d=(p.x-x)**2+(p.z-z)**2; if(d<bd){bd=d;bi=i;} });
+    m2Drag=bi;
+    const p=line[bi], st=tlStation(p.x,p.z);
+    const nx=p.x+st.rx*metres, nz=p.z+st.rz*metres;
+    const c=m2El(), b=c.getBoundingClientRect();
+    const sx=(nx*m2Sc+m2X)*b.width/c.width+b.left, sy=(nz*m2Sc+m2Y)*b.height/c.height+b.top;
+    c.dispatchEvent(new PointerEvent('pointermove',{clientX:sx,clientY:sy,bubbles:true}));
+    c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
+    return {handle:bi, brush:m2Brush};
+  },
   widthAt(s){ const i=Math.round(s/TL_STEP)%tlSt.length; const st=tlSt[i];
       return st?{s, dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2), drawn:!!(st.mR&&st.mL)}:null; },
   limitsScan(step){
