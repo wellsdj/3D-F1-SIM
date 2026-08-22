@@ -375,6 +375,15 @@
   #bestlapsbtn:hover{transform:translateX(6px);background:rgba(255,176,32,.13);border-color:#ffb020}
   #bestlapsbtn:hover:after{transform:translate(4px,-50%)}
   #bestlapsbtn span{display:block;margin-top:5px;font-size:9px;letter-spacing:.1em;opacity:.48;text-transform:none}
+  #watchbtn{position:relative;overflow:hidden;width:100%;font:inherit;font-size:11px;letter-spacing:.16em;
+             text-transform:uppercase;text-align:left;color:#dfe7f1;cursor:pointer;padding:14px 20px;
+             background:rgba(8,14,22,.48);border:1px solid rgba(236,234,228,.18);border-radius:3px;
+             transition:transform .18s ease,background .18s ease,border-color .18s ease}
+  #watchbtn:after{content:"↗";position:absolute;right:19px;top:50%;transform:translateY(-50%);
+                  color:#ffb020;font-size:20px;transition:transform .18s ease}
+  #watchbtn:hover{transform:translateX(6px);background:rgba(255,176,32,.13);border-color:#ffb020}
+  #watchbtn:hover:after{transform:translate(4px,-50%)}
+  #watchbtn span{display:block;margin-top:5px;font-size:9px;letter-spacing:.1em;opacity:.48;text-transform:none}
 
   /* Generated action art: each home action has its own visual cue while a
      left-side navy wash keeps the labels crisp and consistent. */
@@ -382,6 +391,8 @@
   #pick button:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-race.webp') center/cover}
   #bestlapsbtn{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.78) 38%,rgba(7,13,22,.2) 100%),url('home-best-laps.webp') center/cover}
   #bestlapsbtn:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-best-laps.webp') center/cover}
+  #watchbtn{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.72) 38%,rgba(7,13,22,.1) 100%),url('home-watch.webp') center/cover}
+  #watchbtn:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.58) 48%,rgba(7,13,22,.12)),url('home-watch.webp') center/cover}
   #netbtn{background:linear-gradient(90deg,rgba(7,13,22,.96) 0%,rgba(7,13,22,.78) 38%,rgba(7,13,22,.2) 100%),url('home-controller.webp') center/cover}
   #netbtn:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.62) 48%,rgba(7,13,22,.16)),url('home-controller.webp') center/cover}
 
@@ -693,6 +704,7 @@
     <div id="pick">
       <button data-track="spa22"><b>Race <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
     </div>
+    <button id="watchbtn" type="button"><b>Watch <i>TV</i></b><span>10 AI cars // live race director</span></button>
     <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
     <button id="netbtn" type="button"><b>Connect controller</b><span>PS5 / Xbox · shoulder controls</span></button>
     <div id="controller-panel" aria-hidden="true">
@@ -3226,6 +3238,13 @@ function buildMountains(){
 const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
+/* Watch is deliberately a small race director, not a second physics game:
+   the ten cars share the authored racing curve and only their pace, contact
+   response and camera focus are simulated here. */
+let watchMode=false, watchModePending=false, watchClock=0, watchCam=2, watchCars=[];
+const WATCH_CAM_NAMES=['Chase leader','Pack cam','TV director'];
+const WATCH_COLORS=[0xe53935,0x18a8e8,0xffa91f,0x9be21b,0xb05cff,0xf2f4f7,0xff5ca8,0x20d6b5,0xffe45b,0x8d96a8];
+const WATCH_TMP_P=new THREE.Vector3(), WATCH_TMP_T=new THREE.Vector3(), WATCH_TMP_N=new THREE.Vector3();
 let customSpin=true, customDragging=false, customLastX=0;
 let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
 const CUSTOM_BG=new THREE.Color(0x05070b);   // the garage's own black
@@ -4318,7 +4337,10 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
-  if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
+  if(k==='c' && !(TT.live&&TT.drone>0)){
+    if(watchMode){ watchCam=(watchCam+1)%WATCH_CAM_NAMES.length; updateStatus(); }
+    else { camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus(); }
+  }
   if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v' && !(TT.live&&TT.drone>0)){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
   if(k==='x') resetFree();                           // recentre the head
@@ -4364,7 +4386,7 @@ const CAMS=[
 let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
-    orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
+    watchMode?WATCH_CAM_NAMES[watchCam]:(orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name));
   const a=document.getElementById('aname'); if(a) a.textContent = AIDS?'On':'Off';
   const dn=document.getElementById('dname'); if(dn) dn.textContent = DETAILS[detailLevel].name;
 }
@@ -4651,6 +4673,159 @@ function ttBuild(){
   TT.ang0=Math.atan2(carState.wx-TT.cx, carState.wz-TT.cz);   // start over the grid
   tlMeasure(curve,L);
   tvBuild(curve,L);
+}
+
+function watchTint(group,hex){
+  const paint=new THREE.Color(hex);
+  group.traverse(o=>{
+    if(!o.isMesh) return;
+    const part=(o.name||'').toLowerCase();
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    o.material=ms.map(src=>{
+      if(!src) return src;
+      const m=src.clone();
+      const n=(m.name||'').toLowerCase();
+      if(!/wheel|tyre|tire|disc|brake|carbon/.test(part+' '+n) && m.color){
+        m.color.copy(paint);
+        if(m.emissive){ m.emissive.copy(paint); m.emissive.multiplyScalar(.035); m.emissiveIntensity=.45; }
+      }
+      m.needsUpdate=true;
+      return m;
+    });
+  });
+}
+function watchCarCreate(i){
+  const group=new THREE.Group();
+  const body=carObj.clone(true);
+  body.position.copy(carObj.position); body.rotation.copy(carObj.rotation); body.scale.copy(carObj.scale);
+  group.add(body); scene.add(group); watchTint(body,WATCH_COLORS[i%WATCH_COLORS.length]);
+  return {group,body,s:-i*7.5,lap:0,speed:50+i*1.9,pace:53+i*1.9+Math.random()*5,
+          lateral:(i%2?1:-1)*(1.15+((i/2)|0)*.08),incident:0,incidentKind:'',pos:new THREE.Vector3()};
+}
+function watchPlace(c){
+  if(!TT.curve||!TT.len) return;
+  const u=((c.s%TT.len)+TT.len)%TT.len/TT.len;
+  TT.curve.getPointAt(u,WATCH_TMP_P); TT.curve.getTangentAt(u,WATCH_TMP_T);
+  const tx=WATCH_TMP_T.x, tz=WATCH_TMP_T.z, tl=Math.hypot(tx,tz)||1;
+  const nx=tz/tl, nz=-tx/tl;
+  WATCH_TMP_P.x+=nx*c.lateral; WATCH_TMP_P.z+=nz*c.lateral;
+  const g=groundAt(WATCH_TMP_P.x,WATCH_TMP_P.z,1e9);
+  WATCH_TMP_P.y=(g.hit?g.y:WATCH_TMP_P.y)+RIDE;
+  c.group.position.copy(WATCH_TMP_P); c.group.rotation.set(0,Math.atan2(tx,tz),0);
+  c.group.updateMatrixWorld(true); c.pos.copy(WATCH_TMP_P);
+}
+function watchCurvature(c){
+  if(!TT.curve||!TT.len) return 0;
+  const u=((c.s%TT.len)+TT.len)%TT.len/TT.len, a=new THREE.Vector3(), b=new THREE.Vector3();
+  TT.curve.getTangentAt(u,a); TT.curve.getTangentAt((u+.004)%1,b);
+  let d=Math.atan2(b.x,b.z)-Math.atan2(a.x,a.z);
+  while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2;
+  return Math.abs(d)/Math.max(.5,TT.len*.004);
+}
+function watchIncident(c,kind){
+  c.incident=Math.max(c.incident,kind==='GRAVEL'?2.8:1.25);
+  c.incidentKind=kind;
+  c.speed=Math.max(8,c.speed*.56);
+}
+function watchStep(dt){
+  if(!watchMode||!TT.curve||!TT.len) return;
+  watchClock+=dt;
+  for(const c of watchCars){
+    const corner=watchCurvature(c), cornerLimit=clamp(c.pace/(1+corner*125),24,c.pace);
+    let target=c.incident>0?Math.min(cornerLimit,17):cornerLimit;
+    c.speed+=(target-c.speed)*Math.min(1,dt*(c.incident>0?2.8:1.2));
+    c.s+=Math.max(0,c.speed)*dt;
+    while(c.s>=TT.len){ c.s-=TT.len; c.lap++; }
+    if(c.incident>0){ c.incident=Math.max(0,c.incident-dt); if(!c.incident)c.incidentKind=''; }
+    watchPlace(c);
+  }
+  /* Soft body-to-body contact: cars lose speed, move apart and remain
+     driveable. This is intentionally stable at 60 Hz and works in every
+     camera because the collision is resolved before the groups are rendered. */
+  for(let i=0;i<watchCars.length;i++) for(let j=i+1;j<watchCars.length;j++){
+    const a=watchCars[i], b=watchCars[j], dx=b.pos.x-a.pos.x, dz=b.pos.z-a.pos.z;
+    const d=Math.hypot(dx,dz), min=2.45;
+    if(d<min){
+      const nx=(dx/(d||1)), nz=(dz/(d||1));
+      a.s-=.55*dt*30; b.s+=.55*dt*30;
+      a.lateral-=nx*.34; b.lateral+=nx*.34;
+      a.speed*=.88; b.speed*=.88;
+      if(Math.abs(a.speed-b.speed)>7){ watchIncident(a,'CONTACT'); watchIncident(b,'CONTACT'); }
+    }
+  }
+  /* A rare, deterministic-looking mistake creates a genuine off-line car for
+     the TV director to find. It is not a random teleport: the car drifts to
+     the run-off and slows, then returns to the racing line. */
+  if(watchClock>7 && Math.random()<dt*.0015){
+    const c=watchCars[(Math.random()*watchCars.length)|0];
+    if(!c.incident){ c.lateral+=(Math.random()<.5?-1:1)*(ROAD_HALF+2.2); watchIncident(c,'GRAVEL'); }
+  }
+  for(const c of watchCars) watchPlace(c);
+}
+function watchLeader(){
+  return watchCars.reduce((best,c)=>!best||c.lap*TT.len+c.s>best.lap*TT.len+best.s?c:best,null);
+}
+function watchFocus(){
+  const leader=watchLeader();
+  if(!leader) return null;
+  if(watchClock<6) return leader; // onboarding always follows P1
+  const incident=watchCars.find(c=>c.incident>0);
+  if(incident) return incident;
+  let best=leader, bestScore=-Infinity;
+  for(const c of watchCars){
+    let pack=0;
+    for(const d of watchCars) if(d!==c&&c.pos.distanceTo(d.pos)<72) pack++;
+    const score=pack*3+c.lap*TT.len+c.s*.035-(leader.lap*TT.len+leader.s-c.lap*TT.len-c.s)*.02;
+    if(score>bestScore){bestScore=score;best=c;}
+  }
+  return best;
+}
+function watchStartAfterTrack(){
+  if(!watchModePending||watchMode) return;
+  if(!carObj||!trackRoot){ setTimeout(watchStartAfterTrack,120); return; }
+  if(!TT.curve) ttBuild();
+  if(!TT.curve||!TT.len){ setTimeout(watchStartAfterTrack,120); return; }
+  watchModePending=false; watchMode=true; watchClock=0; watchCam=2; watchCars=[];
+  for(let i=0;i<10;i++) watchCars.push(watchCarCreate(i));
+  for(const c of watchCars) watchPlace(c);
+  carGroup.visible=false; engineAudio.mute(); TT.live=false; TTREC.playing=false;
+  startPhase='go'; document.body.classList.remove('cinema');
+  document.getElementById('tt').classList.add('show');
+  const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
+  const tag=document.getElementById('tag'); if(tag) tag.firstChild.textContent='WATCH · SPA 2022';
+  const sub=document.getElementById('tagsub'); if(sub) sub.textContent='10 CAR AI RACE · LIVE TV';
+  updateStatus(); qualifyingLoadHide(true);
+}
+function watchStop(){
+  watchModePending=false;
+  if(!watchMode&&watchCars.length===0) return;
+  watchMode=false;
+  watchCars.forEach(c=>{ if(c.group.parent) c.group.parent.remove(c.group); });
+  watchCars=[]; carGroup.visible=true; watchClock=0; watchCam=2; engineAudio.mute();
+}
+function watchRender(dt){
+  if(!watchCars.length) return;
+  const focus=watchFocus()||watchCars[0], lead=watchLeader()||focus;
+  const p=focus.pos, h=focus.group.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
+  let target=new THREE.Vector3(), aim=new THREE.Vector3();
+  if(watchCam===0){
+    target.set(p.x-fx*11,p.y+4.0,p.z-fz*11); aim.set(p.x+fx*10,p.y+1.0,p.z+fz*10);
+  }else if(watchCam===1){
+    const pack=watchCars.filter(c=>c.pos.distanceTo(focus.pos)<74), center=new THREE.Vector3();
+    pack.forEach(c=>center.add(c.pos)); center.multiplyScalar(1/Math.max(1,pack.length));
+    target.set(center.x-fx*24,center.y+22,center.z-fz*24); aim.set(center.x,center.y,center.z);
+  }else{
+    const incident=focus.incident>0;
+    target.set(p.x-fx*(incident?15:23)+Math.cos(h)*(incident?7:18),p.y+(incident?5.5:8.5),
+               p.z-fz*(incident?15:23)-Math.sin(h)*(incident?7:18));
+    aim.set(p.x+fx*(incident?4:16),p.y+(incident?1.1:0.6),p.z+fz*(incident?4:16));
+  }
+  camera.position.lerp(target,clamp(dt*4.5,0,1)); camera.up.set(0,1,0); camera.lookAt(aim);
+  camera.fov=watchCam===1?48:watchCam===2?42:54; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  skyDome.position.copy(camera.position); centerNightStars(camera);
+  renderer.render(scene,camera);
+  const tag=document.getElementById('tag'); if(tag) tag.firstChild.textContent='WATCH · SPA 2022';
+  const sub=document.getElementById('tagsub'); if(sub) sub.textContent='P1 '+String(watchCars.indexOf(lead)+1).padStart(2,'0')+' · '+WATCH_CAM_NAMES[watchCam].toUpperCase();
 }
 function ttPaint(){
   const pips=document.querySelectorAll('#ttpips i');
@@ -4991,9 +5166,8 @@ function replayBtn(){
 function replayStart(){
   if(!TTREC.best||!TTREC.best.f.length) return;
   netLabel();
-  /* Immediate, not held: the loading screen's ten-second minimum is there so
-     the walk out to the car has room to breathe, and there is no walk out to a
-     replay. Whatever is left of it goes now. */
+  /* Replay loading is immediate; there is no artificial hold once the track is
+     ready, so a missing intro clip cannot delay the drive. */
   if(typeof qualifyingLoadHide==='function') qualifyingLoadHide(true);
   replayMetadataBegin();
   TTREC.playing=true; TTREC.pt=0; TTREC.i=0;
@@ -5020,6 +5194,7 @@ function replayStart(){
    and the entry button -- which startTrack hides on the way in -- comes back,
    or the home screen would have no way off it. */
 function goHome(){
+  watchStop();
   engineAudio.mute();
   replayMetadataEnd();
   if(replaySelectionRestore){ TTREC.best=replaySelectionRestore; replaySelectionRestore=null; }
@@ -6171,7 +6346,8 @@ canvas.addEventListener('pointerup',e=>{
   // camera or drop you into orbit halfway through one
   if(TT.live && TT.drone>0) return;
   if(moved<8 && !freeLook){          // a tap, not a drag — cycle the view
-    if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
+    if(watchMode) watchCam=(watchCam+1)%WATCH_CAM_NAMES.length;
+    else if(orbit) orbit=false; else camMode=(camMode+1)%CAMS.length;
     updateStatus();
   }
 });
@@ -7115,6 +7291,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
+  else if(watchMode){ watchStep(dt); }
   else { controllerPoll(); ttStep(dt); drive(dt); netSend(t); }
 }
 
@@ -7209,6 +7386,10 @@ function frame(now){
     return;
   }
   customizerStage.visible=false;
+  if(watchMode){
+    watchRender(dt);
+    return;
+  }
   if(!booted){
     camera.position.set(5.6,2.75,6.3); camera.lookAt(0,.82,0);
     camera.fov=42; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
@@ -7580,8 +7761,9 @@ const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
 const qualifyingWeatherEl=document.getElementById('qualifying-weather');
 const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
-const QUALIFYING_LOAD_MIN_MS=10000;
-let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
+const QUALIFYING_LOAD_MIN_MS=0;
+const QUALIFYING_LOAD_TIMEOUT_MS=30000;
+let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingLoadTimeout=0, qualifyingVideoChecked=false;
 let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false, qualifyingAllowsWeather=true;
 function qualifyingLoadSetStatus(text){
   if(qualifyingLoadStatusEl) qualifyingLoadStatusEl.textContent=text;
@@ -7628,7 +7810,19 @@ function qualifyingChooseWeather(kind){
 }
 function qualifyingLoadReady(){
   if(!qualifyingLoadEl||!qualifyingLoadEl.classList.contains('active')) return;
+  clearTimeout(qualifyingLoadTimeout);
   qualifyingTrackReady=true;
+  if(watchModePending){
+    /* Watch uses the same track loader but deliberately skips the qualifying
+       weather gate. Wait until the imported line has been built (the explicit
+       spawn path restores it just after maybeStart), then hand off to the TV
+       director. */
+    if(!TT.curve){ qualifyingLoadSetStatus('Building AI grid'); return; }
+    qualifyingStartQueued=true;
+    qualifyingLoadHide(true);
+    setTimeout(watchStartAfterTrack,80);
+    return;
+  }
   if(!qualifyingAllowsWeather){
     if(qualifyingStartQueued) return;
     qualifyingStartQueued=true;
@@ -7646,6 +7840,7 @@ function qualifyingLoadReady(){
 function qualifyingLoadShow(text,allowWeather=true){
   if(!qualifyingLoadEl) return;
   clearTimeout(qualifyingLoadTimer);
+  clearTimeout(qualifyingLoadTimeout);
   qualifyingAllowsWeather=allowWeather;
   qualifyingTrackReady=false;
   qualifyingWeatherReset();
@@ -7663,6 +7858,10 @@ function qualifyingLoadShow(text,allowWeather=true){
   document.body.classList.add('qualifying-loading');
   bootEl.classList.add('gone');
   bootEl.style.opacity='0';
+  qualifyingLoadTimeout=setTimeout(()=>{
+    if(qualifyingLoadEl.classList.contains('active')&&!qualifyingTrackReady)
+      qualifyingLoadFail('Track load timed out — please try again');
+  },QUALIFYING_LOAD_TIMEOUT_MS);
   /* The supplied intro clip can be dropped in as qualifying-intro.mp4. A
      quiet HEAD check keeps the poster fallback clean until that asset exists. */
   if(qualifyingLoadVideo&&!qualifyingVideoChecked){
@@ -7680,6 +7879,7 @@ function qualifyingLoadShow(text,allowWeather=true){
 function qualifyingLoadHide(immediate=false){
   if(!qualifyingLoadEl) return;
   clearTimeout(qualifyingLoadTimer);
+  clearTimeout(qualifyingLoadTimeout);
   const wait=immediate?0:Math.max(0,QUALIFYING_LOAD_MIN_MS-(performance.now()-qualifyingLoadSince));
   const finish=()=>{
     qualifyingLoadEl.classList.remove('active');
@@ -7837,6 +8037,17 @@ addEventListener('pointerdown',e=>{
   }
 });
 document.getElementById('bestlapsbtn').onclick=openLapBook;
+document.getElementById('watchbtn').onclick=()=>{
+  unlockAudio();
+  if(watchMode) return;
+  pendingReplay=false; window._autoReplay=false; watchModePending=true;
+  if(booted && TRACK&&TRACK.id==='spa22'){
+    qualifyingLoadShow('Loading the AI grid',false);
+    ttBuild();
+    qualifyingTrackReady=true;
+    qualifyingLoadReady();
+  }else startTrack('spa22');
+};
 document.getElementById('customize-home').onclick=openCustomizer;
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
@@ -7887,7 +8098,7 @@ function startTrack(id){
   const t=TRACKS[id];
   const replayMode=!!(pendingReplay||window._autoReplay);
   qualifyingLoadShow(replayMode
-    ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'),!replayMode);
+    ? 'Loading your best lap' : watchModePending ? 'Loading the AI grid' : 'Preparing '+(t&&t.name||'the circuit'),!replayMode&&!watchModePending);
   pickEl.style.display='none';
   applyTrackConstants(t);
   if(t.procedural){
@@ -7958,6 +8169,7 @@ function startTrack(id){
       editRestore();          // gate positions come off the hand-clicked lap
       tleLoad();
       recLoad();
+      ttBuild();              // the same authored line drives Watch mode and TV cuts
       qualifyingLoadReady();
       return;
     }
