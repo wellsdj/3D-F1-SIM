@@ -301,20 +301,101 @@
   #pick button small{display:block;margin-top:12px;font-size:8px;letter-spacing:.2em;color:#ffb020;opacity:.7}
   #pick button small strong{font-size:12px;margin-left:4px}
   /* start gantry lights, mirrored on screen so they read in every camera */
-  #lights{position:fixed;left:50%;top:6vh;transform:translateX(-50%);
-          display:flex;gap:clamp(5px,.95vw,13px);padding:clamp(6px,1vw,13px);
-          background:linear-gradient(#171110,#090707);
-          border:1px solid rgba(0,0,0,.55);border-radius:5px;
-          box-shadow:0 8px 30px rgba(0,0,0,.6);
-          pointer-events:none;opacity:0;transition:opacity .3s ease;z-index:6}
-  #lights.show{opacity:1}
-  #lights .col{display:flex;flex-direction:column;gap:clamp(5px,.95vw,13px)}
-  #lights b{display:block;width:clamp(24px,3.9vw,50px);height:clamp(24px,3.9vw,50px);
-            border-radius:50%;background:#2b0b07;
-            box-shadow:inset 0 2px 6px rgba(0,0,0,.85)}
+  /* ---------------------------------------------------------- the race start
+     Five lights on a gantry, the way a race actually starts. The lamps were
+     already here for the other circuit; this is the same five columns given the
+     posts and the beam they hang from, and the room to be seen. */
+  #lights{position:fixed;left:50%;top:7vh;transform:translateX(-50%) scale(.92);
+          display:flex;gap:clamp(6px,1.1vw,15px);padding:clamp(10px,1.5vw,20px) clamp(12px,1.7vw,24px);
+          background:linear-gradient(#1b1413,#070606 60%,#0b0908);
+          border:1px solid rgba(0,0,0,.6);border-radius:8px;
+          box-shadow:0 18px 60px rgba(0,0,0,.72), inset 0 1px 0 rgba(255,255,255,.06);
+          pointer-events:none;opacity:0;transition:opacity .35s ease, transform .35s ease;z-index:12}
+  #lights.show{opacity:1;transform:translateX(-50%) scale(1)}
+  /* the gantry it hangs from */
+  #lights:before{content:"";position:absolute;left:-6%;right:-6%;top:-14px;height:14px;
+                 background:linear-gradient(#3a4148,#171b1f);border-radius:3px;
+                 box-shadow:0 6px 18px rgba(0,0,0,.55)}
+  #lights:after{content:"";position:absolute;left:50%;top:-14px;width:0;height:0}
+  #lights .col{display:flex;flex-direction:column;gap:clamp(6px,1.1vw,15px)}
+  #lights b{display:block;width:clamp(26px,4.2vw,56px);height:clamp(26px,4.2vw,56px);
+            border-radius:50%;background:radial-gradient(circle at 38% 33%,#3a1410,#1a0705 70%);
+            box-shadow:inset 0 3px 8px rgba(0,0,0,.9), inset 0 -2px 6px rgba(255,120,80,.05);
+            transition:background .12s ease, box-shadow .12s ease}
   #lights .col.on b{
     background:radial-gradient(circle at 38% 33%,#fff4dc 5%,#ff6a24 40%,#e01c07 76%,#8b0f04 100%);
-    box-shadow:0 0 clamp(9px,1.9vw,24px) rgba(255,72,20,.9), inset 0 0 8px rgba(255,214,170,.45)}
+    box-shadow:0 0 clamp(14px,2.6vw,34px) rgba(255,72,20,.95), inset 0 0 10px rgba(255,214,170,.5)}
+  /* the grid, shown while the cars are being put on it */
+  #gridcard{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
+            z-index:13;pointer-events:none;opacity:0;transition:opacity .4s ease, transform .4s ease;
+            font-family:var(--mono);min-width:min(420px,84vw);
+            background:linear-gradient(180deg,rgba(12,15,21,.93),rgba(8,10,14,.96));
+            border:1px solid rgba(255,255,255,.14);border-radius:14px;
+            box-shadow:0 30px 90px rgba(0,0,0,.7);overflow:hidden}
+  #gridcard.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #gridcard .head{display:flex;align-items:center;justify-content:space-between;
+            padding:13px 18px;background:linear-gradient(90deg,rgba(255,176,32,.18),transparent);
+            border-bottom:1px solid rgba(255,255,255,.1)}
+  #gridcard .head b{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:#fff}
+  #gridcard .head span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;opacity:.55;color:var(--paper)}
+  #gridcard .slot{display:flex;align-items:center;gap:14px;padding:13px 18px;
+            border-bottom:1px solid rgba(255,255,255,.05)}
+  #gridcard .slot:last-child{border-bottom:0}
+  #gridcard .pos{font-size:22px;font-weight:600;color:#fff;width:44px;
+            font-variant-numeric:tabular-nums}
+  #gridcard .who{flex:1}
+  #gridcard .who b{display:block;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#fff}
+  #gridcard .who span{font-size:9px;letter-spacing:.18em;text-transform:uppercase;opacity:.5;color:var(--paper)}
+  #gridcard .slot.you{background:linear-gradient(90deg,rgba(255,176,32,.14),transparent)}
+  #gridcard .slot.you .pos{color:var(--amber)}
+  #gridcard .tag{font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+            padding:5px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.18);
+            color:var(--paper);opacity:.8}
+  #gridcard .pace{padding:16px 18px 18px;border-top:1px solid rgba(255,255,255,.1);
+            background:linear-gradient(180deg,rgba(255,255,255,.03),transparent)}
+  #gridcard .paceline{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
+  #gridcard .paceline span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+            opacity:.55;color:var(--paper)}
+  #gridcard .paceline b{font-size:26px;font-weight:600;color:var(--amber);
+            font-variant-numeric:tabular-nums;line-height:1}
+  #gridcard .paceline em{font-style:normal;font-size:10px;letter-spacing:.18em;
+            text-transform:uppercase;color:#fff;opacity:.85;margin-left:auto}
+  #paceslider{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:999px;
+            background:linear-gradient(90deg,#3a4048,var(--amber));outline:none;cursor:pointer}
+  #paceslider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+            background:radial-gradient(circle at 36% 32%,#fff,#ffb020 60%,#c97e05);
+            box-shadow:0 2px 10px rgba(255,176,32,.6);cursor:pointer}
+  #paceslider::-moz-range-thumb{width:20px;height:20px;border:0;border-radius:50%;
+            background:#ffb020;box-shadow:0 2px 10px rgba(255,176,32,.6);cursor:pointer}
+  #gridcard .scale{display:flex;justify-content:space-between;margin-top:7px;
+            font-size:8px;letter-spacing:.16em;text-transform:uppercase;opacity:.4;color:var(--paper)}
+  #gridcard #racego{margin-top:15px;width:100%;font-family:var(--mono);font-size:10px;
+            letter-spacing:.22em;text-transform:uppercase;font-weight:600;cursor:pointer;
+            color:#0a0d13;background:linear-gradient(180deg,#ffd24a,#ffb020);
+            border:0;border-radius:8px;padding:12px;
+            box-shadow:0 8px 24px rgba(255,176,32,.3)}
+  #gridcard #racego:hover{filter:brightness(1.08)}
+  #gridcard .hint{margin-top:9px;text-align:center;font-size:8px;letter-spacing:.14em;
+            text-transform:uppercase;opacity:.4;color:var(--paper)}
+  /* Only when it is up. An element at opacity 0 still takes clicks, and this one
+     sits in the middle of the screen over the home page's Race button, which it
+     was quietly swallowing. */
+  #gridcard{pointer-events:none}
+  #gridcard.show{pointer-events:auto}
+  /* lights out */
+  #lightsout{position:fixed;left:50%;top:24vh;transform:translateX(-50%) scale(.9);
+             z-index:14;pointer-events:none;opacity:0;
+             transition:opacity .18s ease, transform .5s cubic-bezier(.2,1.4,.4,1);
+             font-family:var(--mono);font-size:clamp(30px,6.4vw,74px);font-weight:600;
+             letter-spacing:.22em;text-transform:uppercase;color:#fff;
+             text-shadow:0 0 60px rgba(55,224,106,.85), 0 0 18px rgba(255,255,255,.5)}
+  #lightsout.show{opacity:1;transform:translateX(-50%) scale(1)}
+  #lightsout small{display:block;text-align:center;font-size:11px;letter-spacing:.4em;
+             margin-top:10px;color:#37e06a;opacity:.9}
+  body.cinema #lights,body.cinema #gridcard,body.cinema #lightsout{opacity:0}
+  /* The lap card sits where the gantry hangs, and a clock reading zero is not
+     what you are looking at on the grid anyway. It comes back at lights out. */
+  body.racestart #tt,body.racestart #netwrap,body.racestart #netbtn{opacity:0;transition:opacity .3s ease}
   /* The count sits in the middle of the screen, not at the top: at the top it
      was behind the lap card and you could not see it at all. */
   #golabel{position:fixed;left:50%;top:26vh;transform:translateX(-50%);
@@ -685,6 +766,21 @@
   <div><kbd>R</kbd> restart the lap &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
 </div>
 
+<div id="gridcard">
+  <div class="head"><b>Starting grid</b><span>Spa 2022 &middot; 1 lap</span></div>
+  <div class="slot you"><div class="pos">P1</div>
+    <div class="who"><b>You</b><span>McLaren MCL39</span></div><div class="tag">Pole</div></div>
+  <div class="slot"><div class="pos">P2</div>
+    <div class="who"><b id="gridai">AI</b><span>McLaren MCL39</span></div><div class="tag">Row 1</div></div>
+  <div class="pace">
+    <div class="paceline"><span>AI pace</span><b id="pacenum">7</b><em id="pacename">Quick</em></div>
+    <input id="paceslider" type="range" min="0" max="10" step="1" value="7">
+    <div class="scale"><span>0 &middot; crawling</span><span>10 &middot; on the limit</span></div>
+    <button id="racego">Start the lights</button>
+    <div class="hint">Set the pace, then start. Nothing happens until you do.</div>
+  </div>
+</div>
+<div id="lightsout">Lights out<small>Go</small></div>
 <div id="lights">
   <div class="col"><b></b><b></b></div>
   <div class="col"><b></b><b></b></div>
@@ -729,7 +825,7 @@
           <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
-          <div class="ctrl-row"><kbd>J</kbd><span>Send the AI car out &mdash; and stop it</span></div>
+          <div class="ctrl-row"><kbd>J</kbd><span>Start a race &mdash; grid, five lights, go</span></div>
           <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
@@ -1002,88 +1098,89 @@ const SPA_EDGE_IN=[
    close the line already was: a fifth of a metre out on a road fifteen metres
    wide, which is why it needed cleaning up rather than redoing. */
 const SPA_EDGE_OUT=[
- [-255.32,-623.78],[-263.84,-637.35],[-270.42,-647.85],[-278.97,-661.51],[-285.37,-671.72],[-293.9,-685.29],
- [-300.28,-695.46],[-308.77,-708.97],[-315.17,-719.15],[-323.68,-732.75],[-329.59,-743.22],[-338.04,-756.83],
- [-344.44,-767.01],[-352.96,-780.57],[-359.33,-790.75],[-367.81,-804.3],[-374.2,-814.45],[-382.68,-828.01],
- [-389.04,-838.2],[-397.54,-851.69],[-403.96,-861.89],[-412.51,-875.44],[-418.91,-885.61],[-427.44,-899.14],
- [-433.89,-909.3],[-442.43,-922.86],[-449.59,-934.28],[-456.93,-946.05],[-461.34,-953.32],[-460.27,-965.19],
- [-452.26,-974.32],[-442.17,-980.43],[-432.17,-978.64],[-415.47,-970.94],[-358.54,-943.51],[-340.02,-934.93],
- [-329.14,-929.85],[-314.66,-923.16],[-303.8,-918.07],[-288.16,-910.73],[-279.01,-906.14],[-267.93,-900.28],
- [-253.97,-892.7],[-243.02,-885.32],[-232.79,-878.83],[-218.77,-872.58],[-206.41,-861.57],[-193.04,-852.18],
- [-183.08,-845.17],[-170.52,-835.06],[-161.25,-827.26],[-149.51,-816.15],[-140.61,-807.91],[-129.15,-796.46],
- [-120.77,-787.7],[-109.7,-775.94],[-101.48,-767.1],[-90.56,-755.18],[-82.38,-746.29],[-71.51,-734.5],
- [-63.43,-725.69],[-52.3,-715.58],[-44.58,-705.11],[-33.81,-693.31],[-25.65,-684.49],[-14.41,-673.09],
- [-6.33,-664.31],[4.47,-652.55],[12.69,-643.84],[23.46,-632.19],[31.62,-623.73],[42.8,-613.34],
- [49.75,-603.25],[60.56,-591.4],[68.16,-581.7],[81,-572.12],[91.42,-566.07],[108.05,-557.28],
- [118.96,-550.95],[129.75,-544.35],[139.95,-536.21],[149.46,-528.22],[157.29,-518.37],[168.7,-500.49],
- [174.57,-489.05],[180.61,-474.28],[184.15,-462.67],[187.9,-446.76],[189.51,-434.73],[192.23,-419.02],
- [194.55,-407.29],[199.77,-392.18],[206.13,-380.94],[214.22,-367.22],[223.45,-356.04],[231.5,-344.77],
- [238.23,-335.22],[246.45,-323.68],[253.14,-314.06],[262,-301.27],[269.03,-291.16],[278.29,-277.92],
- [284.55,-267.57],[293.78,-254.4],[300.65,-244.5],[309.82,-231.34],[316.71,-221.5],[325.89,-208.33],
- [332.77,-198.45],[346.58,-178.68],[357.9,-161.97],[364.4,-151.62],[372.31,-137.59],[377.77,-126.76],
- [382.96,-115.76],[389.26,-100.9],[394.75,-85.7],[398.62,-74.2],[403.71,-58.93],[407.54,-47.51],
- [412.62,-32.31],[416.42,-20.92],[421.46,-5.79],[425.22,5.6],[430.3,20.85],[434.1,32.23],
- [439.14,47.41],[442.91,58.81],[447.98,74],[451.76,85.4],[456.8,100.6],[460.6,111.99],
- [465.61,127.19],[469.37,138.58],[474.37,153.81],[478.14,165.21],[483.14,180.43],[487.03,192.14],
- [491.88,206.97],[495.7,218.34],[500.75,233.52],[504.54,244.89],[509.57,260.07],[513.37,271.45],
- [518.4,286.64],[522.21,298.02],[527.23,313.21],[530.94,324.62],[535.92,339.83],[539.68,351.22],
- [544.67,366.43],[548.38,377.84],[553.46,393.02],[557.26,404.41],[562.28,419.6],[566.04,431.05],
- [571.03,446.19],[574.82,457.58],[579.82,472.77],[583.59,484.17],[588.61,499.37],[592.34,510.78],
- [597.05,526.07],[600.74,537.5],[605.71,552.71],[610.69,567.9],[614.42,579.3],[619.42,594.59],
- [625.31,605.77],[629.65,621.92],[633.03,635],[628.1,652.26],[620,667.23],[611.91,678.71],
- [598,684.34],[585.65,692.96],[578.35,702.12],[572.43,716.82],[571.71,728.79],[574.49,742.56],
- [577.56,753.56],[582.08,768.35],[585.47,779.92],[590.05,795.61],[593.49,807.28],[598.11,823.49],
- [600.73,836.23],[596.55,862.27],[585.07,880.68],[575.49,889.38],[562.67,899.76],[553,907.11],
- [540.05,916.54],[530.48,923.8],[517.59,933.3],[508.03,940.52],[495.18,950.12],[485.77,957.58],
- [472.99,967.22],[463.36,974.4],[450.54,984],[440.91,991.18],[428.1,1000.71],[418.46,1007.86],
- [405.66,1017.46],[396.09,1024.7],[383.18,1034.16],[373.61,1041.41],[360.86,1051.03],[351.76,1059.51],
- [337.97,1068.24],[325.45,1074.97],[308.07,1076.32],[293.73,1074.72],[277.97,1067.87],[262.82,1050.81],
- [255.12,1033.19],[253.84,1011.62],[257.31,997.23],[269.04,983.88],[278.44,975.17],[291.79,966.25],
- [302.02,959.66],[315.38,950.61],[325.52,943.77],[339.22,933.34],[347.86,927.47],[359.99,920.15],
- [369.6,913.72],[382.2,906.13],[390.12,897.18],[396.94,882.95],[399.29,871.32],[396.79,855.68],
- [391.24,845.61],[385.96,831.95],[382.23,822.34],[377.67,806.89],[373.9,795.66],[367.59,780],
- [363.17,769.54],[357.72,753.59],[350.83,734.32],[344.32,714.87],[337.9,701.72],[335,688.68],
- [331.5,672.53],[328.97,661.07],[325.72,645.45],[323.02,633.77],[319.48,618.21],[316.87,606.51],
- [313.4,590.89],[310.8,579.16],[307.36,563.48],[304.72,551.7],[301.25,536.03],[298.71,524.28],
- [295.27,508.68],[292.71,497.1],[289.33,481.59],[286.84,470.01],[283.52,454.79],[280.99,443.37],
- [278.02,428.13],[274.66,416.71],[267.59,404.22],[260.76,393.81],[250.95,381.06],[242.2,373.63],
- [229.45,365.63],[218.83,360.89],[203.82,356.79],[192.24,355.36],[176.89,354.62],[165.39,354.15],
- [149.89,353.68],[138.2,353.27],[122.75,354.09],[111.36,355.48],[96.15,358.94],[84.97,362.8],
- [70.57,369.14],[60.38,374.77],[47.63,383.69],[38.66,391.34],[27.67,402.59],[20.23,411.93],
- [11.63,424.7],[6.18,434.65],[-0.57,454.14],[-6.1,469.53],[-10.3,481.33],[-13.57,490.45],
- [-16.95,500.11],[-21.31,511.35],[-26.93,526.34],[-30.89,537.7],[-35.87,552.94],[-39.78,564.16],
- [-45.77,579.06],[-49.88,590.5],[-55.33,605.67],[-59.96,618.6],[-64.86,632.1],[-68.95,643.4],
- [-74.38,658.46],[-78.37,669.79],[-83.54,686.07],[-88.34,696.04],[-93.73,711.12],[-97.77,722.47],
- [-103.43,737.76],[-108.74,749.14],[-118.24,763.38],[-126.11,773.5],[-136.51,781.18],[-152.66,789],
- [-170.21,792.04],[-183.33,792.52],[-200.54,791.79],[-213.27,787.44],[-227.2,778.46],[-237.76,772.25],
- [-251.52,765.43],[-262.38,762.28],[-277.99,761.03],[-289.77,762.29],[-304.82,767.08],[-318.1,775.03],
- [-326.89,782.73],[-336.11,795.17],[-341.47,804.87],[-349.29,818.11],[-355.39,828.43],[-363.45,842.2],
- [-369.5,852.55],[-377.6,866.33],[-383.87,876.93],[-391.8,890.37],[-398.01,901.01],[-405.85,914.31],
- [-411.3,925.39],[-417.9,936.96],[-431.34,959.82],[-441.73,971.08],[-451.33,978.58],[-468.5,985.34],
- [-482,986.53],[-497.26,983.69],[-518.22,972.97],[-528.42,966.12],[-541.89,957.12],[-551.79,950.54],
- [-565.12,941.76],[-575.12,934.97],[-588.54,926.1],[-599.39,921.14],[-612.7,910.2],[-622.04,901.55],
- [-632.83,888.56],[-639.73,877.89],[-646.54,861.77],[-650.05,849.33],[-652.34,832.77],[-652.22,820.07],
- [-648.62,803.37],[-645.25,791.42],[-640.46,775.91],[-636.92,764.34],[-631.75,749.03],[-627.94,737.47],
- [-621.56,722.57],[-616.59,711.5],[-609.75,696.81],[-603.84,686.15],[-595.03,672.57],[-588.54,662.34],
- [-579.32,649.09],[-572.16,639.35],[-562.1,626.69],[-554.33,617.36],[-543.65,605.11],[-535.46,596.03],
- [-524.44,584.18],[-516.28,575.47],[-505.39,563.84],[-497.13,555.08],[-485.88,543.48],[-477.13,534.96],
- [-465.07,524.17],[-455.52,516.41],[-442.23,506.64],[-432.09,499.62],[-418.41,490.98],[-408.11,484.86],
- [-394.32,476.95],[-383.91,471.02],[-370.01,463.03],[-359.55,457.04],[-345.98,448.74],[-334.73,442.68],
- [-322.21,434.32],[-311.36,427.49],[-296.74,420.91],[-286.46,415.04],[-273,407.27],[-262.97,400.98],
- [-249.59,392.62],[-239.84,386],[-227.32,376.56],[-218.22,369.1],[-207.68,359.67],[-198.27,350],
- [-187.78,338.14],[-180.27,328.94],[-170.79,316.29],[-164.16,306.47],[-156.04,292.92],[-150.52,282.41],
- [-143.88,268.2],[-139.24,257.32],[-133.23,242.69],[-128.78,231.59],[-123.01,217.14],[-118.61,206.12],
- [-112.6,191.2],[-108.14,180.11],[-102.17,165.29],[-97.67,154.16],[-91.93,139.88],[-87.73,128.88],
- [-82.79,114.55],[-79.85,102.48],[-77.39,86.82],[-77.2,74.84],[-78.77,59],[-82.07,47.48],
- [-87.22,32.36],[-91.82,21.29],[-97.96,6.76],[-102.14,-3.01],[-108.1,-17.1],[-112.87,-28.25],
- [-117.13,-39.59],[-123.43,-54.4],[-129.67,-69.09],[-134.45,-80.13],[-140.72,-94.92],[-145.43,-106.01],
- [-151.74,-120.82],[-156.63,-132.24],[-162.92,-146.92],[-169.19,-162.27],[-173.83,-173.78],[-177.82,-185.26],
- [-182.43,-200.49],[-185.54,-211.73],[-189.25,-226.93],[-192.68,-243.12],[-194.8,-255.34],[-196.37,-265.98],
- [-198.76,-283.51],[-200.26,-295.49],[-202.18,-311.43],[-203.63,-323.34],[-205.54,-339.24],[-207.03,-351.17],
- [-209.05,-367.08],[-210.32,-379.05],[-212.43,-394.95],[-213.79,-406.91],[-216.48,-422.32],[-217.87,-433.17],
- [-218.45,-443.82],[-215.12,-453.94],[-206.85,-460.33],[-190.24,-461.29],[-178.17,-459.15],[-166.66,-458.93],
- [-160.3,-464.47],[-158.33,-471.58],[-159.91,-476.26],[-189.85,-520.45],[-198.01,-532.82],[-204.65,-542.88],
- [-213.45,-556.16],[-220.13,-565.96],[-227.5,-578.69],[-236.62,-590.2],[-242.84,-603.9],[-249.2,-614.11]];
+  [-255.34,-623.77], [-263.99,-637.26], [-270.53,-647.78], [-279.08,-661.44], [-285.48,-671.65], [-293.92,-685.28],
+  [-300.47,-695.34], [-308.96,-708.85], [-315.36,-719.03], [-323.87,-732.63], [-329.59,-743.22], [-338.06,-756.82],
+  [-344.63,-766.89], [-353.11,-780.48], [-359.48,-790.66], [-368,-804.18], [-374.22,-814.44], [-382.83,-827.92],
+  [-389.1,-838.16], [-397.69,-851.6], [-403.98,-861.88], [-412.62,-875.37], [-419.1,-885.49], [-427.5,-899.1],
+  [-433.95,-909.26], [-442.54,-922.79], [-449.78,-934.16], [-457.33,-945.79], [-462.15,-953.18], [-460.27,-965.19],
+  [-452.08,-974.11], [-442.17,-980.43], [-432.06,-978.95], [-415.5,-970.87], [-358.57,-943.44], [-339.97,-935.04],
+  [-329.09,-929.96], [-314.61,-923.27], [-303.77,-918.14], [-288.16,-910.73], [-279.01,-906.14], [-267.93,-900.28],
+  [-253.97,-892.7], [-243.02,-885.32], [-232.79,-878.83], [-220,-870.67], [-206.3,-861.71], [-192.94,-852.32],
+  [-183.03,-845.23], [-170.5,-835.08], [-161.2,-827.32], [-149.46,-816.2], [-140.59,-807.93], [-129.1,-796.51],
+  [-120.61,-787.85], [-109.68,-775.96], [-101.39,-767.18], [-90.54,-755.2], [-82.25,-746.41], [-71.46,-734.55],
+  [-63.31,-725.81], [-52.3,-715.58], [-44.52,-705.16], [-33.75,-693.36], [-25.6,-684.54], [-14.25,-673.25],
+  [-6.28,-664.36], [4.63,-652.7], [12.69,-643.84], [23.46,-632.19], [31.62,-623.73], [42.8,-613.34],
+  [49.85,-603.33], [60.69,-591.51], [68.21,-581.75], [81.07,-572.22], [91.53,-566.27], [108.05,-557.28],
+  [118.96,-550.95], [129.75,-544.35], [139.95,-536.21], [149.04,-527.82], [157.06,-518.22], [168.42,-500.33],
+  [174.27,-488.92], [180.26,-474.16], [183.83,-462.59], [187.53,-446.69], [189.58,-434.74], [192.35,-419.04],
+  [194.67,-407.32], [199.77,-392.18], [206.13,-380.94], [214.22,-367.22], [223.45,-356.04], [231.5,-344.77],
+  [238.23,-335.22], [246.47,-323.69], [253.16,-314.07], [262.18,-301.4], [269.17,-291.26], [278.35,-277.96],
+  [284.74,-267.69], [293.8,-254.41], [300.79,-244.6], [309.96,-231.44], [316.77,-221.54], [326.03,-208.43],
+  [332.96,-198.58], [346.27,-178.47], [357.96,-162.01], [364.42,-151.63], [372.33,-137.6], [377.84,-126.79],
+  [382.48,-115.54], [389.47,-100.98], [394.96,-85.78], [398.79,-74.26], [403.83,-58.97], [407.61,-47.53],
+  [412.83,-32.38], [416.59,-20.98], [421.63,-5.85], [425.34,5.56], [430.51,20.78], [434.31,32.16],
+  [439.31,47.35], [443.03,58.77], [447.96,74.01], [451.88,85.36], [457.01,100.53], [460.67,111.97],
+  [465.78,127.13], [469.44,138.56], [474.58,153.74], [478.26,165.17], [483.21,180.41], [487.05,192.13],
+  [491.95,206.95], [495.72,218.33], [500.77,233.51], [504.56,244.88], [509.64,260.05], [513.44,271.43],
+  [518.52,286.6], [522.33,297.98], [527.4,313.16], [530.96,324.61], [536.04,339.79], [539.85,351.17],
+  [544.69,366.42], [548.5,377.8], [553.58,392.98], [557.38,404.37], [562.45,419.54], [566.25,430.98],
+  [571.29,446.1], [574.84,457.57], [579.89,472.75], [583.66,484.15], [588.68,499.35], [592.41,510.76],
+  [597.07,526.06], [600.95,537.43], [605.73,552.7], [610.71,567.89], [614.44,579.29], [619.44,594.58],
+  [624.96,605.9], [629.67,621.91], [632.66,634.98], [628.1,652.26], [620,667.23], [610.82,677.31],
+  [597.99,684.32], [585.6,692.9], [578.5,702.2], [572.6,716.86], [571.73,728.79], [574.56,742.54],
+  [577.56,753.56], [582.15,768.33], [585.54,779.9], [590.12,795.59], [593.71,807.22], [598.18,823.47],
+  [600.71,836.23], [596.15,862.13], [585.09,880.7], [575.63,889.55], [562.44,899.46], [552.72,906.72],
+  [539.8,916.2], [530.28,923.54], [517.7,933.44], [508.17,940.7], [495.26,950.22], [485.85,957.68],
+  [473.1,967.36], [463.38,974.42], [450.62,984.1], [441.05,991.36], [428.17,1000.81], [418.48,1007.88],
+  [405.77,1017.6], [396.23,1024.88], [383.32,1034.34], [373.69,1041.51], [360.97,1051.17], [351.5,1059.17],
+  [337.97,1068.24], [325.45,1074.97], [308.07,1076.32], [293.73,1074.72], [277.97,1067.87], [262.82,1050.81],
+  [255.12,1033.19], [253.84,1011.62], [257.31,997.23], [268.95,983.79], [278.44,975.17], [291.79,966.25],
+  [301.98,959.6], [315.25,950.42], [325.48,943.71], [339.18,933.28], [347.79,927.36], [359.9,920],
+  [369.6,913.72], [382.2,906.13], [389.93,897.06], [397.15,883.03], [399.31,871.32], [396.96,855.63],
+  [392.09,845.24], [386.46,831.79], [383.77,821.83], [377.67,806.89], [373.9,795.66], [367.59,780],
+  [363.17,769.54], [357.72,753.59], [350.83,734.32], [344.32,714.87], [339.54,701.19], [335.81,688.5],
+  [331.48,672.54], [328.75,661.12], [325.65,645.47], [322.95,633.79], [319.36,618.24], [316.65,606.56],
+  [313.28,590.92], [310.58,579.21], [307.29,563.5], [304.5,551.75], [301.08,536.07], [298.49,524.33],
+  [295.2,508.7], [292.59,497.13], [289.21,481.62], [286.82,470.02], [283.4,454.82], [280.97,443.38],
+  [277.9,428.16], [274.59,416.74], [267.44,404.31], [260.54,393.97], [250.93,381.08], [242.13,373.73],
+  [229.41,365.7], [218.77,361.06], [203.82,356.81], [192.22,355.58], [176.88,354.79], [165.39,354.27],
+  [149.88,353.9], [138.2,353.39], [122.76,354.21], [111.4,355.7], [96.17,359.01], [85.04,362.96],
+  [70.67,369.34], [60.45,374.88], [47.74,383.83], [38.82,391.5], [27.84,402.74], [20.29,411.97],
+  [11.65,424.71], [6.3,434.7], [-0.45,454.18], [-6.17,469.51], [-10.09,481.4], [-13.21,490.57],
+  [-16.6,500.24], [-21.24,511.38], [-26.77,526.4], [-30.87,537.71], [-35.85,552.95], [-39.62,564.22],
+  [-45.7,579.09], [-49.71,590.56], [-55.16,605.73], [-59.8,618.66], [-64.74,632.14], [-68.69,643.49],
+  [-74.31,658.48], [-78.2,669.85], [-83.84,685.96], [-88.18,696.1], [-93.52,711.19], [-97.65,722.51],
+  [-103.36,737.79], [-108.63,749.2], [-118.18,763.43], [-126.96,772.55], [-137.07,780.14], [-153.01,787.93],
+  [-170.18,792.26], [-183.33,792.54], [-200.23,790.35], [-212.7,786.3], [-227.27,778.57], [-237.84,772.4],
+  [-251.58,765.59], [-262.4,762.4], [-277.99,761.05], [-289.74,762.41], [-304.79,767.15], [-318.06,775.09],
+  [-326.76,782.85], [-336.05,795.21], [-341.32,804.96], [-349.14,818.2], [-355.15,828.57], [-363.43,842.21],
+  [-369.48,852.56], [-377.4,866.44], [-383.2,877.32], [-391.69,890.43], [-397.9,901.07], [-405.7,914.39],
+  [-411.32,925.38], [-417.62,937.12], [-431.28,959.86], [-441.37,971.46], [-451.41,978.43], [-468.54,985.17],
+  [-481.99,986.36], [-497.18,983.48], [-517.98,972.56], [-528.15,965.73], [-541.65,956.77], [-551.52,950.15],
+  [-564.77,941.24], [-574.91,934.66], [-588.29,925.7], [-598.69,920.07], [-612.75,910.26], [-622.13,901.64],
+  [-632.85,888.58], [-639.93,877.99], [-646.61,861.8], [-650.07,849.34], [-652.51,832.78], [-652.34,820.05],
+  [-648.6,803.38], [-645.27,791.41], [-640.39,775.93], [-636.57,764.46], [-631.35,749.17], [-627.54,737.62],
+  [-621.63,722.54], [-616.75,711.42], [-609.42,696.98], [-603.52,686.34], [-595.22,672.45], [-588.64,662.27],
+  [-579.42,649.02], [-572.3,639.24], [-562.2,626.61], [-554.46,617.25], [-543.78,604.99], [-535.52,595.98],
+  [-524.61,584.03], [-516.44,575.32], [-505.48,563.76], [-497.26,554.96], [-486.01,543.36], [-477.28,534.8],
+  [-465.22,524], [-455.57,516.35], [-442.24,506.62], [-432.1,499.6], [-418.4,491], [-408.15,484.8],
+  [-394.36,476.89], [-383.97,470.91], [-370.12,462.84], [-359.67,456.85], [-345.98,448.74], [-334.73,442.68],
+  [-322.21,434.32], [-311.44,427.34], [-296.75,420.89], [-286.55,414.89], [-273.01,407.25], [-263.06,400.83],
+  [-249.63,392.56], [-239.85,385.98], [-227.34,376.54], [-218.24,369.08], [-207.94,359.4], [-198.33,349.95],
+  [-187.88,338.06], [-180.33,328.89], [-170.93,316.19], [-164.31,306.38], [-156.11,292.88], [-150.63,282.36],
+  [-143.95,268.17], [-139.31,257.29], [-133.25,242.68], [-128.8,231.58], [-123.03,217.13], [-118.77,206.06],
+  [-112.81,191.12], [-108.3,180.05], [-102.24,165.26], [-97.74,154.13], [-92.09,139.82], [-87.89,128.82],
+  [-82.91,114.51], [-79.87,102.48], [-77.61,86.8], [-77.22,74.84], [-78.94,59.03], [-82.14,47.5],
+  [-87.43,32.44], [-91.93,21.34], [-98.17,6.85], [-102.21,-2.98], [-108.22,-17.05], [-112.48,-28.41],
+  [-117.29,-39.52], [-123.54,-54.35], [-129.88,-69], [-134.56,-80.08], [-140.74,-94.91], [-145.64,-105.92],
+  [-151.95,-120.73], [-156.79,-132.17], [-162.99,-146.89], [-168.89,-162.39], [-173.9,-173.75], [-178.03,-185.19],
+  [-182.65,-200.43], [-185.66,-211.7], [-189.47,-226.88], [-192.36,-243.18], [-194.97,-255.31], [-196.54,-265.96],
+  [-198.78,-283.51], [-200.28,-295.49], [-202.3,-311.41], [-203.65,-323.34], [-205.66,-339.22], [-207.25,-351.14],
+  [-208.83,-367.11], [-210.2,-379.06], [-212.11,-394.99], [-213.57,-406.94], [-216.48,-422.32], [-217.87,-433.17],
+  [-218.45,-443.82], [-215.12,-453.94], [-206.85,-460.33], [-190.24,-461.29], [-178.17,-459.15], [-166.82,-459.53],
+  [-159.73,-464.11], [-158.55,-471.58], [-160.14,-476.11], [-189.85,-520.45], [-198.01,-532.82], [-204.65,-542.88],
+  [-213.45,-556.16], [-220.13,-565.96], [-227.5,-578.69], [-236,-590.58], [-242.99,-603.82], [-249.22,-614.1]
+];
 
 /* ------------------------------------------------------------- racing line */
 /* THE PATH: the shape of the optimum lap round Spa, 207 points clicked by
@@ -4345,9 +4442,10 @@ addEventListener('keydown',e=>{
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
   if(k==='escape' && AIR.on) airMode(false);
-  /* J sends the AI car out, and stops it. It drives the hand-clicked line at
-     the speed the profile solves for the player's own car. */
-  if(k==='j' && FREEROAM && !TTREC.playing && !NET.watching) aiToggle();
+  /* J starts a race: both cars on the grid, five lights, and away. Pressed
+     again it clears the grid and puts things back. */
+  if(k==='j') raceStart();
+  if(k==='enter' && RACE.on && RACE.phase==='grid'){ RACE.ready=true; RACE.t=0; }
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
 });
 addEventListener('keyup',e=>{
@@ -5969,11 +6067,14 @@ function tlMeasure(curve,L){
     if(st.dR<TL_FLOOR){ st.dR=TL_FLOOR; floored++; }
     if(st.dL<TL_FLOOR){ st.dL=TL_FLOOR; floored++; }
   }
+  const drawn=tlSt.filter(s=>s.mR||s.mL).length, both=tlSt.filter(s=>s.mR&&s.mL).length;
   const w=tlSt.map(s=>s.dR+s.dL).sort((a,b)=>a-b);
   console.log('track limits: '+tlSt.length+' stations'+(lineMesh?'':', NO LINE MESH')
     +' — track width min '+w[0].toFixed(1)+' m, median '+w[w.length>>1].toFixed(1)
     +' m, max '+w[w.length-1].toFixed(1)+' m'
-    +(floored?', '+floored+' sides widened to the floor':''));
+    +(floored?', '+floored+' sides widened to the floor':'')
+    +' — '+both+' stations take both drawn lines, '+(drawn-both)+' take one, '
+    +(tlSt.length-drawn)+' fall back to the survey');
 }
 
 /* ------------------------------------------- track limits, marked by hand
@@ -6150,12 +6251,20 @@ function tlApply(list){
       if(o.off>0.5){ if(!bR||o.dist<bR.dist) bR=o; }
       else if(o.off<-0.5){ if(!bL||o.dist<bL.dist) bL=o; }
     }
-    if(bR){ st.dR=bR.off; used++; }
-    if(bL){ st.dL=-bL.off; used++; }
+    if(bR){ st.dR=bR.off; st.mR=true; used++; }
+    if(bL){ st.dL=-bL.off; st.mL=true; used++; }
   }
+  /* The kerb walk extends a limit outward while the ground under it is still
+     kerb, which is right where the limit came from a raycast that stopped at
+     the first painted line it found. It is wrong where the limit came from a
+     line drawn by hand: that line is the white line, put there deliberately,
+     and walking six metres of kerb past it means the limit being enforced is
+     not the one that was drawn. Hand-drawn sides are left exactly where they
+     were drawn; only surveyed ones are extended. */
   for(const st of list){
     const g0=groundAt(st.x,st.z,1e9), ref=g0.hit?g0.y:0;
     for(const side of [1,-1]){
+      if(side>0?st.mR:st.mL) continue;          // drawn by hand: leave it alone
       let r=side>0?st.dR:st.dL, on=false;
       for(let k=0;k<24;k++){
         const g=groundAt(st.x+side*st.rx*(r+0.25), st.z+side*st.rz*(r+0.25), ref);
@@ -7411,10 +7520,11 @@ const AI_WIN=6;                    // metres either side, for measuring curvatur
    at La Source by 0.25 m, and 1.30 goes off there and at Stavelot. This is the
    last clean one. */
 const AI_MARGIN=1.20;
-const AI={ lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
+const AI={ level:7, lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
            car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
 
 function aiBuild(margin){
+  AI._margin=margin||AI_MARGIN;
   if(!TT.curve) return false;
   const L=TT.len, n=Math.max(16,Math.round(L/AI_STEP));
   const P=new THREE.Vector3();
@@ -7458,13 +7568,33 @@ function aiCurvature(win){
     const area=Math.abs((bx-ax)*(cz-az)-(cx-ax)*(bz-az))/2;
     k[i]=(A*B*C>1e-9)?4*area/(A*B*C):0;
   }
-  /* Then the worst of the neighbourhood, not the average of it. A corner whose
-     radius tightens has to be entered at the speed of its tightest part, and a
-     mean would hand back the speed of its easiest. */
-  const out=new Float64Array(n);
+  return aiWorst(k, win);
+}
+/* The worst of the neighbourhood, but of a smoothed curvature rather than a raw
+   one -- a corner that tightens still has to be entered at the speed of its
+   tightest part, and that is why this takes a maximum at all.
+   
+   Taking the maximum of the raw estimate is too pessimistic on a line that was
+   clicked by hand: one sample of wobble on a 300 m sweeper reads as a 60 m
+   corner and the profile brakes for it. That is what was happening through Eau
+   Rouge and Blanchimont, both of which this car can take flat and neither of
+   which it was taking flat. Blurring first over a few metres keeps a genuine
+   tightening -- those last tens of metres, not one sample -- and drops the
+   single-point spikes that were never in the road. */
+function aiWorst(k, win){
+  const n=AI.n;
+  const blur=new Float64Array(n), half=Math.max(1,Math.round(5/AI.ds));
+  let sum=0;
+  for(let j=-half;j<=half;j++) sum+=k[((j)%n+n)%n];
+  for(let i=0;i<n;i++){
+    blur[i]=sum/(2*half+1);
+    sum-=k[((i-half)%n+n)%n];
+    sum+=k[((i+half+1)%n+n)%n];
+  }
+  const out=new Float64Array(n), span=Math.max(1,Math.round(win/2));
   for(let i=0;i<n;i++){
     let m=0;
-    for(let j=-win;j<=win;j++) m=Math.max(m,k[(i+j+n)%n]);
+    for(let j=-span;j<=span;j++) m=Math.max(m,blur[(i+j+n)%n]);
     out[i]=m;
   }
   return out;
@@ -7512,7 +7642,7 @@ function aiVCorner(k){
    +9.96, which is the ten that was asked for. Seventy percent of the brakes is
    the part you can see -- it starts slowing well before it needs to and rolls
    into the corner rather than standing on the pedal at the last metre. */
-const AI_PACE={ pace:0.86, spread:0.07, brake:0.85, brakeSpread:0.10, seed:7, reach:260 };
+const AI_PACE={ pace:0.565, spread:0.08, brake:0.75, brakeSpread:0.11, seed:7, reach:260, cap:100 };
 const aiHash=x=>{ let h=Math.imul(x^0x9e3779b9, 0x85ebca6b); h^=h>>>13;
                   h=Math.imul(h,0xc2b2ae35); h^=h>>>16; return (h>>>0)/4294967296; };
 /* The corners, as contiguous runs of real curvature, and what this driver makes
@@ -7557,11 +7687,20 @@ function aiProfile(k, margin){
      because a straight's limit is the car's top speed, and the AI came out
      47 kph down the Kemmel with no corner involved. Being careful through
      Pouhon does not make the car slower on the straight to Les Combes. */
+  /* Pace only bites where the car is actually being held back by grip. Two
+     things have to be true for a corner to be somewhere a driver can be braver
+     or more careful: it has to bend, and the bend has to be asking for more
+     than the car has. Blanchimont bends and asks for nothing -- the limit there
+     is well above the car's top speed -- so a careful driver is flat through it
+     exactly like a brave one, and scaling it by pace had the AI lifting to
+     327 kph in a corner it can take at 358. */
   const K0=1/1500, K1=1/600;               // straight, and unarguably a corner
   for(let i=0;i<n;i++){
-    const w=clamp((k[i]-K0)/(K1-K0),0,1);
-    const f=1-(1-P.pace*vf[i])*w;
-    v[i]=Math.min(MAXSPEED, aiVCorner(k[i]/margin)*f);
+    const raw=aiVCorner(k[i]/margin);
+    const bend=clamp((k[i]-K0)/(K1-K0),0,1);
+    const grip=clamp((MAXSPEED-raw)/(0.22*MAXSPEED),0,1);   // 0 = not grip-limited
+    const f=1-(1-P.pace*vf[i])*Math.min(bend,grip);
+    v[i]=Math.min(MAXSPEED, P.cap||MAXSPEED, raw*f);
   }
   for(let pass=0;pass<2;pass++){                 // twice, so the lap wraps cleanly
     for(let i=n-1;i>=0;i--){                     // brake, backwards from each apex
@@ -7602,7 +7741,7 @@ function aiProfile(k, margin){
    to end, both alternate lines put a wheel over the white line in about forty
    samples of two thousand. 2.4 m with a wider keep-back does the same job --
    it is still a clear car's width of separation -- and stays inside. */
-const AI_LINES={ off:2.4, smooth:45, win:6, keep:1.8, window:25, reach:220, ramp:140 };
+const AI_LINES={ off:2.4, smooth:45, win:6, keep:1.8, window:25, reach:220, ramp:140, edge:1.45 };
 function aiNormal(i){
   const j=(i+1)%AI.n;
   const tx=AI.x[j]-AI.x[i], tz=AI.z[j]-AI.z[i], tl=Math.hypot(tx,tz)||1;
@@ -7624,6 +7763,25 @@ function aiNormal(i){
    over to defend looks like. A short blur afterwards takes the corners out of
    the field itself, because a kink in the field is curvature the profile would
    otherwise have to solve for. */
+function aiBlur(arr, metres){
+  const n=AI.n, half=Math.max(1,Math.round(metres/AI.ds)), out=new Float64Array(n);
+  let sum=0;
+  for(let k=-half;k<=half;k++) sum+=arr[((k)%n+n)%n];
+  for(let i=0;i<n;i++){
+    out[i]=sum/(2*half+1);
+    sum-=arr[((i-half)%n+n)%n];
+    sum+=arr[((i+half+1)%n+n)%n];
+  }
+  return out;
+}
+function aiFit(arr, keep){
+  const n=AI.n;
+  for(let i=0;i<n;i++){
+    const hiR=aiRoom(i, 1, keep), hiL=aiRoom(i,-1, keep);
+    arr[i]=clamp(arr[i], -hiL, hiR);
+  }
+  return arr;
+}
 function aiOffsetField(which){
   const n=AI.n, dirAt=new Float64Array(n), wAt=new Float64Array(n);
   const corners=aiCorners(AI.k, 1/600);
@@ -7689,22 +7847,22 @@ function aiCurvatureOffset(field, win){
     const area=Math.abs((X[i]-X[a])*(Z[c]-Z[a])-(X[c]-X[a])*(Z[i]-Z[a]))/2;
     k[i]=(A*B*C>1e-9)?4*area/(A*B*C):0;
   }
-  const out=new Float64Array(n);
-  for(let i=0;i<n;i++){
-    let m=0;
-    for(let j=-win;j<=win;j++) m=Math.max(m,k[(i+j+n)%n]);
-    out[i]=m;
-  }
-  return out;
+  return aiWorst(k, win);
 }
 function aiBuildLines(margin){
-  AI.field={ race:new Float64Array(AI.n) };
-  AI.vline={ race:AI.v };
-  for(const which of ['in','out']){
-    const f=aiOffsetField(which);
-    AI.field[which]=f;
-    AI.vline[which]=aiProfile(aiCurvatureOffset(f, AI_LINES.win), margin||AI_MARGIN);
-  }
+  /* Even the racing line is nudged off the paint. It was clicked by hand and in
+     a couple of places -- the exit of Raidillon is the one you can feel -- it
+     sits close enough to the edge that a car tracking it with a metre of error
+     puts a wheel on the grass, loses a tenth, and is easy to pass. Anywhere the
+     line leaves less than a car's width plus a little, it is moved in by the
+     difference, blurred so the move is not a kink, and checked again. */
+  const race=new Float64Array(AI.n);
+  AI.field={ race:aiFit(aiBlur(aiFit(race, AI_LINES.edge), 18), AI_LINES.edge) };
+  for(const which of ['in','out']) AI.field[which]=aiOffsetField(which);
+  AI.vline={};
+  for(const which of Object.keys(AI.field))
+    AI.vline[which]=aiProfile(aiCurvatureOffset(AI.field[which], AI_LINES.win), margin||AI_MARGIN);
+  AI.v=AI.vline.race;                 // the racing line's speeds are the reference
 }
 /* Where on the line the car is. Searched forward from where it was, because it
    is going forwards, with a full sweep only if it has been put somewhere else. */
@@ -7746,7 +7904,8 @@ function aiLocate(x,z){
 /* blue: quicker than this and it is not a fight, it stands aside. race: it
    counts you as gaining if you are within this of its own speed, so it defends
    against someone reeling it in rather than only against someone already past. */
-const AI_TRAF={ look:75, ease:4.0, yieldK:0.90, clear:2.6, blue:25, race:8, hold:1.25 };
+const AI_TRAF={ look:75, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, hold:1.25,
+                overlap:18, giveK:0.94, pinK:0.82 };
 function aiPlayerRel(){
   if(!AI.n || !booted) return null;
   const n=AI.n, px=carState.wx, pz=carState.wz;
@@ -7868,9 +8027,46 @@ function aiTraffic(dt){
   }
   AI._lineHeld=Math.max(0,(AI._lineHeld||0)-dt);
   if(AI.forced){ AI.line=AI.forced; AI.mode='forced'; AI.speedK=1; }
-  AI.want=AI.field?AI.field[AI.line][AI.i]:0;
+  let want=AI.field?AI.field[AI.line][AI.i]:0;
+  /* And then the part that overrides all of it: if you are actually there, that
+     is not a place it may drive.
+
+     Picking a line is not enough on its own. The racing line crosses the road --
+     that is what a racing line is -- so a car following it through a corner
+     will sweep across whatever is beside it, and choosing the "outside line"
+     does nothing about the moment the outside line and your car want the same
+     three metres. This is applied last, every frame, against where your car
+     actually is rather than which line it is thought to be on: the command is
+     not allowed within a car's width of you on the side it is passing.
+
+     If holding that would put it off the road -- you have it pinned against the
+     edge -- it stays on the road and comes off the throttle instead. That is
+     the one case where it gives up the corner rather than the space. */
+  if(rel && Math.abs(rel.gap)<AI_TRAF.overlap){
+    const side=Math.sign(AI.lat-rel.lat) || -Math.sign(rel.lat) || 1;
+    const bound=rel.lat+side*AI_TRAF.clear;
+    let w = side>0 ? Math.max(want,bound) : Math.min(want,bound);
+    const lim=aiRoomNear(AI.i, side, 30);
+    if(Math.abs(w)>lim){                       // no road left on that side
+      w=side*lim;
+      AI.pinned=true;
+      AI.speedK=Math.min(AI.speedK, AI_TRAF.pinK);
+    } else AI.pinned=false;
+    if(Math.abs(w-want)>0.5){                  // shoved off its line: ease off
+      AI.speedK=Math.min(AI.speedK, AI_TRAF.giveK);
+      AI._urgent=true;                         // and move over like it means it
+    }
+    want=w;
+  } else AI.pinned=false;
+  AI.want=want;
   AI.vAct=(AI.vline&&AI.vline[AI.line])||AI.v;
-  const step=T.ease*dt;
+  /* Twice the rate when it is getting out of your way. The normal ease is set
+     for changing line, which is something a car does over a couple of seconds;
+     leaving room for a car that is already beside it is not that, and at the
+     slower rate the gap it opened lagged a good half metre behind the gap it
+     had decided on. */
+  const step=(AI._urgent?T.ease*2.4:T.ease)*dt;
+  AI._urgent=false;
   AI.lat += clamp(AI.want-AI.lat, -step, step);
   /* And whatever it is doing, it is pulled back inside the white line here --
      the offset is eased, so a road that narrows faster than the ease can answer
@@ -7983,6 +8179,185 @@ function aiPlace(i, flying){
   probeCar(st.wx, st.wz, st.hdg, AI.y[i], AI.car.surf);
   AI.t=0; AI.lap=0; AI.worst=0; AI._prev=i;
 }
+/* ---------------------------------------------------------------------------
+   The race start.
+
+   J used to put the AI car out on its own from wherever you happened to be,
+   which is a tool for testing an AI and not a way to start a race. It now does
+   what starting a race means: both cars on the grid, you on pole and the AI
+   alongside on the second slot, five lights on one at a time, and the moment
+   they go out you are both released together.
+
+   The grid slots were hand-clicked in the running game long ago and are the
+   same ten this circuit has always had. The five lights already existed too --
+   they were built for the other circuit's start gantry -- so this is the same
+   five columns, given a beam to hang from and the room to be seen.
+
+   Neither car can move until the lights go out. The player is pinned by the
+   same startPhase the other circuit uses, and the AI by a flag it checks before
+   it steps, so there is one release and both of them answer to it. */
+const RACE={ on:false, phase:'', t:0, hold:0, ready:false };
+/* Nought to ten, and ten is the car that was ten seconds a lap quicker than a
+   person. Seven is the one that had a driver in front of it. Below seven the
+   two levers move together and hard -- less of the grip asked for in a corner
+   and much earlier on the brakes -- because "slow AI" has to look like someone
+   being careful, not like someone quick with the handbrake on. */
+/* pace, brake, spread, and a ceiling on speed.
+
+   The ceiling is what makes the bottom of the scale mean anything. Pace only
+   bites where the car is held back by grip, which is right -- it is what keeps
+   Blanchimont flat for a careful driver -- but it also means that below about
+   level 3 the lap stopped getting slower, because most of Spa is not grip
+   limited and a frightened driver was still doing 360 kph down the Kemmel. A
+   driver at nought is not just careful in the corners, they are not going
+   anywhere near the top of the car anywhere. */
+const AI_LEVELS=[
+  // pace, brake, spread, top speed (kph)
+  [0.30,0.25,0.15,150],[0.34,0.32,0.14,185],[0.39,0.40,0.13,220],
+  [0.44,0.48,0.12,255],[0.49,0.56,0.11,290],[0.53,0.63,0.10,320],
+  [0.545,0.70,0.09,345],[0.565,0.75,0.08,360],
+  [0.67,0.85,0.06,360],[0.82,0.92,0.045,360],[1.00,1.00,0.03,360]];
+function aiSetLevel(n){
+  const L=Math.round(clamp(n,0,10));
+  const [pace,brake,spread,cap]=AI_LEVELS[L];
+  AI.level=L;
+  Object.assign(AI_PACE,{pace,brake,spread,cap:cap/3.6,
+                         brakeSpread:Math.min(0.2,spread*1.4)});
+  aiRepace();
+  return L;
+}
+const AI_LEVEL_NAME=['Crawling','Cruising','Steady','Careful','Club','Brisk',
+                     'Rapid','Quick','Sharp','Ruthless','On the limit'];
+/* Only the speeds are rebuilt. The lines themselves do not depend on how hard
+   the car is being driven round them, and re-sampling the circuit every time a
+   slider moves would take a second each nudge. */
+function aiRepace(){
+  if(!AI.field) return;
+  for(const which of Object.keys(AI.field))
+    AI.vline[which]=aiProfile(aiCurvatureOffset(AI.field[which], AI_LINES.win), AI._margin||AI_MARGIN);
+  AI.v=AI.vline.race;
+}
+const RACE_LIGHT=1.0;                  // seconds between columns
+const RACE_HOLD=[0.9, 2.4];            // and the pause on five lit, at random
+function raceEl(id){ return document.getElementById(id); }
+/* Which way the circuit runs where a car is being put down, off the racing line
+   rather than off the model, so a grid slot faces down the road. */
+function raceHeading(x,z){
+  if(!TT.curve) return 0;
+  const P=new THREE.Vector3(); let bu=0, bd=1e18;
+  for(let i=0;i<=1200;i++){
+    const u=i/1200; TT.curve.getPointAt(u,P);
+    const d=(P.x-x)**2+(P.z-z)**2;
+    if(d<bd){ bd=d; bu=u; }
+  }
+  const T=TT.curve.getTangentAt(bu);
+  return Math.atan2(T.x,T.z);
+}
+function racePlace(car, slot){
+  if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
+  const g=gridPts[slot] || gridPts[0];
+  const hdg=raceHeading(g.x,g.z);
+  const ground=groundAt(g.x,g.z,1e9);
+  const y=(ground.hit?ground.y:g.y);
+  if(car==='player'){
+    carState.wx=g.x; carState.wz=g.z; carState.hdg=hdg; carState.speed=0;
+    PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
+    PLAYER.groundY=y+RIDE;
+    carGroup.position.set(g.x, PLAYER.groundY, g.z);
+    clearDebris();
+  } else {
+    const st=AI.car.st;
+    st.wx=g.x; st.wz=g.z; st.hdg=hdg; st.speed=0;
+    AI.car.steerIn=0; AI.car.steerAng=0; AI.car.slipAng=0;
+    AI.car.groundY=y+RIDE;
+    probeCar(st.wx, st.wz, st.hdg, y, AI.car.surf);
+    AI.i=aiLocate(st.wx,st.wz).i;
+    AI.lat=0; AI.want=0; AI._dv=0; AI._dvRace=0;
+  }
+}
+function raceStart(){
+  if(!FREEROAM || TTREC.playing || NET.watching) return false;
+  if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
+  if(RACE.on){ raceEnd(); return false; }
+  if(!AI.car && !aiSpawn()) return false;
+  if(!AI.n) aiBuild();
+  AI.obj.visible=true;
+  racePlace('player', 0);               // pole
+  racePlace('ai', 1);                   // alongside
+  AI.on=true; AI.hold=true; AI.laps=[];
+  RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
+  RACE.hold=RACE_HOLD[0]+Math.random()*(RACE_HOLD[1]-RACE_HOLD[0]);
+  /* Pinned by the same lever the other circuit's start uses: anything that is
+     not 'go' holds the car on the line. */
+  startPhase='hold'; startT=0; holdFor=1e9;
+  TT.live=false; TT.cd=0; TT.drone=0;
+  ttReset();
+  setLights(0);
+  raceEl('gridcard').classList.add('show');
+  raceEl('lights').classList.remove('show');
+  raceEl('lightsout').classList.remove('show');
+  document.body.classList.add('racestart');
+  document.body.classList.remove('cinema');
+  return true;
+}
+function raceEnd(){
+  RACE.on=false; RACE.phase='';
+  AI.hold=false; AI.on=false;
+  if(AI.obj) AI.obj.visible=false;
+  startPhase='go';
+  setLights(0);
+  ['gridcard','lights','lightsout'].forEach(id=>raceEl(id).classList.remove('show'));
+  document.body.classList.remove('racestart');
+}
+/* The sequence itself, on the world clock rather than on timers, so it cannot
+   drift away from the cars it is holding. */
+function raceUI(){
+  const sl=raceEl('paceslider'), num=raceEl('pacenum'), nm=raceEl('pacename');
+  if(!sl) return;
+  const show=()=>{ const L=+sl.value; num.textContent=L; nm.textContent=AI_LEVEL_NAME[L]; };
+  sl.addEventListener('input',()=>{ show(); aiSetLevel(+sl.value); });
+  sl.addEventListener('keydown',e=>e.stopPropagation());
+  raceEl('racego').onclick=()=>{ RACE.ready=true; RACE.t=0; };
+  show();
+}
+function raceStep(dt){
+  if(!RACE.on) return;
+  RACE.t+=dt;
+  if(RACE.phase==='grid'){
+    /* No clock on this one. The lights do not start until the pace has been
+       chosen and the start pressed -- if that is never, the car sits on the
+       grid on the nose camera and waits, which is a fair description of being
+       on the grid. */
+    if(RACE.ready && RACE.t>=0.35){
+      RACE.phase='lights'; RACE.t=0;
+      raceEl('gridcard').classList.remove('show');
+      raceEl('lights').classList.add('show');
+    }
+    return;
+  }
+  if(RACE.phase==='lights'){
+    const n=Math.min(5, Math.floor(RACE.t/RACE_LIGHT)+1);
+    setLights(n);
+    if(RACE.t>=RACE_LIGHT*5){ RACE.phase='hold'; RACE.t=0; }
+    return;
+  }
+  if(RACE.phase==='hold'){
+    if(RACE.t>=RACE.hold){
+      RACE.phase='racing'; RACE.t=0;
+      setLights(0);
+      raceEl('lights').classList.remove('show');
+      const lo=raceEl('lightsout');
+      lo.classList.add('show');
+      setTimeout(()=>lo.classList.remove('show'),1300);
+      // one release, both cars
+      startPhase='go'; AI.hold=false;
+      document.body.classList.remove('racestart');
+      TT.live=true; TT.t=0; ttReset();
+    }
+    return;
+  }
+}
+
 function aiToggle(){
   if(AI.on){ AI.on=false; if(AI.obj) AI.obj.visible=false; return false; }
   if(!AI.car){ if(!aiSpawn()) return false; }
@@ -7999,6 +8374,11 @@ function aiToggle(){
 function aiStep(dt, t){
   if(!AI.on||!AI.car) return;
   const C=AI.car, st=C.st;
+  if(AI.hold){                      // on the grid, waiting for the lights
+    st.speed=0; C.steerIn=0; C.steerAng=0;
+    placeCar(C, dt, t);
+    return;
+  }
   const loc=aiLocate(st.wx,st.wz);
   AI.err=loc.d;
   /* Signed, and against the room the survey says is there. Distance from the
@@ -8056,7 +8436,7 @@ window.SIM={
       kph:+(AI.car.st.speed*3.6).toFixed(1), tgt:+(AI.v[AI.i]*3.6).toFixed(1),
       mode:AI.mode||'clear', line:AI.line||'race',
       lat:+(AI.lat||0).toFixed(2), want:+(AI.want||0).toFixed(2),
-      speedK:+(AI.speedK||1).toFixed(2), dv:+((AI._dv)||0).toFixed(1), dvRace:+((AI._dvRace)||0).toFixed(1),
+      speedK:+(AI.speedK||1).toFixed(2), pinned:!!AI.pinned, dv:+((AI._dv)||0).toFixed(1), dvRace:+((AI._dvRace)||0).toFixed(1),
       err:+(AI.err||0).toFixed(2), off:+(AI.off||0).toFixed(2),
       room:+(AI.room||0).toFixed(2), out:+(AI.outside||0).toFixed(2),
       worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
@@ -8065,6 +8445,8 @@ window.SIM={
   /* Walk the racing line and ask the track-limits test about every metre of it.
      The line is by definition on the circuit, so anything it calls a violation
      is the limits being wrong, not the driving. */
+  widthAt(s){ const i=Math.round(s/TL_STEP)%tlSt.length; const st=tlSt[i];
+      return st?{s, dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2), drawn:!!(st.mR&&st.mL)}:null; },
   limitsScan(step){
     const keep={x:carState.wx,z:carState.wz,h:carState.hdg};
     const P=new THREE.Vector3(), T=new THREE.Vector3();
@@ -8089,6 +8471,21 @@ window.SIM={
       fields:['t','s','kph','target','err','off','outside','steer','surf'], p:t}; },
   /* Pin the AI to one of the three lines, for driving each of them end to end
      without needing a second car to provoke it. */
+  race(){ return {on:RACE.on, phase:RACE.phase, t:+RACE.t.toFixed(2), hold:+RACE.hold.toFixed(2),
+      lit:litCols, held:!!AI.hold, startPhase,
+      ui:{grid:raceEl('gridcard').classList.contains('show'),
+          lights:raceEl('lights').classList.contains('show'),
+          out:raceEl('lightsout').classList.contains('show')}}; },
+  raceGo(){ return raceStart(); },
+  raceReady(){ RACE.ready=true; RACE.t=0; return true; },
+  aiLevel(n){ return n===undefined?AI.level:aiSetLevel(n); },
+  aiSpeedAt(s){ const i=Math.round(s/AI.ds)%AI.n;
+    return {race:+(AI.vline.race[i]*3.6).toFixed(0), R:+(1/Math.max(1e-9,AI.k[i])).toFixed(0)}; },
+  gridOrder(){
+    if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
+    return gridPts.slice(0,4).map((g,i)=>({slot:i+1,
+      s:+(aiLocate(g.x,g.z).i*AI.ds).toFixed(1)}));
+  },
   aiForce(line){ AI.forced=line||null; return AI.forced; },
   aiLines(){
     if(!AI.field) return null;
@@ -8399,7 +8796,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
+  else { controllerPoll(); raceStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
