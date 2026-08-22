@@ -4698,7 +4698,8 @@ function watchCarCreate(i){
   const group=new THREE.Group();
   const body=carObj.clone(true);
   body.position.copy(carObj.position); body.rotation.copy(carObj.rotation); body.scale.copy(carObj.scale);
-  group.add(body); scene.add(group); watchTint(body,WATCH_COLORS[i%WATCH_COLORS.length]);
+  body.traverse(o=>{ o.visible=true; if(o.isMesh) o.frustumCulled=false; });
+  group.scale.copy(carGroup.scale); group.add(body); scene.add(group); watchTint(body,WATCH_COLORS[i%WATCH_COLORS.length]);
   return {group,body,s:-i*7.5,lap:0,speed:50+i*1.9,pace:53+i*1.9+Math.random()*5,
           lateral:(i%2?1:-1)*(1.15+((i/2)|0)*.08),incident:0,incidentKind:'',pos:new THREE.Vector3()};
 }
