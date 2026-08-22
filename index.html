@@ -71,6 +71,13 @@
   /* ------------------------------------------ track limits, seen from above */
   #m2wrap{position:fixed;inset:0;z-index:30;display:none}
   #m2wrap.on{display:block}
+  #m2radwrap{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;
+        letter-spacing:.16em;text-transform:uppercase;color:var(--paper);opacity:.85}
+  #m2radwrap b{color:var(--amber);font-weight:600;min-width:38px;display:inline-block}
+  #m2rad{-webkit-appearance:none;appearance:none;width:100px;height:3px;border-radius:999px;
+        background:linear-gradient(90deg,#3a4048,var(--amber));outline:none;cursor:pointer}
+  #m2rad::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+        background:#ffb020;box-shadow:0 2px 8px rgba(255,176,32,.6);cursor:pointer}
   #m2brushwrap{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;
         letter-spacing:.16em;text-transform:uppercase;color:var(--paper);opacity:.85}
   #m2brushwrap b{color:var(--amber);font-weight:600;min-width:42px;display:inline-block}
@@ -390,13 +397,6 @@
   #gridcard{pointer-events:none}
   #gridcard.show{pointer-events:auto}
   body.mapopen #gridcard,body.mapopen #tt,body.mapopen #lights{opacity:0;pointer-events:none}
-  #limtip{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:12;
-          display:none;font-family:var(--mono);font-size:10px;letter-spacing:.16em;
-          text-transform:uppercase;color:var(--paper);background:rgba(10,13,19,.82);
-          border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:8px 18px;
-          pointer-events:none;white-space:nowrap}
-  #limtip.on{display:block}
-  body.cinema #limtip{opacity:0}
   /* lights out */
   #lightsout{position:fixed;left:50%;top:24vh;transform:translateX(-50%) scale(.9);
              z-index:14;pointer-events:none;opacity:0;
@@ -705,11 +705,18 @@
 <button id="joybtn">Connect Joystick</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
-  <div id="m2hint">Drag any dot on either line to move it &middot; hold &#8984; or click Pencil and draw a corner
+  <div id="m2hint">Paint over the track &mdash; everything you paint counts as track
+    &middot; Erase to take it back &middot; drag the background to pan &middot; scroll to zoom &middot; hold &#8984; or click Pencil and draw a corner
     &middot; drag the background to pan &middot; scroll to zoom</div>
   <div id="m2bar">
-    <button id="m2in">Inside</button>
-    <button id="m2out" class="on">Outside</button>
+    <button id="m2paint" class="on">Paint track</button>
+    <button id="m2erase">Erase</button>
+    <label id="m2radwrap">Size <b id="m2radval">6 m</b>
+      <input id="m2rad" type="range" min="1" max="30" step="1" value="6"></label>
+    <button id="m2clear">Clear paint</button>
+    <button id="m2lines">Lines</button>
+    <button id="m2in" style="display:none">Inside</button>
+    <button id="m2out" style="display:none">Outside</button>
     <span id="m2info"></span>
     <label id="m2brushwrap">Brush <b id="m2brushval">25 m</b>
       <input id="m2brush" type="range" min="0" max="120" step="5" value="25"></label>
@@ -803,7 +810,6 @@
     <div class="hint">Set the pace, then start. Nothing happens until you do.</div>
   </div>
 </div>
-<div id="limtip">Track limits &mdash; drag a dot to move the line &middot; G to hide</div>
 <div id="lightsout">Lights out<small>Go</small></div>
 <div id="lights">
   <div class="col"><b></b><b></b></div>
@@ -850,7 +856,6 @@
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
           <div class="ctrl-row"><kbd>J</kbd><span>Start a race &mdash; grid, five lights, go</span></div>
-          <div class="ctrl-row"><kbd>G</kbd><span>Show the track limits on the road</span></div>
           <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
@@ -4479,7 +4484,6 @@ addEventListener('keydown',e=>{
       ttStart(false);                 // restart at the countdown, not the drone shots
     } else resetToTrack();
   }
-  if(k==='g') limShow(!limOn);                       // where the limit actually is
   /* Drawing the AI's lines: K puts the circuit on screen from above and takes
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
@@ -4865,6 +4869,7 @@ function ttBuild(){
   const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal',0.5);
   const L=curve.getLength();
   TT.curve=curve; TT.len=L;
+  surfInit();
   curve.arcLengthDivisions=Math.max(200,Math.ceil(L/2));
   curve.updateArcLengths();
   // start where the car starts, so gate one is the line you are sitting on
@@ -5356,7 +5361,8 @@ function clearGround(v,pad){
    Nothing here computes anything. It is a drawing tool -- what you drag is
    what the car is judged against, and Copy hands you the numbers to keep. */
 let m2Vis=[];
-let m2Brush=25;                  // metres of line either side that come with a drag
+let m2Brush=25;
+let m2Tool='paint', m2Rad=6, m2PtrX=null, m2PtrY=null, m2Painting=false;                  // metres of line either side that come with a drag
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
 const m2El=()=>document.getElementById('m2canvas');
 
@@ -5365,6 +5371,107 @@ const m2Cam=new THREE.OrthographicCamera(-100,100,100,-100,1,20000);
    a point drawn at a screen position is over the piece of track at that screen
    position. Orthographic, so there is no perspective to correct for and world
    x/z map to screen x/y linearly whatever the elevation underneath. */
+/* ---------------------------------------------------------------------------
+   Painting where the track is.
+
+   Two lines round a circuit is a poor description of a racing surface. They
+   have to be drawn in the right order, they cannot say "this bit of run-off is
+   track and that bit is not", and every question you ask them -- which side is
+   which, how much room is there, is this station's edge sane -- is geometry
+   that can be got wrong. Painting the surface asks none of it: a cell is track
+   or it is not, and a lap is legal while any wheel is on a painted cell.
+
+   The mask is one metre cells over the circuit's bounding box, which for Spa is
+   about 2700 by 2400 -- six and a half million bytes, held as one Uint8Array.
+   Painting is a filled disc into that array, erasing is the same disc set back
+   to zero, and the whole thing survives as a run-length string, which for a
+   circuit-shaped smear of paint in a mostly empty box is small. */
+const SURF_KEY='f1sim.paint.spa22', SURF_VER=1;
+const SURF={ w:0, h:0, minx:0, minz:0, data:null, count:0 };
+function surfInit(){
+  if(SURF.data || !TT.curve) return !!SURF.data;
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;
+  const P=new THREE.Vector3();
+  for(let u=0;u<=1.0001;u+=1/400){
+    TT.curve.getPointAt(Math.min(u,1),P);
+    if(P.x<x0)x0=P.x; if(P.x>x1)x1=P.x; if(P.z<z0)z0=P.z; if(P.z>z1)z1=P.z;
+  }
+  const M=150;                       // room for run-off, pit lane and slip roads
+  SURF.minx=Math.floor(x0-M); SURF.minz=Math.floor(z0-M);
+  SURF.w=Math.ceil(x1+M)-SURF.minx; SURF.h=Math.ceil(z1+M)-SURF.minz;
+  SURF.data=new Uint8Array(SURF.w*SURF.h);
+  SURF.count=0;
+  surfLoad();
+  return true;
+}
+const surfIdx=(x,z)=>{
+  const i=(x-SURF.minx)|0, j=(z-SURF.minz)|0;
+  if(i<0||j<0||i>=SURF.w||j>=SURF.h) return -1;
+  return j*SURF.w+i;
+};
+function surfOn(x,z){
+  if(!SURF.data||!SURF.count) return null;      // nothing painted: not our call
+  const k=surfIdx(x,z);
+  return k<0?false:SURF.data[k]===1;
+}
+/* A filled disc, which is what a brush is. */
+function surfDisc(x,z,r,on){
+  if(!SURF.data) return;
+  const r2=r*r;
+  const i0=Math.max(0,Math.floor(x-r-SURF.minx)), i1=Math.min(SURF.w-1,Math.ceil(x+r-SURF.minx));
+  const j0=Math.max(0,Math.floor(z-r-SURF.minz)), j1=Math.min(SURF.h-1,Math.ceil(z+r-SURF.minz));
+  for(let j=j0;j<=j1;j++){
+    const dz=(j+0.5+SURF.minz)-z;
+    for(let i=i0;i<=i1;i++){
+      const dx=(i+0.5+SURF.minx)-x;
+      if(dx*dx+dz*dz>r2) continue;
+      const k=j*SURF.w+i, was=SURF.data[k];
+      if(on&&!was){ SURF.data[k]=1; SURF.count++; }
+      else if(!on&&was){ SURF.data[k]=0; SURF.count--; }
+    }
+  }
+}
+/* Along a stroke rather than at a point, so a fast drag does not leave gaps. */
+function surfStroke(x0,z0,x1,z1,r,on){
+  const d=Math.hypot(x1-x0,z1-z0), n=Math.max(1,Math.ceil(d/(r*0.5)));
+  for(let i=0;i<=n;i++) surfDisc(x0+(x1-x0)*i/n, z0+(z1-z0)*i/n, r, on);
+}
+/* Run lengths, base 36, alternating off and on. A circuit is a thin smear in a
+   big empty box, so this is a few tens of kilobytes rather than six megabytes. */
+function surfPack(){
+  if(!SURF.data) return '';
+  const out=[]; let run=0, cur=0;
+  for(let k=0;k<SURF.data.length;k++){
+    const v=SURF.data[k]?1:0;
+    if(v===cur) run++;
+    else { out.push(run.toString(36)); cur=v; run=1; }
+  }
+  out.push(run.toString(36));
+  return JSON.stringify({v:SURF_VER, w:SURF.w, h:SURF.h,
+                         x:SURF.minx, z:SURF.minz, r:out.join('.')});
+}
+function surfUnpack(txt){
+  let d; try{ d=JSON.parse(txt); }catch(e){ return false; }
+  if(!d||d.v!==SURF_VER||d.w!==SURF.w||d.h!==SURF.h) return false;
+  SURF.data.fill(0); SURF.count=0;
+  let k=0, cur=0;
+  for(const t of d.r.split('.')){
+    const n=parseInt(t,36)||0;
+    if(cur) for(let i=0;i<n&&k<SURF.data.length;i++,k++){ SURF.data[k]=1; SURF.count++; }
+    else k+=n;
+    cur=1-cur;
+  }
+  return true;
+}
+function surfSave(){ try{ localStorage.setItem(SURF_KEY, surfPack()); }catch(e){} }
+function surfLoad(){
+  try{ const t=localStorage.getItem(SURF_KEY); if(t) surfUnpack(t); }catch(e){}
+}
+function surfClear(){
+  if(!SURF.data) return;
+  SURF.data.fill(0); SURF.count=0; surfSave();
+}
+
 function m2Sync(){
   const c=m2El(); if(!c) return;
   const w=c.width, h=c.height;
@@ -5390,6 +5497,7 @@ function m2Show(on){
   const w=document.getElementById('m2wrap');
   if(w) w.classList.toggle('on',on);
   if(on){
+    surfInit();
     // the overlay matches the window, so the mapping is one canvas pixel to one
     const c=m2El();
     if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
@@ -5432,6 +5540,24 @@ function m2Draw(){
      is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
 
+  /* What has been painted as track, under everything else. Only the cells in
+     view are walked, and only every nth one when zoomed out, so this costs the
+     same whether the mask is empty or the whole circuit is covered. */
+  if(SURF.data && SURF.count){
+    const step=Math.max(1, Math.round(1/Math.max(0.05,m2Sc)));
+    const wx0=m2wx(0), wx1=m2wx(c.width), wz0=m2wz(0), wz1=m2wz(c.height);
+    const i0=Math.max(0,Math.floor(wx0-SURF.minx)), i1=Math.min(SURF.w-1,Math.ceil(wx1-SURF.minx));
+    const j0=Math.max(0,Math.floor(wz0-SURF.minz)), j1=Math.min(SURF.h-1,Math.ceil(wz1-SURF.minz));
+    g.fillStyle='rgba(55,224,106,.30)';
+    const px=Math.max(1, m2Sc*step);
+    for(let j=j0;j<=j1;j+=step){
+      const y=m2sy(j+SURF.minz);
+      for(let i=i0;i<=i1;i+=step){
+        if(!SURF.data[j*SURF.w+i]) continue;
+        g.fillRect(m2sx(i+SURF.minx), y, px, px);
+      }
+    }
+  }
   /* The limit as the game enforces it, thin and pale under everything else. The
      line you drag is not quite the limit -- the floor under the width and the
      kerb walk on surveyed stretches both have a say -- and dragging a line
@@ -5462,7 +5588,7 @@ function m2Draw(){
     g.stroke();
   }
   // the other limit line, dim -- but with its own dots, because it is grabbable
-  const other=tleLines[1-m2Edge];
+  const other=m2Tool?[]:tleLines[1-m2Edge];
   if(other.length>1){
     g.strokeStyle='rgba(120,200,255,.5)'; g.lineWidth=3;
     g.beginPath();
@@ -5480,7 +5606,7 @@ function m2Draw(){
     }
   }
   // the line being edited: red, thick, closed
-  const pts=tleLines[m2Edge];
+  const pts=m2Tool?[]:tleLines[m2Edge];
   if(pts.length>1){
     g.strokeStyle='#ff3b30'; g.lineWidth=6; g.lineJoin='round'; g.lineCap='round';
     g.beginPath();
@@ -5501,6 +5627,12 @@ function m2Draw(){
     g.lineWidth=2; g.strokeStyle='#fff'; g.stroke();
   }
   m2Vis.length=0;
+  if(m2Tool && m2PtrX!==null){
+    g.beginPath(); g.arc(m2PtrX, m2PtrY, Math.max(2,m2Rad*m2Sc), 0, Math.PI*2);
+    g.strokeStyle=m2Tool==='paint'?'rgba(55,224,106,.95)':'rgba(255,107,82,.95)';
+    g.lineWidth=2; g.stroke();
+  }
+  if(m2Tool){ m2Info(); return; }
   const r=5.5;
   let lx=-1e9, ly=-1e9;
   for(let i=0;i<pts.length;i++){
@@ -5519,15 +5651,26 @@ function m2Draw(){
     m2PenPts.forEach((q,i)=>{ const x=m2sx(q.x), y=m2sy(q.z); i?g.lineTo(x,y):g.moveTo(x,y); });
     g.stroke();
   }
-  const info=document.getElementById('m2info');
-  if(info) info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '
-    +m2Vis.length+' handles';
+  m2Info();
 }
 /* Both lines, always. Only the selected edge used to be hit-tested, so clicking
    the other one -- which is drawn right there on the screen, with dots on it --
    found nothing, fell through to the pan, and moved the camera instead. That is
    the whole of "it moves the camera instead of the line". Whichever line you
    clicked becomes the one you are editing. */
+function m2Info(){
+  const info=document.getElementById('m2info');
+  if(!info) return;
+  if(m2Tool){
+    const km2=(SURF.count/1e6).toFixed(3);
+    info.textContent = SURF.count
+      ? (SURF.count.toLocaleString()+' m² painted · '+(SURF.count/7000).toFixed(1)+' m wide on average')
+      : 'Nothing painted yet — the old edge lines are still deciding laps';
+  } else {
+    const pts=tleLines[m2Edge];
+    info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '+m2Vis.length+' handles';
+  }
+}
 function m2Hit(sx,sy){
   let bl=-1, bi=-1, bd=60*60;
   for(let li=0; li<tleLines.length; li++){
@@ -5581,7 +5724,6 @@ function m2Applied(p){
       if(Math.hypot(q.x-p.x,q.z-p.z)<=brush) tlTouch(q.x,q.z);
     }
   }
-  if(limOn) limShow(true);
   if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
   m2Draw();
 }
@@ -5601,7 +5743,6 @@ function m2Undo(){
   if(!m2Was){ m2Note('nothing to undo'); return; }
   tleLines[m2Was.edge]=m2Was.pts.map(v=>v.clone());
   tleSave(); ttRemeasure();
-  if(limOn) limShow(true);
   if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
   m2Was=null; m2Note('undone'); m2Draw();
 }
@@ -5670,7 +5811,6 @@ function m2PenEnd(){
   tleLines[m2Edge]=made.concat(rest.slice(1));
   tleSave();
   for(const q of made) tlTouch(q.x,q.z);
-  if(limOn) limShow(true);
   if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
   m2Draw(); m2Copy(true);
 }
@@ -5678,6 +5818,18 @@ function m2PenEnd(){
    edge at a time was the old behaviour and it meant remembering which one you
    had changed and doing it twice. */
 function m2Copy(quiet){
+  if(m2Tool){
+    const txt=surfPack();
+    const msg=t=>{ const info=document.getElementById('m2info');
+      if(info){ info.textContent=t; setTimeout(()=>m2Draw(),2600); } };
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(txt).then(
+        ()=>msg('copied the painted track · '+SURF.count.toLocaleString()+' m² · '
+                +Math.round(txt.length/1024)+' KB'),
+        ()=>msg('copy blocked — it is in the console'));
+    console.log('painted track surface:\n'+txt);
+    return txt;
+  }
   /* gridToModel already hands back [x,z] rounded to the centimetre -- the same
      pair you pasted in -- so this only has to collect them. */
   const pack=li=>tleLines[li].map(v=>gridToModel(v));
@@ -5703,6 +5855,11 @@ function m2Init(){
   c.addEventListener('pointerdown',e=>{
     window._m2downs=(window._m2downs||0)+1;
     const [x,y]=pos(e);
+    if(m2Tool){
+      m2Painting=true; m2PtrX=x; m2PtrY=y;
+      surfDisc(m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
+      c.setPointerCapture(e.pointerId); m2Draw(); return;
+    }
     if(e.metaKey||e.ctrlKey||m2PenMode){ m2PenStart(x,y); c.setPointerCapture(e.pointerId); return; }
     m2Drag=m2Hit(x,y);
     if(m2Drag>=0) m2Snapshot();
@@ -5711,6 +5868,12 @@ function m2Init(){
   });
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
+    if(m2Tool){
+      const lx=m2PtrX, ly=m2PtrY;
+      m2PtrX=x; m2PtrY=y;
+      if(m2Painting) surfStroke(m2wx(lx), m2wz(ly), m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
+      m2Draw(); return;
+    }
     if(m2Pen){ m2PenMove(x,y); return; }
     if(m2Drag>=0){
       const line=tleLines[m2Edge], p=line[m2Drag];
@@ -5755,6 +5918,7 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
+    if(m2Painting){ m2Painting=false; surfSave(); m2Draw(); m2Info(); return; }
     if(m2Pen){ m2PenEnd(); return; }
     if(m2Drag>=0){
       window._m2last=m2Drag;
@@ -6626,6 +6790,13 @@ function tlWheelOn(lx,lz){
      surface: the kerbs are their own mesh with their own material, so its
      edge is the white line, which is the thing being measured. */
   const wx=carState.wx + lx*fz + lz*fx, wz=carState.wz - lx*fx + lz*fz;
+  /* Painted surface first. It is a direct answer -- this square metre is track
+     or it is not -- where the lines are an inference from two curves and a pile
+     of rules about which side is which. If nothing has been painted it returns
+     null and the old measurement decides, so a circuit works before anyone has
+     picked up the brush. */
+  const painted=surfOn(wx,wz);
+  if(painted!==null) return TL_TOL===TL_OFF ? true : painted;
   const st=tlStation(wx,wz);
   if(!st) return true;                  // nothing measured: never take a lap away
   const off=(wx-st.x)*st.rx + (wz-st.z)*st.rz;    // + is right of the line
@@ -6725,16 +6896,10 @@ function editRestore(){
 let dragging=false, lastX=0, lastY=0, moved=0, orbYaw=Math.PI, orbPitch=0.22, orbDist=16;
 canvas.addEventListener('pointerdown',e=>{
   unlockAudio();
-  /* A limit point under the pointer wins over the camera. Without this the
-     camera swings away the moment you try to take hold of one, which is exactly
-     what "it moves the camera instead of the line" was. */
-  limDrag=limPick(e.clientX,e.clientY);
-  if(limDrag){ canvas.setPointerCapture(e.pointerId); return; }
   dragging=true; moved=0; lastX=e.clientX; lastY=e.clientY;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointerup',e=>{
-  if(limDrag){ limDrop(); dragging=false; return; }
   dragging=false;
   if(moved<8 && tleOn){
     tleClick(e.clientX,e.clientY);
@@ -6761,7 +6926,6 @@ canvas.addEventListener('pointerup',e=>{
   }
 });
 canvas.addEventListener('pointermove',e=>{
-  if(limDrag){ limMoveTo(e.clientX,e.clientY); limShowDots(); return; }
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY;
   moved+=Math.abs(dx)+Math.abs(dy);
@@ -8617,158 +8781,6 @@ function raceEnd(){
 }
 /* The sequence itself, on the world clock rather than on timers, so it cannot
    drift away from the cars it is holding. */
-/* ------------------------------------------------------------ the limit, seen
-   Not the lines as drawn, but the limit as enforced: every station's own edge,
-   after the drawn lines, the kerbs and the floor have all had their say. That
-   distinction is the whole point -- knowing where you drew a line does not tell
-   you where the car is being judged, and the only way to answer "why was that
-   lap deleted" is to be able to see the thing that deleted it. */
-let limOn=false, limGroup=null;
-function limShow(on){
-  limOn=on;
-  const tip=document.getElementById('limtip');
-  if(tip) tip.classList.toggle('on',on);
-  if(limGroup){ scene.remove(limGroup);
-    limGroup.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) o.material.dispose(); });
-    limGroup=null; }
-  if(!on || !tlSt.length) return;
-  limGroup=new THREE.Group(); scene.add(limGroup);
-  /* Ribbons rather than lines. A THREE.Line is one pixel wide however far away
-     it is, which at 300 kph is a thread you cannot see -- and the entire point
-     of this is being able to see, from the car, where the limit runs. These are
-     laid on the road like paint, a third of a metre across, lifted a few
-     centimetres and offset in depth so they do not fight with the tarmac. */
-  const W=0.34, LIFT=0.06;
-  for(const side of [1,-1]){
-    const n=tlSt.length, pos=new Float32Array((n+1)*2*3), idx=[];
-    for(let i=0;i<=n;i++){
-      const st=tlSt[i%n];
-      const r=(side>0?st.dR:st.dL)*side;
-      const x=st.x+st.rx*r, z=st.z+st.rz*r;
-      const g=groundAt(x,z,1e9), y=(g.hit?g.y:0)+LIFT;
-      const k=i*6;
-      pos[k  ]=x-st.rx*W*side; pos[k+1]=y; pos[k+2]=z-st.rz*W*side;
-      pos[k+3]=x+st.rx*W*side; pos[k+4]=y; pos[k+5]=z+st.rz*W*side;
-      if(i<n){ const v=i*2;
-        idx.push(v,v+1,v+2, v+1,v+3,v+2); }
-    }
-    const geo=new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
-    geo.setIndex(idx);
-    const mat=new THREE.MeshBasicMaterial({
-      color: side>0?0x33ddff:0xffd21e, transparent:true, opacity:0.85,
-      side:THREE.DoubleSide, depthWrite:false,
-      polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4 });
-    const m=new THREE.Mesh(geo,mat);
-    m.renderOrder=999;
-    limGroup.add(m);
-  }
-  /* And the points you can actually take hold of. The ribbon is the limit as
-     enforced; these are the line it is built from, which is the thing an edit
-     moves. They are drawn on the road, in the world, because that is where you
-     are when you can see that a limit is wrong. */
-  for(let li=0; li<tleLines.length; li++){
-    const pts=tleLines[li];
-    if(!pts.length) continue;
-    const a=new Float32Array(pts.length*3);
-    pts.forEach((q,i)=>{ const g=groundAt(q.x,q.z,1e9);
-      a[i*3]=q.x; a[i*3+1]=(g.hit?g.y:q.y)+0.35; a[i*3+2]=q.z; });
-    const geo=new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(a,3));
-    const dots=new THREE.Points(geo, new THREE.PointsMaterial({
-      color: li?0xffd21e:0x33ddff, size:2.6, sizeAttenuation:true,
-      transparent:true, opacity:0.95, depthTest:false }));
-    dots.renderOrder=1000;
-    limGroup.add(dots);
-  }
-}
-/* Dragging one of those, on the track, with the mouse.
-
-   The map is the precise tool and it is still there, but the moment you can see
-   a limit in the wrong place you are in the car looking at it, and going to a
-   menu to fix what is in front of you is the wrong shape of job. Grab the dot,
-   move it, let go. */
-let limDrag=null;
-const LIM_REACH=90;        // metres from the car you may take hold of
-const LIM_MAX=14;          // and how far one drag may move a point
-/* Only the dots are refreshed while the pointer is down. Rebuilding the ribbons
-   means walking seventeen hundred stations, which is fine once on release and
-   not fine sixty times a second. */
-function limShowDots(){
-  if(!limGroup) return;
-  let li=0;
-  limGroup.children.forEach(o=>{
-    if(!o.isPoints) return;
-    const pts=tleLines[li++], a=o.geometry.attributes.position.array;
-    pts.forEach((q,i)=>{ a[i*3]=q.x; a[i*3+2]=q.z; });
-    o.geometry.attributes.position.needsUpdate=true;
-  });
-}
-function limPick(sx,sy){
-  if(!limOn) return null;
-  const w=markScreenToGround(sx,sy);
-  if(!w) return null;
-  /* Only points near the car. A ray through the screen lands further away the
-     nearer the horizon it is aimed, so without this you could take hold of a
-     limit half a lap up the road and then move it by hundreds of metres with a
-     flick of the wrist -- measured at 689 m for a sixty pixel drag. */
-  let best=null, bd=7*7;
-  for(let li=0; li<tleLines.length; li++){
-    tleLines[li].forEach((q,i)=>{
-      if((q.x-carState.wx)**2+(q.z-carState.wz)**2 > LIM_REACH*LIM_REACH) return;
-      const d=(q.x-w.x)**2+(q.z-w.z)**2;
-      if(d<bd){ bd=d; best={line:li, i, x0:q.x, z0:q.z}; }
-    });
-  }
-  return best;
-}
-function limMoveTo(sx,sy){
-  if(!limDrag) return;
-  const w=markScreenToGround(sx,sy);
-  if(!w) return;
-  const line=tleLines[limDrag.line], p=line[limDrag.i];
-  /* And a ceiling on how far one drag can take it, measured from where it
-     started, for the same reason. A limit is wrong by a metre or two, never by
-     a hundred. */
-  let tx=w.x, tz=w.z;
-  const away=Math.hypot(tx-limDrag.x0, tz-limDrag.z0);
-  if(away>LIM_MAX){
-    const k=LIM_MAX/away;
-    tx=limDrag.x0+(tx-limDrag.x0)*k;
-    tz=limDrag.z0+(tz-limDrag.z0)*k;
-  }
-  const dx=tx-p.x, dz=tz-p.z;
-  const R=m2Brush, n=line.length, h=n>>1;
-  if(R>0){
-    for(let k=-h;k<=h;k++){
-      const i=((limDrag.i+k)%n+n)%n;
-      if(i===limDrag.i) continue;
-      const q=line[i]; if(!q) continue;
-      const d=Math.hypot(q.x-p.x, q.z-p.z);
-      if(d>R) continue;
-      const wgt=0.5+0.5*Math.cos(Math.PI*d/R);
-      q.x+=dx*wgt; q.z+=dz*wgt;
-      const gq=groundAt(q.x,q.z,1e9); if(gq.hit) q.y=gq.y;
-    }
-  }
-  p.x=tx; p.z=tz;
-  const g=groundAt(p.x,p.z,1e9); if(g.hit) p.y=g.y;
-}
-function limDrop(){
-  if(!limDrag) return;
-  const p=tleLines[limDrag.line][limDrag.i];
-  tleSave();
-  tlTouch(p.x,p.z);
-  const line=tleLines[limDrag.line], n=line.length, h=n>>1;
-  for(let k=-h;k<=h;k+=3){
-    const q=line[((limDrag.i+k)%n+n)%n];
-    if(q && Math.hypot(q.x-p.x,q.z-p.z)<=Math.max(30,m2Brush*2.5)) tlTouch(q.x,q.z);
-  }
-  limDrag=null;
-  limShow(true);
-  if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
-  if(m2On) m2Draw();
-}
 function raceUI(){
   const sl=raceEl('paceslider'), num=raceEl('pacenum'), nm=raceEl('pacename');
   if(!sl) return;
@@ -8966,6 +8978,11 @@ window.SIM={
     c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
     return {handle:bi, brush:m2Brush};
   },
+  surf(){ return {w:SURF.w,h:SURF.h,cells:SURF.count,
+      hasData:!!SURF.data, minx:SURF.minx, minz:SURF.minz}; },
+  surfPaint(x,z,r,on){ surfDisc(x,z,r,on); return SURF.count; },
+  surfAt(x,z){ return surfOn(x,z); },
+  surfPack(){ return surfPack(); },
   widthAt(s){ const i=Math.round(s/TL_STEP)%tlSt.length; const st=tlSt[i];
       return st?{s, dR:+st.dR.toFixed(2), dL:+st.dL.toFixed(2), drawn:!!(st.mR&&st.mL)}:null; },
   limitsScan(step){
@@ -8994,8 +9011,6 @@ window.SIM={
      without needing a second car to provoke it. */
   linePoint(li,i){ const q=tleLines[li][i]; return q?{x:q.x,z:q.z}:null; },
   camAim(){ return +orbYaw.toFixed(4); },
-  limPickAt(x,y){ return limPick(x,y); },
-  limits(){ return {on:limOn, dragging:!!limDrag, lines:limGroup?limGroup.children.length:0}; },
   race(){ return {on:RACE.on, phase:RACE.phase, t:+RACE.t.toFixed(2), hold:+RACE.hold.toFixed(2),
       lit:litCols, held:!!AI.hold, startPhase,
       ui:{grid:raceEl('gridcard').classList.contains('show'),
