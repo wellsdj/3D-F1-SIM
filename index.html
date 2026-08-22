@@ -4785,7 +4785,10 @@ function ttStart(cinematic=true){
   lightsEl.classList.remove('show');
   document.getElementById('tt').classList.add('show');
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
-  const nb=document.getElementById('netbtn'); if(nb) nb.classList.add('on');
+  /* The controller link is a home-screen action. It used to be re-enabled
+     here, which let it leak through during the race/cinematic transition on
+     a slow load. Keep it completely out of the racing UI. */
+  const nb=document.getElementById('netbtn'); if(nb){ nb.classList.remove('on'); nb.style.display='none'; }
   netHost(); netLabel();
   ttHUD();
   return true;
@@ -5081,7 +5084,7 @@ function goHome(){
   const b=document.getElementById('boot'); if(b){ b.classList.remove('gone'); b.style.opacity=''; }
   if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
-  const nb=document.getElementById('netbtn'); if(nb) nb.classList.remove('on');
+  const nb=document.getElementById('netbtn'); if(nb){ nb.classList.remove('on'); nb.style.display=''; }
   const nw=document.getElementById('netwrap'); if(nw) nw.classList.remove('on');
   netPanel(false);
   replayBtn(); homeReplayUI();
