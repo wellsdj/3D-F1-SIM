@@ -697,14 +697,17 @@
 <button id="joybtn">Connect Joystick</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
-  <div id="m2hint">Drag a yellow point to move the limit · drag the background to pan · scroll to zoom</div>
+  <div id="m2hint">Drag the limit to move it &middot; hold &#8984; or click Pencil and draw a corner
+    &middot; drag the background to pan &middot; scroll to zoom</div>
   <div id="m2bar">
     <button id="m2in">Inside</button>
     <button id="m2out" class="on">Outside</button>
     <span id="m2info"></span>
     <label id="m2brushwrap">Brush <b id="m2brushval">25 m</b>
       <input id="m2brush" type="range" min="0" max="120" step="5" value="25"></label>
-    <button id="m2copy">Copy</button>
+    <button id="m2pen">Pencil</button>
+    <button id="m2undo2">Undo</button>
+    <button id="m2copy">Copy both</button>
     <button id="m2close">Done</button>
   </div>
 </div>
@@ -5451,16 +5454,30 @@ function m2Draw(){
     g.fill();
     g.lineWidth=1.5; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke();
   }
+  if(m2Pen && m2PenPts.length>1){
+    g.strokeStyle='#37e06a'; g.lineWidth=4; g.setLineDash([]);
+    g.beginPath();
+    m2PenPts.forEach((q,i)=>{ const x=m2sx(q.x), y=m2sy(q.z); i?g.lineTo(x,y):g.moveTo(x,y); });
+    g.stroke();
+  }
   const info=document.getElementById('m2info');
   if(info) info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '
     +m2Vis.length+' handles';
 }
 function m2Hit(sx,sy){
   const pts=tleLines[m2Edge];
-  const r=9;                       // screen pixels, and the nearest one wins
+  /* Any point of the line, not only the ones drawn as handles. Handles are
+     thinned so the line is visible under them -- at full-lap zoom that is a
+     handful out of five hundred -- and hit-testing only those meant grabbing
+     the limit almost anywhere did nothing and panned the map instead, which
+     reads exactly like "I cannot move it". The whole line is grabbable now;
+     the handles are only there to show where the points are. */
+  const r=16;                      // screen pixels, and the nearest one wins
   let best=-1, bd=r*r;
-  for(const i of m2Vis){
-    const dx=m2sx(pts[i].x)-sx, dy=m2sy(pts[i].z)-sy;
+  for(let i=0;i<pts.length;i++){
+    const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
+    if(x<-40||y<-40||x>1e5||y>1e5) continue;
+    const dx=x-sx, dy=y-sy;
     const d=dx*dx+dy*dy;
     if(d<bd){ bd=d; best=i; }
   }
@@ -5486,6 +5503,117 @@ function m2Applied(p){
   if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
   m2Draw();
 }
+/* Drawing a limit rather than dragging one.
+
+   Holding command (or control) turns the pointer into a pencil: draw over the
+   corner the way you want the limit to run, let go, and the stretch of line
+   between where the stroke started and where it ended is replaced by what was
+   drawn. It is the tool this needed -- moving a corner point by point is a lot
+   of small drags, and a corner is a shape, not twelve positions. */
+let m2Pen=false, m2PenPts=[], m2Was=null;
+/* One step back. Both tools here rewrite a run of the line in one go, so the
+   thing you want after a bad one is the line as it was a moment ago, not a
+   point-by-point undo. */
+function m2Snapshot(){ m2Was={edge:m2Edge, pts:tleLines[m2Edge].map(v=>v.clone())}; }
+function m2Undo(){
+  if(!m2Was){ m2Note('nothing to undo'); return; }
+  tleLines[m2Was.edge]=m2Was.pts.map(v=>v.clone());
+  tleSave(); ttRemeasure();
+  if(limOn) limShow(true);
+  if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
+  m2Was=null; m2Note('undone'); m2Draw();
+}
+function m2Note(t){
+  const info=document.getElementById('m2info');
+  if(info){ info.textContent=t; setTimeout(()=>{ if(info.textContent===t) m2Draw(); },2600); }
+}
+function m2PenStart(x,y){ m2Snapshot(); m2Pen=true; m2PenPts=[{x:m2wx(x), z:m2wz(y)}]; }
+function m2PenMove(x,y){
+  if(!m2Pen) return;
+  const p={x:m2wx(x), z:m2wz(y)}, last=m2PenPts[m2PenPts.length-1];
+  if(Math.hypot(p.x-last.x, p.z-last.z)<1.0) return;    // a metre between samples
+  m2PenPts.push(p);
+  m2Draw();
+}
+function m2PenEnd(){
+  if(!m2Pen) return;
+  m2Pen=false;
+  const stroke=m2PenPts; m2PenPts=[];
+  if(stroke.length<3){ m2Draw(); return; }
+  const line=tleLines[m2Edge], n=line.length;
+  const nearest=q=>{ let bi=0, bd=Infinity;
+    line.forEach((p,i)=>{ const d=(p.x-q.x)**2+(p.z-q.z)**2; if(d<bd){bd=d;bi=i;} });
+    return bi; };
+  let a=nearest(stroke[0]), b=nearest(stroke[stroke.length-1]);
+  const strokeLen=(()=>{ let t=0;
+    for(let i=1;i<stroke.length;i++) t+=Math.hypot(stroke[i].x-stroke[i-1].x, stroke[i].z-stroke[i-1].z);
+    return t; })();
+  /* Forward from a to b the short way round, so drawing right to left replaces
+     the piece you drew over rather than the rest of the circuit. */
+  let fwd=((b-a)%n+n)%n;
+  if(fwd>n/2){ const t=a; a=b; b=t; stroke.reverse(); fwd=((b-a)%n+n)%n; }
+  // the drawn shape, at about the spacing the line already uses
+  /* How much line the stroke is about to replace, and a refusal if that is out
+     of all proportion to what was drawn. Both ends of a stroke are matched to
+     their nearest point on the line, so a stroke drawn away from the line -- or
+     one whose ends happen to sit near two distant parts of it -- can quietly
+     splice out half the circuit. A short scribble may not delete a kilometre. */
+  {
+    const line2=tleLines[m2Edge];
+    let span=0;
+    for(let k=0;k<fwd;k++){
+      const i=(a+k)%n, j=(a+k+1)%n;
+      span+=Math.hypot(line2[j].x-line2[i].x, line2[j].z-line2[i].z);
+    }
+    if(span > strokeLen*3+120){
+      m2Note('drawn too far from the line — nothing changed');
+      m2Draw(); return;
+    }
+  }
+  const step=Math.max(2, (function(){ let t=0;
+    for(let i=1;i<n;i++) t+=Math.hypot(line[i].x-line[i-1].x, line[i].z-line[i-1].z);
+    return t/n; })());
+  const out=[]; let acc=0;
+  out.push(stroke[0]);
+  for(let i=1;i<stroke.length;i++){
+    acc+=Math.hypot(stroke[i].x-stroke[i-1].x, stroke[i].z-stroke[i-1].z);
+    if(acc>=step){ out.push(stroke[i]); acc=0; }
+  }
+  out.push(stroke[stroke.length-1]);
+  for(const q of out){ const g=groundAt(q.x,q.z,1e9); q.y=g.hit?g.y:0; q.isVector3=false; }
+  const made=out.map(q=>new THREE.Vector3(q.x,q.y,q.z));
+  // splice: everything from a to b becomes the drawn shape
+  const rest=[];
+  for(let k=fwd; k<=n; k++) rest.push(line[(a+k)%n]);
+  tleLines[m2Edge]=made.concat(rest.slice(1));
+  tleSave();
+  for(const q of made) tlTouch(q.x,q.z);
+  if(limOn) limShow(true);
+  if(AI.n) aiBuildLines(AI._margin||AI_MARGIN);
+  m2Draw(); m2Copy(true);
+}
+/* Both lines, in the shape they were pasted in, ready to hand back. Copying one
+   edge at a time was the old behaviour and it meant remembering which one you
+   had changed and doing it twice. */
+function m2Copy(quiet){
+  /* gridToModel already hands back [x,z] rounded to the centimetre -- the same
+     pair you pasted in -- so this only has to collect them. */
+  const pack=li=>tleLines[li].map(v=>gridToModel(v));
+  const txt=JSON.stringify({inside:pack(0), outside:pack(1)});
+  const btn=document.getElementById('m2copy');
+  const msg=n=>{ const info=document.getElementById('m2info');
+    if(info){ info.dataset.was=info.dataset.was||info.textContent;
+      info.textContent=n; setTimeout(()=>m2Draw(),2600); } };
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(
+      ()=>msg('copied both lines · '+tleLines[0].length+' + '+tleLines[1].length
+              +' points · '+Math.round(txt.length/1024)+' KB'),
+      ()=>msg('copy blocked — it is in the console'));
+  else msg('copy blocked — it is in the console');
+  console.log('track limits (model coordinates, inside and outside):\n'+txt);
+  return txt;
+}
+let m2PenMode=false;
 function m2Init(){
   const c=m2El(); if(!c) return;
   const pos=e=>{ const b=c.getBoundingClientRect();
@@ -5493,12 +5621,15 @@ function m2Init(){
   c.addEventListener('pointerdown',e=>{
     window._m2downs=(window._m2downs||0)+1;
     const [x,y]=pos(e);
+    if(e.metaKey||e.ctrlKey||m2PenMode){ m2PenStart(x,y); c.setPointerCapture(e.pointerId); return; }
     m2Drag=m2Hit(x,y);
+    if(m2Drag>=0) m2Snapshot();
     if(m2Drag<0){ m2Pan=true; m2LX=x; m2LY=y; }
     c.setPointerCapture(e.pointerId); m2Draw();
   });
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
+    if(m2Pen){ m2PenMove(x,y); return; }
     if(m2Drag>=0){
       const line=tleLines[m2Edge], p=line[m2Drag];
       const nx=m2wx(x), nz=m2wz(y);
@@ -5530,6 +5661,7 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
+    if(m2Pen){ m2PenEnd(); return; }
     if(m2Drag>=0){
       window._m2last=m2Drag;
       const p=tleLines[m2Edge][m2Drag];
@@ -8568,6 +8700,31 @@ window.SIM={
   /* Walk the racing line and ask the track-limits test about every metre of it.
      The line is by definition on the circuit, so anything it calls a violation
      is the limits being wrong, not the driving. */
+  mapHandle(){
+    const c=m2El(), b=c.getBoundingClientRect(), pts=tleLines[m2Edge];
+    if(!m2Vis.length) return null;
+    let best=null, bd=Infinity;
+    for(const i of m2Vis){
+      const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
+      const d=(x-c.width/2)**2+(y-c.height/2)**2;
+      if(d<bd){ bd=d; best={i, sx:x*b.width/c.width+b.left, sy:y*b.height/c.height+b.top}; }
+    }
+    return best;
+  },
+  mapLinePoint(frac){
+    const c=m2El(), b=c.getBoundingClientRect(), pts=tleLines[m2Edge];
+    for(let k=0;k<pts.length;k++){
+      const i=Math.floor(frac*pts.length+k)%pts.length;
+      const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
+      if(x<40||y<40||x>c.width-40||y>c.height-40) continue;
+      return {i, hadHandle:m2Vis.includes(i),
+              sx:x*b.width/c.width+b.left, sy:y*b.height/c.height+b.top};
+    }
+    return null;
+  },
+  mapCopy(){ return m2Copy(true); },
+  mapUndo(){ m2Undo(); return tleLines[m2Edge].length; },
+  mapPoint(i){ const p=tleLines[m2Edge][i]; return p?{x:p.x,z:p.z}:null; },
   stationAt(s){ const st=tlSt[Math.round(s/TL_STEP)%tlSt.length];
       return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:st.dR,dL:st.dL}:null; },
   /* Grab the nearest handle to a world point and pull it out by so many metres,
