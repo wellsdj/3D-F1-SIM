@@ -424,7 +424,7 @@
   #customize-home:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.56)),url('home-customise.webp') center/cover}
 
   /* ---------------------------------------------------------- lap book */
-  #lapbook{position:fixed;inset:0;z-index:14;display:none;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px);
+  #lapbook{position:fixed;inset:0;z-index:14;display:none;padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px);
            color:var(--paper);font-family:var(--mono);background:linear-gradient(90deg,rgba(3,7,12,.98),rgba(3,7,12,.77)),url('home-hero.png') center/cover}
   #lapbook.open{display:block}
   #lapbook:before,#customizer:before{content:"";position:absolute;inset:20px;pointer-events:none;border:1px solid rgba(236,234,228,.1)}
@@ -441,9 +441,6 @@
   .lap-row .lap-label{display:grid;gap:5px;font-size:10px;letter-spacing:.14em;text-transform:uppercase}
   .lap-row .lap-label small{font-size:7px;letter-spacing:.08em;line-height:1.45;opacity:.48;text-transform:uppercase}
   .lap-row .lap-time{font-size:22px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
-  .lap-watch{font:inherit;font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:#f4f7fb;background:rgba(255,255,255,.07);border:1px solid rgba(236,234,228,.2);border-radius:3px;padding:8px 9px;cursor:pointer}
-  .lap-watch:hover:not(:disabled){background:rgba(255,176,32,.16);border-color:#ffb020}
-  .lap-watch:disabled{opacity:.35;cursor:default}
   #lapbook-empty{position:relative;z-index:1;margin-top:28px;width:min(100%,560px);padding:20px;border:1px dashed rgba(236,234,228,.2);
                  font-size:10px;letter-spacing:.13em;text-transform:uppercase;opacity:.55}
   .overlay-close{position:absolute;z-index:3;right:clamp(24px,4vw,64px);top:clamp(24px,4vw,58px);display:grid;place-items:center;
@@ -493,7 +490,7 @@
     #homecopy .spec{font-size:8px;gap:12px}#pick button{padding:14px 48px 13px 16px}#bestlapsbtn{padding:13px 16px}
     #home-settings{right:18px;top:18px}#home-settings .cog{width:52px;height:52px;font-size:24px}#home-settings .settings-menu{top:62px;width:min(285px,calc(100vw - 36px))}
     #customize-home{right:18px;bottom:18px;width:min(calc(100% - 36px),360px);min-height:78px;padding:18px 22px 16px;font-size:11px}#lapbook{padding:92px 22px 34px}#lapbook h2,#customizer h2{font-size:clamp(42px,14vw,66px)}
-    .lap-row{grid-template-columns:38px 1fr auto auto;gap:8px;padding:12px}.lap-row .lap-time{font-size:18px}.lap-watch{font-size:7px;padding:7px 6px}
+    .lap-row{grid-template-columns:38px 1fr auto;gap:10px;padding:12px}.lap-row .lap-time{font-size:18px}
     #customizer .custom-copy{padding:82px 22px 0}#customizer .custom-controls{left:18px;bottom:18px;width:calc(100% - 36px)}#customizer .custom-tag{display:none}
     #customizer-home{right:78px;top:18px;min-width:96px;padding:11px 12px;font-size:9px}}
 
@@ -4802,7 +4799,7 @@ function ttLine(){
   }
   TT.last=TT.t;
   const lapMeta=lapSnapshot();
-  recHistory(TT.t,lapMeta,TTREC.frames.slice());
+  recHistory(TT.t,lapMeta);
   const rec = TT.best===null || TT.t<TT.best;
   /* Also when there is nothing recorded yet, not only when the lap is quicker.
      A time set before laps were being recorded -- or kept after a recording was
@@ -4874,7 +4871,7 @@ const LAPS_KEY='f1sim.tt.history.spa22';
    everything else. A Catmull-Rom through the four samples around the moment
    has no such kinks. */
 const REC_HZ=30;
-const TTREC={ on:false, next:0, frames:[], best:null, history:[], playing:false, pt:0, i:0, replayLap:null };
+const TTREC={ on:false, next:0, frames:[], best:null, history:[], playing:false, pt:0, i:0 };
 let replayContext=null;
 
 /* A replay is more than a path through the circuit. Keep the exact session
@@ -4917,12 +4914,11 @@ function replayLiveryApply(value){
   return true;
 }
 function replayMetadataBegin(){
-  const record=TTREC.replayLap||TTREC.best;
-  if(!record) return;
+  if(!TTREC.best) return;
   replayContext={lighting:timeOfDay,livery:liverySnapshot()};
-  const c=record.conditions;
+  const c=TTREC.best.conditions;
   if(c&&TIME_OF_DAY[c.lighting]) applyTimeOfDay(c.lighting);
-  replayLiveryApply(record.livery);
+  replayLiveryApply(TTREC.best.livery);
 }
 function replayMetadataEnd(){
   if(!replayContext) return;
@@ -4948,13 +4944,12 @@ function recKeep(lapTime,meta){
   try{ localStorage.setItem(REPLAY_KEY, JSON.stringify(TTREC.best)); }catch(e){}
   replayBtn();
 }
-function recHistory(lapTime,meta,frames){
+function recHistory(lapTime,meta){
   if(!(lapTime>0)) return;
   const snap=meta||lapSnapshot();
   TTREC.history=[...(TTREC.history||[]),{t:+lapTime.toFixed(2),at:snap.capturedAt,
-    conditions:snap.conditions,livery:snap.livery,
-    f:Array.isArray(frames)&&frames.length>4?frames:null}]
-    .sort((a,b)=>a.t-b.t).slice(0,5);
+    conditions:snap.conditions,livery:snap.livery}]
+    .sort((a,b)=>a.t-b.t).slice(0,8);
   try{ localStorage.setItem(LAPS_KEY,JSON.stringify(TTREC.history)); }catch(e){}
 }
 function recLoad(){
@@ -4964,7 +4959,7 @@ function recLoad(){
        if(Array.isArray(h)) TTREC.history=h.filter(x=>x&&x.t>0).map(x=>({
          ...x,t:+x.t,conditions:x.conditions&&TIME_OF_DAY[x.conditions.lighting]?{
            lighting:x.conditions.lighting,label:TIME_OF_DAY[x.conditions.lighting].label,weather:'dry'}:null,
-         livery:liveryNormalise(x.livery),f:Array.isArray(x.f)&&x.f.length>4?x.f:null})).sort((a,b)=>a.t-b.t).slice(0,5); }catch(e){}
+         livery:liveryNormalise(x.livery)})).sort((a,b)=>a.t-b.t).slice(0,8); }catch(e){}
   if(!TTREC.history.length&&TTREC.best) TTREC.history=[{t:+TTREC.best.t,at:TTREC.best.capturedAt||0,
     conditions:TTREC.best.conditions,livery:TTREC.best.livery}];
   replayBtn();
@@ -4989,10 +4984,8 @@ function replayBtn(){
   b.style.display = TTREC.best ? '' : 'none';
   b.textContent = TTREC.playing ? 'Stop replay' : ('Watch best lap · '+ttFmt(TTREC.best?TTREC.best.t:0));
 }
-function replayStart(selected){
-  const record=selected||TTREC.best;
-  if(!record||!Array.isArray(record.f)||!record.f.length) return;
-  TTREC.replayLap=record;
+function replayStart(){
+  if(!TTREC.best||!TTREC.best.f.length) return;
   netLabel();
   /* Immediate, not held: the loading screen's ten-second minimum is there so
      the walk out to the car has room to breathe, and there is no walk out to a
@@ -5005,7 +4998,7 @@ function replayStart(selected){
      old shot and seed the station index from the first recorded position so
      TV mode cannot hold the last live frame while the replay is moving. */
   tvReset();
-  if(record.f[0]) tlStation(record.f[0][1],record.f[0][2]);
+  if(TTREC.best.f[0]) tlStation(TTREC.best.f[0][1],TTREC.best.f[0][2]);
   camMode=2; orbit=false; freeLook=false; updateStatus();
   TT.live=false;                       // the trial stands down while this runs
   netLabel();                          // and nobody can join a recording
@@ -5026,7 +5019,6 @@ function goHome(){
   engineAudio.mute();
   replayMetadataEnd();
   TTREC.playing=false;
-  TTREC.replayLap=null;
   TT.live=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   document.body.classList.remove('cinema');
@@ -5057,9 +5049,7 @@ function enterCircuit(){
 }
 /* One step of the replay, in place of drive(). */
 function replayStep(dt){
-  const record=TTREC.replayLap||TTREC.best;
-  if(!record||!record.f){replayStop();return;}
-  const f=record.f;
+  const f=TTREC.best.f;
   TTREC.pt+=dt;
   const end=f[f.length-1][0];
   if(TTREC.pt>=end){ replayStop(); return; }
@@ -7730,9 +7720,7 @@ function lapBookRefresh(){
      the deleted laps back off the disk. */
   if(!TTREC.best && !(TTREC.history&&TTREC.history.length)) recLoad();
   const list=document.getElementById('lapbook-list'), empty=document.getElementById('lapbook-empty'), play=document.getElementById('lapbook-replay');
-  const rawLaps=(TTREC.history&&TTREC.history.length?TTREC.history:(TTREC.best?[{t:TTREC.best.t,at:0}]:[]));
-  const laps=rawLaps.slice().sort((a,b)=>a.t-b.t).slice(0,5).map((lap,i)=>
-    i===0&&TTREC.best&&lap.t===TTREC.best.t&&!lap.f?{...lap,f:TTREC.best.f}:lap);
+  const laps=(TTREC.history&&TTREC.history.length?TTREC.history:(TTREC.best?[{t:TTREC.best.t,at:0}]:[])).slice(0,8);
   if(!list||!empty) return;
   list.innerHTML=laps.map((lap,i)=>'<div class="lap-row '+(i===0?'best':'')+'">'
     +'<span class="rank">'+String(i+1).padStart(2,'0')+'</span>'
@@ -7740,16 +7728,7 @@ function lapBookRefresh(){
     +'<small>'+lapDateLabel(lap.at||lap.capturedAt)+'</small>'
     +'<small>'+lapConditionsLabel(lap)+'</small>'
     +'<small>'+lapLiveryLabel(lap)+'</small></span>'
-    +'<b class="lap-time">'+ttFmt(lap.t)+'</b>'
-    +'<button class="lap-watch" data-lap-index="'+i+'" '+(Array.isArray(lap.f)?'':'disabled')+'>'
-    +(Array.isArray(lap.f)?'Watch ↗':'No replay')+'</button></div>').join('');
-  list.querySelectorAll('.lap-watch').forEach(btn=>btn.addEventListener('click',()=>{
-    const lap=laps[+btn.dataset.lapIndex];
-    if(!lap||!Array.isArray(lap.f)) return;
-    closeLapBook();
-    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading lap '+String(+btn.dataset.lapIndex+1),false);
-    setTimeout(()=>replayStart(lap),260);
-  }));
+    +'<b class="lap-time">'+ttFmt(lap.t)+'</b></div>').join('');
   empty.style.display=laps.length?'none':'';
   /* A disabled button that says nothing is a button that looks broken. A lap
      time set before laps were being recorded has no replay to show, so say
