@@ -3241,7 +3241,7 @@ let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
 /* Watch is deliberately a small race director, not a second physics game:
    the ten cars share the authored racing curve and only their pace, contact
    response and camera focus are simulated here. */
-let watchMode=false, watchModePending=false, watchClock=0, watchCam=2, watchCars=[];
+let watchMode=false, watchModePending=false, watchClock=0, watchCam=2, watchCars=[], watchPalette=[];
 const WATCH_CAM_NAMES=['Chase leader','Pack cam','TV director'];
 const WATCH_COLORS=[0xe53935,0x18a8e8,0xffa91f,0x9be21b,0xb05cff,0xf2f4f7,0xff5ca8,0x20d6b5,0xffe45b,0x8d96a8];
 const WATCH_TMP_P=new THREE.Vector3(), WATCH_TMP_T=new THREE.Vector3(), WATCH_TMP_N=new THREE.Vector3();
@@ -4699,7 +4699,7 @@ function watchCarCreate(i){
   const body=carObj.clone(true);
   body.position.copy(carObj.position); body.rotation.copy(carObj.rotation); body.scale.copy(carObj.scale);
   body.traverse(o=>{ o.visible=true; if(o.isMesh) o.frustumCulled=false; });
-  group.scale.copy(carGroup.scale); group.add(body); scene.add(group); watchTint(body,WATCH_COLORS[i%WATCH_COLORS.length]);
+  group.scale.copy(carGroup.scale); group.add(body); scene.add(group); watchTint(body,(watchPalette[i]||WATCH_COLORS[i%WATCH_COLORS.length]));
   return {group,body,s:-i*7.5,lap:0,speed:50+i*1.9,pace:53+i*1.9+Math.random()*5,
           lateral:(i%2?1:-1)*(1.15+((i/2)|0)*.08),incident:0,incidentKind:'',pos:new THREE.Vector3()};
 }
@@ -4787,6 +4787,7 @@ function watchStartAfterTrack(){
   if(!TT.curve) ttBuild();
   if(!TT.curve||!TT.len){ setTimeout(watchStartAfterTrack,120); return; }
   watchModePending=false; watchMode=true; watchClock=0; watchCam=2; watchCars=[];
+  watchPalette=WATCH_COLORS.slice().sort(()=>Math.random()-.5);
   for(let i=0;i<10;i++) watchCars.push(watchCarCreate(i));
   for(const c of watchCars) watchPlace(c);
   carGroup.visible=false; engineAudio.mute(); TT.live=false; TTREC.playing=false;
