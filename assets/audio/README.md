@@ -1,7 +1,10 @@
-# Engine loop
+# Apex GP audio set
 
-`engine-loop.mp3` is from the OpenGameArt “racing car engine sound loops” pack by domasx2:
+This game now uses the four original Apex GP audio files: `engine.mp3`,
+`coast.mp3`, `coast2.mp3`, and `brake.mp3`. They are loaded as persistent HTML
+audio loops and crossfaded using the same approach as Apex GP.
 
-https://lpc.opengameart.org/content/racing-car-engine-sound-loops
+Source repository: https://github.com/wellsdj/Apex-Gp-3D
 
-The source page marks the pack **CC0**. The included `loop_1_0.wav` was converted to MP3 for browser delivery with ffmpeg (192 kbps). Replace `engine-loop.mp3` with a longer seamless sports-car loop if you prefer; no code changes are required.
+The Apex GP repository does not declare a public licence for these assets;
+they are being reused here as the project owner's existing files.

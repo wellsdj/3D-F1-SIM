@@ -771,9 +771,10 @@ const ASSETS = {
   rock:  "rock.jpg",
   car:   "car.glb",
   podium:"podium_art.glb",
-  engine:"assets/audio/engine-loop.mp3",
-  snd:   { accel:"accel.mp3", idle:"idle.mp3",
-           brake:"brake.mp3", coast:"coast.mp3" }
+  engine:"assets/audio/engine.mp3",
+  coast:"assets/audio/coast.mp3",
+  coast2:"assets/audio/coast2.mp3",
+  brake:"assets/audio/brake.mp3"
 };
 </script>
 <script>
@@ -4303,7 +4304,8 @@ function drawCornerMap(){
 }
 
 /* ----------------------------------------------------------------- audio */
-const engineAudio=new EngineAudio({src:ASSETS.engine});
+const engineAudio=new EngineAudio({engine:ASSETS.engine,coast:ASSETS.coast,
+  coast2:ASSETS.coast2,brake:ASSETS.brake});
 function unlockAudio(){ engineAudio.unlock(); }
 addEventListener('pointerdown',unlockAudio,{passive:true});
 
@@ -6850,7 +6852,8 @@ function presentCar(dt, thr, brk, gridded, yawRate){
   /* One continuously-running loop. RPM and gain are smoothed inside the
      audio module, so throttle/brake changes never restart or click the sample. */
   const wSpd=carState.speed;
-  engineAudio.update(dt,{speed:wSpd,throttle:thr?1:0,active:true});
+  engineAudio.update(dt,{speed:wSpd,throttle:thr?1:0,brake:brk?1:0,
+    curvature:Math.abs(trackK(carState.s)),active:true});
 
   kmhEl.textContent = Math.round(wSpd*3.6);
 }

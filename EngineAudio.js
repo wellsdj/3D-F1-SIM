@@ -1,144 +1,85 @@
-/* A deliberately small one-loop racing engine. Keep the tuning in one place
-   so the sound can be adjusted without touching the driving model. */
+/* Apex GP's original racing mix: persistent engine/coast/brake loops with
+   smooth volume crossfades. Keep all tuning here so the sound can be adjusted
+   without touching the driving model. */
 class EngineAudio {
-  static tuning = {
-    idleRPM: 1200,
-    maxRPM: 10500,
-    shiftUpRPM: 9650,
-    shiftDownRPM: 3900,
-    minimumPlaybackRate: 0.72,
-    maximumPlaybackRate: 1.48,
-    throttleVolumeBoost: 0.18,
-    baseVolume: 0.46,
-    rpmVolumeBoost: 0.18,
-    rpmSmoothing: 8.5,
-    shiftSpeed: 18,
-    playbackSmoothing: 0.055,
-    volumeSmoothing: 0.075,
-    v10HarmonicVolume: 0.045,
-    gearSpeedRangesKph: [
-      [0, 55], [34, 96], [64, 142], [104, 194], [148, 252], [188, 360]
-    ]
+  static tuning={
+    engineVolume:0.90, idleVolume:0.35, coastVolume:0.75, brakeVolume:0.85,
+    idleSpeedKph:10, lowSpeedKph:70, playbackIdle:0.60,
+    playbackMin:0.85, playbackMax:1.50, speedForMaxKph:160,
+    fadeInRate:2, fadeOutRate:3, lowSpeedFadeInRate:12,
+    brakeLeadSeconds:0.50, coastCornerThreshold:0.038
   };
 
-  constructor({src, tuning={}}={}) {
-    this.srcUrl=src;
+  constructor({engine,coast,coast2,brake,tuning={}}={}){
     this.tuning={...EngineAudio.tuning,...tuning};
-    this.gears=this.tuning.gearSpeedRangesKph.map(r=>r.slice());
-    this.context=null; this.buffer=null; this.source=null;
-    this.gain=null; this.filter=null; this.synthGain=null; this.oscillators=[]; this.compressor=null; this.readyPromise=null;
-    this.rpm=this.tuning.idleRPM; this.gear=1; this.active=false;
-    this.throttle=0; this.speedKph=0; this.shiftDrop=0;
+    this.engine=new Audio(engine); this.engine.loop=true; this.engine.volume=0;
+    this.coast=new Audio(coast); this.coast.loop=true; this.coast.volume=0;
+    this.coast2=new Audio(coast2); this.coast2.loop=true; this.coast2.volume=0;
+    this.brake=new Audio(brake); this.brake.loop=true; this.brake.volume=0;
+    this.activeCoast=this.coast; this.started=false; this.active=false;
+    this.target=''; this.coastTarget=''; this.brakeLead=0;
+    this.prevEngine=false; this.prevCoast=false;
+    this.loops=[this.engine,this.coast,this.coast2,this.brake];
   }
 
-  async unlock(){
-    const AC=window.AudioContext||window.webkitAudioContext;
-    if(!AC) return false;
-    if(!this.context) this.context=new AC();
-    if(this.context.state==='suspended') await this.context.resume();
-    if(!this.readyPromise) this.readyPromise=this.load();
-    return this.readyPromise;
-  }
-
-  async load(){
-    try{
-      const response=await fetch(this.srcUrl);
-      if(!response.ok) throw new Error('engine loop '+response.status);
-      this.buffer=await this.context.decodeAudioData(await response.arrayBuffer());
-      this.start();
-      return true;
-    }catch(error){
-      console.warn('EngineAudio: unable to load '+this.srcUrl,error);
-      return false;
+  unlock(){
+    if(!this.started){
+      this.started=true;
+      this.loops.forEach(s=>s.play().catch(()=>{}));
     }
+    return Promise.resolve(true);
   }
-
-  start(){
-    if(!this.context||!this.buffer||this.source) return;
-    this.source=this.context.createBufferSource();
-    this.source.buffer=this.buffer; this.source.loop=true;
-    this.filter=this.context.createBiquadFilter();
-    this.filter.type='lowpass'; this.filter.frequency.value=3200; this.filter.Q.value=.35;
-    this.gain=this.context.createGain(); this.gain.gain.value=0;
-    this.compressor=this.context.createDynamicsCompressor();
-    this.compressor.threshold.value=-12; this.compressor.knee.value=18;
-    this.compressor.ratio.value=4; this.compressor.attack.value=.008; this.compressor.release.value=.12;
-    this.synthGain=this.context.createGain(); this.synthGain.gain.value=0;
-    /* A very quiet pair of harmonics gives the short CC0 loop the sharp,
-       high-rev V10 edge without adding another sample or changing physics. */
-    [1,2].forEach((mult,index)=>{
-      const osc=this.context.createOscillator();
-      osc.type=index?'square':'sawtooth'; osc.frequency.value=100;
-      osc.connect(this.synthGain); osc.start(); this.oscillators.push({osc,mult});
-    });
-    this.source.connect(this.filter); this.filter.connect(this.gain);
-    this.gain.connect(this.compressor); this.synthGain.connect(this.compressor);
-    this.compressor.connect(this.context.destination);
-    this.source.start();
-  }
-
-  setActive(active){ this.active=!!active; }
 
   mute(){
     this.active=false;
-    if(this.gain&&this.context){
-      const now=this.context.currentTime;
-      this.gain.gain.cancelScheduledValues(now);
-      this.gain.gain.setTargetAtTime(0,now,this.tuning.volumeSmoothing);
-      if(this.synthGain) this.synthGain.gain.setTargetAtTime(0,now,this.tuning.volumeSmoothing);
+    this.loops.forEach(s=>{s.volume=0;});
+  }
+
+  update(dt,{speed=0,throttle=0,brake=0,curvature=0,active=true}={}){
+    this.active=!!active;
+    if(!this.active){this.mute();return;}
+    this.unlock();
+    const t=this.tuning, kph=Math.max(0,speed*3.6);
+    const moving=kph>0.4, gas=!!throttle, braking=!!brake;
+    const idleZone=kph<t.idleSpeedKph, slowZone=kph<30&&!gas;
+    let want='';
+    if(moving&&!slowZone&&!idleZone){
+      if(braking) want='brake';
+      else if(gas) want='engine';
+      else want='coast';
+    }else if(gas) want=idleZone?'idle':'engine';
+
+    if(want==='brake'&&this.target!=='brake'){
+      this.target='brake'; this.brakeLead=t.brakeLeadSeconds;
     }
-  }
+    if(want!=='brake'){this.target=want;this.brakeLead=0;}
+    let current=want;
+    if(this.target==='brake'&&this.brakeLead>0){current='coast';this.brakeLead-=dt;}
 
-  shift(direction){
-    this.gear=Math.max(1,Math.min(this.gears.length,this.gear+direction));
-    /* A real upshift drops revs before the next ratio starts pulling them up. */
-    this.shiftDrop=Math.max(this.shiftDrop,.28);
-  }
+    const lowSpeedEngine=(want==='engine'||want==='idle')&&kph<t.lowSpeedKph;
+    if(want==='engine'||want==='idle') current=want;
+    const engineNow=current==='engine'||current==='idle';
+    if(engineNow&&!this.prevEngine&&kph<t.lowSpeedKph)this.engine.currentTime=0;
+    this.prevEngine=engineNow;
 
-  targetRPM(){
-    const range=this.gears[this.gear-1]||this.gears[0];
-    const span=Math.max(1,range[1]-range[0]);
-    const ratio=Math.max(0,Math.min(1,(this.speedKph-range[0])/span));
-    const throttleRise=this.throttle*520;
-    return Math.max(this.tuning.idleRPM, this.tuning.idleRPM+
-      ratio*(this.tuning.maxRPM-this.tuning.idleRPM)+throttleRise);
-  }
-
-  update(dt,{speed=0,throttle=0,active=true}={}){
-    this.setActive(active);
-    this.speedKph=Math.max(0,speed*3.6);
-    this.throttle=Math.max(0,Math.min(1,throttle?1:0));
-
-    const currentTarget=this.targetRPM();
-    const range=this.gears[this.gear-1]||this.gears[0];
-    const nextUp=this.gear<this.gears.length && currentTarget>=this.tuning.shiftUpRPM && this.speedKph>=range[1]-2;
-    const nextDown=this.gear>1 && this.speedKph<range[0]-7 && currentTarget<=this.tuning.shiftDownRPM;
-    if(nextUp) this.shift(1);
-    else if(nextDown) this.shift(-1);
-
-    let target=this.targetRPM();
-    if(this.shiftDrop>0){
-      target*=1-this.shiftDrop*.42;
-      this.shiftDrop=Math.max(0,this.shiftDrop-dt*this.tuning.shiftSpeed);
+    const coastNow=current==='coast';
+    if(coastNow&&!this.prevCoast){
+      const next=Math.abs(curvature)>t.coastCornerThreshold?this.coast:this.coast2;
+      const other=next===this.coast?this.coast2:this.coast;
+      other.volume=0; this.activeCoast=next; this.activeCoast.currentTime=0;
     }
-    const rpmK=1-Math.exp(-this.tuning.rpmSmoothing*Math.max(dt,0));
-    this.rpm+=(target-this.rpm)*rpmK;
-    this.rpm=Math.max(this.tuning.idleRPM,Math.min(this.tuning.maxRPM,this.rpm));
+    this.prevCoast=coastNow;
 
-    if(!this.gain||!this.source||!this.context) return;
-    const now=this.context.currentTime;
-    const norm=Math.max(0,Math.min(1,(this.rpm-this.tuning.idleRPM)/(this.tuning.maxRPM-this.tuning.idleRPM)));
-    const rate=this.tuning.minimumPlaybackRate+
-      (this.tuning.maximumPlaybackRate-this.tuning.minimumPlaybackRate)*norm;
-    const volume=this.active ? this.tuning.baseVolume+
-      this.throttle*this.tuning.throttleVolumeBoost+norm*this.tuning.rpmVolumeBoost : 0;
-    const harmonicGain=this.active ? this.tuning.v10HarmonicVolume*(0.45+norm*0.9) : 0;
-    const cutoff=1100+norm*6000;
-    this.source.playbackRate.setTargetAtTime(rate,now,this.tuning.playbackSmoothing);
-    this.gain.gain.setTargetAtTime(volume,now,this.tuning.volumeSmoothing);
-    this.synthGain.gain.setTargetAtTime(harmonicGain,now,this.tuning.volumeSmoothing);
-    const firingHz=Math.max(80,this.rpm/12);
-    this.oscillators.forEach(({osc,mult})=>osc.frequency.setTargetAtTime(firingHz*mult,now,.045));
-    this.filter.frequency.setTargetAtTime(cutoff,now,.08);
+    const targetEngine=current==='engine'?t.engineVolume:current==='idle'?t.idleVolume:0;
+    const targetCoast=current==='coast'?t.coastVolume:0;
+    const targetBrake=current==='brake'?t.brakeVolume:0;
+    const inRate=lowSpeedEngine?dt*t.lowSpeedFadeInRate:dt*t.fadeInRate;
+    this.engine.volume=targetEngine>this.engine.volume?Math.min(targetEngine,this.engine.volume+inRate):Math.max(targetEngine,this.engine.volume-dt*t.fadeOutRate);
+    this.activeCoast.volume=targetCoast>this.activeCoast.volume?Math.min(targetCoast,this.activeCoast.volume+dt*t.fadeInRate):Math.max(targetCoast,this.activeCoast.volume-dt*t.fadeOutRate);
+    const inactive=this.activeCoast===this.coast?this.coast2:this.coast;
+    inactive.volume=Math.max(0,inactive.volume-dt*t.fadeOutRate);
+    this.brake.volume=targetBrake>this.brake.volume?Math.min(targetBrake,this.brake.volume+dt*t.fadeInRate):Math.max(targetBrake,this.brake.volume-dt*t.fadeOutRate);
+    const norm=Math.max(0,Math.min(1,kph/t.speedForMaxKph));
+    this.engine.playbackRate=idleZone?t.playbackIdle:t.playbackMin+(t.playbackMax-t.playbackMin)*norm;
   }
 }
