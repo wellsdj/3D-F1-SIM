@@ -698,7 +698,7 @@
 <button id="joybtn">Connect Joystick</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
-  <div id="m2hint">Drag the limit to move it &middot; hold &#8984; or click Pencil and draw a corner
+  <div id="m2hint">Drag any dot on either line to move it &middot; hold &#8984; or click Pencil and draw a corner
     &middot; drag the background to pan &middot; scroll to zoom</div>
   <div id="m2bar">
     <button id="m2in">Inside</button>
@@ -5436,13 +5436,23 @@ function m2Draw(){
     }
     g.stroke();
   }
-  // the other limit line, dim
+  // the other limit line, dim -- but with its own dots, because it is grabbable
   const other=tleLines[1-m2Edge];
   if(other.length>1){
-    g.strokeStyle='rgba(120,200,255,.28)'; g.lineWidth=2;
+    g.strokeStyle='rgba(120,200,255,.5)'; g.lineWidth=3;
     g.beginPath();
     other.forEach((p,i)=>{ const x=m2sx(p.x), y=m2sy(p.z); i?g.lineTo(x,y):g.moveTo(x,y); });
     g.closePath(); g.stroke();
+    let lx=-1e9, ly=-1e9;
+    for(const p of other){
+      const x=m2sx(p.x), y=m2sy(p.z);
+      if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
+      if(Math.hypot(x-lx,y-ly)<11) continue;
+      lx=x; ly=y;
+      g.beginPath(); g.arc(x,y,4,0,Math.PI*2);
+      g.fillStyle='rgba(120,200,255,.75)'; g.fill();
+      g.lineWidth=1.2; g.strokeStyle='rgba(0,0,0,.55)'; g.stroke();
+    }
   }
   // the line being edited: red, thick, closed
   const pts=tleLines[m2Edge];
@@ -5471,7 +5481,7 @@ function m2Draw(){
   for(let i=0;i<pts.length;i++){
     const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
     if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
-    if(i!==m2Drag && Math.hypot(x-lx,y-ly)<14) continue;
+    if(i!==m2Drag && Math.hypot(x-lx,y-ly)<11) continue;
     lx=x; ly=y; m2Vis.push(i);
     g.beginPath(); g.arc(x,y,i===m2Drag?r*1.7:r,0,Math.PI*2);
     g.fillStyle=i===m2Drag?'#fff':'#ffd21e';
@@ -5488,7 +5498,30 @@ function m2Draw(){
   if(info) info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '
     +m2Vis.length+' handles';
 }
+/* Both lines, always. Only the selected edge used to be hit-tested, so clicking
+   the other one -- which is drawn right there on the screen, with dots on it --
+   found nothing, fell through to the pan, and moved the camera instead. That is
+   the whole of "it moves the camera instead of the line". Whichever line you
+   clicked becomes the one you are editing. */
 function m2Hit(sx,sy){
+  let bl=-1, bi=-1, bd=60*60;
+  for(let li=0; li<tleLines.length; li++){
+    const pts=tleLines[li];
+    for(let i=0;i<pts.length;i++){
+      const x=m2sx(pts[i].x)-sx, y=m2sy(pts[i].z)-sy;
+      const d=x*x+y*y;
+      if(d<bd){ bd=d; bi=i; bl=li; }
+    }
+  }
+  if(bl>=0 && bl!==m2Edge){ m2Edge=bl; m2EdgeButtons(); }
+  return bi;
+}
+function m2EdgeButtons(){
+  const a=document.getElementById('m2in'), b=document.getElementById('m2out');
+  if(a) a.classList.toggle('on', m2Edge===0);
+  if(b) b.classList.toggle('on', m2Edge===1);
+}
+function m2HitOld(sx,sy){
   const pts=tleLines[m2Edge];
   /* Any point of the line, not only the ones drawn as handles. Handles are
      thinned so the line is visible under them -- at full-lap zoom that is a
@@ -5516,8 +5549,8 @@ function m2Applied(p){
   const brush=Math.max(30, m2Brush*2.5);
   tlTouch(p.x,p.z);
   if(m2Brush>0){                        // a brush moved a stretch, so redo the stretch
-    const line=tleLines[m2Edge], n=line.length;
-    for(let k=-n/2;k<n/2;k+=3){
+    const line=tleLines[m2Edge], n=line.length, h=n>>1;
+    for(let k=-h;k<=h;k+=3){
       const q=line[((m2Drag+k)%n+n)%n];
       if(!q) continue;
       if(Math.hypot(q.x-p.x,q.z-p.z)<=brush) tlTouch(q.x,q.z);
@@ -5665,11 +5698,17 @@ function m2Init(){
       const dx=nx-p.x, dz=nz-p.z;
       const R=e.shiftKey?0:m2Brush;
       if(R>0){
-        const n=line.length;
-        for(let k=-n/2;k<n/2;k++){
+        /* Integer bounds. n/2 on an odd-length line is a half, which makes every
+           index in this loop a half, which makes line[i] undefined -- and the
+           throw came out mid-drag, so the point stopped following the pointer
+           the moment the brush was on. Which is most of what "I still cannot
+           move it" was. */
+        const n=line.length, h=n>>1;
+        for(let k=-h;k<=h;k++){
           const i=((m2Drag+k)%n+n)%n;
           if(i===m2Drag) continue;
           const q=line[i];
+          if(!q) continue;
           const d=Math.hypot(q.x-p.x, q.z-p.z);
           if(d>R) continue;
           const w=0.5+0.5*Math.cos(Math.PI*d/R);      // 1 at the middle, 0 at the edge
@@ -6580,12 +6619,8 @@ document.getElementById('netinput').addEventListener('keydown',e=>{
   if(e.key==='Enter') netWatch(e.currentTarget.value);
   e.stopPropagation();                       // typing a code must not drive the car
 });
-document.getElementById('m2in').onclick=()=>{ m2Edge=0;
-  document.getElementById('m2in').classList.add('on');
-  document.getElementById('m2out').classList.remove('on'); m2Fit(); m2Draw(); };
-document.getElementById('m2out').onclick=()=>{ m2Edge=1;
-  document.getElementById('m2out').classList.add('on');
-  document.getElementById('m2in').classList.remove('on'); m2Fit(); m2Draw(); };
+document.getElementById('m2in').onclick=()=>{ m2Edge=0; m2EdgeButtons(); m2Draw(); };
+document.getElementById('m2out').onclick=()=>{ m2Edge=1; m2EdgeButtons(); m2Draw(); };
 document.getElementById('m2copy').onclick=e=>{
   const t=JSON.stringify(tleLines[m2Edge].map(v=>gridToModel(v)));
   console.log('track limit line (model coordinates):\n'+t);
@@ -8755,6 +8790,24 @@ window.SIM={
   mapCopy(){ return m2Copy(true); },
   mapUndo(){ m2Undo(); return tleLines[m2Edge].length; },
   mapHover(){ return m2Hover; },
+  /* Click at a world position and report which line got picked up and how far it
+     moved -- the real handlers, driven the way a mouse drives them. */
+  mapClickAt(x,z,dx,dz){
+    const c=m2El(), b=c.getBoundingClientRect();
+    const toS=(wx,wz)=>[ (wx*m2Sc+m2X)*b.width/c.width+b.left,
+                         (wz*m2Sc+m2Y)*b.height/c.height+b.top ];
+    const [sx,sy]=toS(x,z), [ex,ey]=toS(x+dx,z+dz);
+    const edgeBefore=m2Edge, panBefore=[m2X,m2Y];
+    c.dispatchEvent(new PointerEvent('pointerdown',{clientX:sx,clientY:sy,bubbles:true,pointerId:1}));
+    const grabbed=m2Drag, edgeNow=m2Edge;
+    const p0=grabbed>=0?{x:tleLines[m2Edge][grabbed].x,z:tleLines[m2Edge][grabbed].z}:null;
+    c.dispatchEvent(new PointerEvent('pointermove',{clientX:ex,clientY:ey,bubbles:true,pointerId:1}));
+    c.dispatchEvent(new PointerEvent('pointerup',{clientX:ex,clientY:ey,bubbles:true,pointerId:1}));
+    const p1=grabbed>=0?{x:tleLines[edgeNow][grabbed].x,z:tleLines[edgeNow][grabbed].z}:null;
+    return { grabbed, edgeBefore, edgeNow,
+             moved: p0&&p1?+Math.hypot(p1.x-p0.x,p1.z-p0.z).toFixed(2):0,
+             cameraMoved:+Math.hypot(m2X-panBefore[0], m2Y-panBefore[1]).toFixed(1) };
+  },
   mapPoint(i){ const p=tleLines[m2Edge][i]; return p?{x:p.x,z:p.z}:null; },
   stationAt(s){ const st=tlSt[Math.round(s/TL_STEP)%tlSt.length];
       return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:st.dR,dL:st.dL}:null; },
