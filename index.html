@@ -7036,7 +7036,10 @@ function presentCar(dt, thr, brk, gridded, yawRate){
      audio module, so throttle/brake changes never restart or click the sample. */
   const wSpd=carState.speed;
   engineAudio.update(dt,{speed:wSpd,throttle:thr?1:0,brake:brk?1:0,
-    curvature:Math.abs(trackK(carState.s)),active:true});
+    /* Imported Spa is free-roam, so it has no procedural curvature array.
+       The engine mix only uses this to choose the coast loop; a neutral value
+       keeps the loading handoff from calling track-space code before a lap. */
+    curvature:FREEROAM?0:Math.abs(trackK(carState.s)),active:true});
 
   kmhEl.textContent = Math.round(wSpd*3.6);
 }
