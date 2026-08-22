@@ -7359,16 +7359,17 @@ function frame(now){
      the whole lap. */
   if(TT.live && TT.drone>TT_NEAR && TT.rad){
     const k=clamp((TT_WIDE-(TT.drone-TT_NEAR))/TT_WIDE,0,1);
-    /* Closer than it was: at 1.45 radii the circuit sat in the middle of a lot
-       of empty valley. This fills the frame with the lap. */
-    const ang=TT.ang0+0.5*k, R=TT.rad*(1.02-0.14*k);
+    /* Keep the whole lap in the establishing shot, but hold a tighter lens so
+       the outer model boundary never becomes a visible frame edge. The old
+       44° view made the circuit look like a map floating in empty space. */
+    const ang=TT.ang0+0.5*k, R=TT.rad*(0.98-0.12*k);
     if(scene.fog){ if(TT._fog===undefined) TT._fog=scene.fog.density;
                    scene.fog.density=TT._fog*0.18; }
     camera.position.set(TT.cx+Math.sin(ang)*R, TT.cy+TT.rad*(0.66-0.09*k),
                         TT.cz+Math.cos(ang)*R);
     camera.up.set(0,1,0);
     camera.lookAt(TT.cx, TT.cy, TT.cz);
-    camera.fov=44;
+    camera.fov=38;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
@@ -7381,13 +7382,16 @@ function frame(now){
     if(scene.fog && TT._fog!==undefined){ scene.fog.density=TT._fog; TT._fog=undefined; }
     const k=clamp((TT_NEAR-TT.drone)/TT_NEAR,0,1);
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
-    const out=150-k*38, up=54-k*17;
+    /* Move decisively toward the grid while keeping the lens compressed. The
+       previous 150→112 m move paired with a 42→48° widening lens, which
+       pulled the track edge into the corners just as the shot approached. */
+    const out=128-k*48, up=48-k*16;
     const gx=carGroup.position.x, gz=carGroup.position.z;
     const base=carGroup.position.y-RIDE;
     camera.position.set(gx+fx*out, base+up, gz+fz*out);
     camera.up.set(0,1,0);
     camera.lookAt(gx+fx*24, base+3, gz+fz*24);
-    camera.fov=42+k*6;
+    camera.fov=38+k*3;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     skyDome.position.copy(camera.position);
