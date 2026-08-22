@@ -4392,6 +4392,7 @@ addEventListener('keydown',e=>{
       carState.wx=g.x; carState.wz=g.z; carState.hdg=Math.atan2(g.dx,g.dz);
       carState.speed=0; PLAYER.steerIn=0; PLAYER.steerAng=0;
       PLAYER.groundY=g.y+RIDE; clearDebris();
+      resetCameraToFront();
       ttStart(false);                 // restart at the countdown, not the drone shots
     } else resetToTrack();
   }
@@ -4477,6 +4478,13 @@ let freeLook=false;
 let fYaw=0, fPitch=0;
 const F_YAW=1.15, F_PITCH_UP=0.42, F_PITCH_DN=0.55;   // rad
 function resetFree(){ fYaw=0; fPitch=0; }
+function resetCameraToFront(){
+  camMode=0;
+  orbit=false;
+  freeLook=false;
+  resetFree();
+  updateStatus();
+}
 
 let trackRoot=null;
 
@@ -6483,6 +6491,7 @@ function resetToTrack(){
   carState.n=0; carState.psi=0; carState.speed=0;
   PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.lockF=1;
   pitch=0; roll=0; headLean=0; spdPrev=0;
+  resetCameraToFront();
   clearDebris();
 }
 
