@@ -759,6 +759,7 @@
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="meshopt_decoder.js"></script>
 <script src="GLTFLoader.js"></script>
+<script src="EngineAudio.js"></script>
 <script>
 const ASSETS = {
   geoManifest: null,                       // filled by boot() from trees.json
@@ -770,6 +771,7 @@ const ASSETS = {
   rock:  "rock.jpg",
   car:   "car.glb",
   podium:"podium_art.glb",
+  engine:"assets/audio/engine-loop.mp3",
   snd:   { accel:"accel.mp3", idle:"idle.mp3",
            brake:"brake.mp3", coast:"coast.mp3" }
 };
@@ -4301,72 +4303,9 @@ function drawCornerMap(){
 }
 
 /* ----------------------------------------------------------------- audio */
-/* Four looping engine beds crossfaded on a 0.1 s ramp. Each state gets a
-   fresh source so it can be started at an offset -- a looping BufferSource
-   cannot be seeked once running. */
-const FADE=0.10;
-let actx=null, sbuf={}, sndCur=null, sndSrc=null, sndGain=null, audioOn=false;
-const sbufTrim={};                 // per-bed loop points, see trimPoints()
-
-/* Every one of these beds carries dead air at the head -- 148 ms on accel,
-   128 on brake, 127 on coast -- partly the encoder's own delay and partly
-   real silence in the source. Looped raw that is an audible dropout on every
-   pass, which on the 3.9 s coast bed lands every 3.9 seconds.
-
-   Rather than re-encode the assets, find the first and last samples that
-   actually carry signal and hand those to the source as loopStart/loopEnd,
-   so the loop cycles the sounding part and never replays the gap. The trim is
-   capped so a genuinely quiet intro can never be cut short. */
-function trimPoints(buf){
-  const d=buf.getChannelData(0), n=d.length, sr=buf.sampleRate;
-  const thr=0.004, cap=Math.round(sr*0.40);
-  let a=0; while(a<n && a<cap && Math.abs(d[a])<thr) a++;
-  let b=n-1, lim=n-1-cap; while(b>a && b>lim && Math.abs(d[b])<thr) b--;
-  const start=a/sr, end=(b+1)/sr;
-  return (end-start>0.25) ? {start,end,len:end-start}
-                          : {start:0, end:buf.duration, len:buf.duration};
-}
-
-function initAudio(){
-  if(actx) return;
-  const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC) return;
-  actx=new AC();
-  const ks=['accel','idle','brake','coast'];
-  let done=0;
-  ks.forEach(k=>{
-    const fin=()=>{ if(++done===ks.length) audioOn=true; };
-    fetch(ASSETS.snd[k]).then(r=>r.arrayBuffer())
-      .then(ab=>actx.decodeAudioData(ab, b=>{ sbuf[k]=b; sbufTrim[k]=trimPoints(b); fin(); }, fin))
-      .catch(fin);
-  });
-}
-function unlockAudio(){
-  initAudio();
-  if(actx && actx.state==='suspended') actx.resume();
-}
-function setSound(name, offset){
-  if(!audioOn || !actx || !sbuf[name] || sndCur===name) return;
-  const now=actx.currentTime;
-  if(sndGain){                       // fade the outgoing bed out, then drop it
-    const g=sndGain, old=sndSrc;
-    g.gain.cancelScheduledValues(now);
-    g.gain.setValueAtTime(g.gain.value, now);
-    g.gain.linearRampToValueAtTime(0, now+FADE);
-    try{ old.stop(now+FADE+0.02); }catch(e){}
-  }
-  const src=actx.createBufferSource();
-  src.buffer=sbuf[name]; src.loop=true;
-  // loop only the sounding part, skipping the dead air at the head
-  const tr=sbufTrim[name]||{start:0,end:sbuf[name].duration,len:sbuf[name].duration};
-  src.loopStart=tr.start; src.loopEnd=tr.end;
-  const g=actx.createGain();
-  g.gain.setValueAtTime(0, now);
-  g.gain.linearRampToValueAtTime(1, now+FADE);
-  src.connect(g); g.connect(actx.destination);
-  src.start(now, tr.start + ((offset||0)%tr.len));
-  sndCur=name; sndSrc=src; sndGain=g;
-}
+const engineAudio=new EngineAudio({src:ASSETS.engine});
+function unlockAudio(){ engineAudio.unlock(); }
+addEventListener('pointerdown',unlockAudio,{passive:true});
 
 /* --------------------------------------------------------------- controls */
 const keys=Object.create(null);
@@ -5075,6 +5014,7 @@ function replayStart(){
    and the entry button -- which startTrack hides on the way in -- comes back,
    or the home screen would have no way off it. */
 function goHome(){
+  engineAudio.mute();
   replayMetadataEnd();
   TTREC.playing=false;
   TT.live=false;
@@ -6907,21 +6847,10 @@ function presentCar(dt, thr, brk, gridded, yawRate){
   if(spin>6.283185307) spin-=6.283185307;
   turnWheels(wheels, wingL, wingR, spin, PLAYER.steerAng);
 
-  /* engine bed: idle when stopped, otherwise brake > throttle > coast.
-     Lifting off the brake back onto the throttle while still rolling means
-     the engine is already spinning, so pick the accel loop up halfway in
-     rather than replaying the rev sweep from nothing. */
-  // on the grid the car is stationary but the engine is not: holding W there
-  // has to rev it, or sitting on the lights is silent
-  const wSpd = carState.speed, wThr = thr?1:0, wBrk = brk?1:0;
-  const st = gridded ? (thr?'accel':'idle')
-           : wSpd<0.6 ? 'idle' : wBrk ? 'brake' : wThr ? 'accel' : 'coast';
-  if(st!==sndCur){
-    // resuming onto the throttle mid-clip: half way through the sounding part,
-    // not half way through the file, which would land inside the dead air
-    const rolling = (st==='accel' && sndCur==='brake' && wSpd>0.6);
-    setSound(st, rolling && sbufTrim.accel ? sbufTrim.accel.len*0.5 : 0);
-  }
+  /* One continuously-running loop. RPM and gain are smoothed inside the
+     audio module, so throttle/brake changes never restart or click the sample. */
+  const wSpd=carState.speed;
+  engineAudio.update(dt,{speed:wSpd,throttle:thr?1:0,active:true});
 
   kmhEl.textContent = Math.round(wSpd*3.6);
 }
