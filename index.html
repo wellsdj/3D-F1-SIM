@@ -389,6 +389,7 @@
      was quietly swallowing. */
   #gridcard{pointer-events:none}
   #gridcard.show{pointer-events:auto}
+  body.mapopen #gridcard,body.mapopen #tt,body.mapopen #lights{opacity:0;pointer-events:none}
   /* lights out */
   #lightsout{position:fixed;left:50%;top:24vh;transform:translateX(-50%) scale(.9);
              z-index:14;pointer-events:none;opacity:0;
@@ -5356,6 +5357,11 @@ function m2Sync(){
 }
 function m2Show(on){
   m2On=on;
+  /* Anything else that takes clicks gets out of the way. The grid card sits in
+     the middle of the screen with pointer events on while it waits for you to
+     start the race, so opening the limits map from the grid meant every drag in
+     the middle of the map went into the card instead of the line. */
+  document.body.classList.toggle('mapopen',on);
   const w=document.getElementById('m2wrap');
   if(w) w.classList.toggle('on',on);
   if(on){
@@ -5363,7 +5369,19 @@ function m2Show(on){
     const c=m2El();
     if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
            c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
-    m2Fit(); m2Draw();
+    /* Opened where the car is, close in, rather than fitted to the whole lap.
+       At full-lap zoom one pixel is several metres, so the gentlest drag threw
+       the limit a hundred metres sideways -- which is the other half of "I
+       cannot move it": you could move it, just never by an amount that was any
+       use. Fitted to the lap is still a scroll away. */
+    m2Fit();
+    if(trackRoot){
+      m2Sc=2.2;
+      const c2=m2El();
+      m2X=c2.width/2-carState.wx*m2Sc;
+      m2Y=c2.height/2-carState.wz*m2Sc;
+    }
+    m2Draw();
   }
 }
 function m2Fit(){
@@ -5441,6 +5459,12 @@ function m2Draw(){
      at least fourteen pixels from the last drawn one get a circle, and only
      those can be grabbed -- so zoom out and you see the line, zoom in and the
      handles appear where you are working. */
+  if(m2Hover>=0 && pts[m2Hover]){
+    const x=m2sx(pts[m2Hover].x), y=m2sy(pts[m2Hover].z);
+    g.beginPath(); g.arc(x,y,11,0,Math.PI*2);
+    g.fillStyle='rgba(255,255,255,.22)'; g.fill();
+    g.lineWidth=2; g.strokeStyle='#fff'; g.stroke();
+  }
   m2Vis.length=0;
   const r=5.5;
   let lx=-1e9, ly=-1e9;
@@ -5472,7 +5496,7 @@ function m2Hit(sx,sy){
      the limit almost anywhere did nothing and panned the map instead, which
      reads exactly like "I cannot move it". The whole line is grabbable now;
      the handles are only there to show where the points are. */
-  const r=16;                      // screen pixels, and the nearest one wins
+  const r=60;                      // screen pixels, and the nearest one wins
   let best=-1, bd=r*r;
   for(let i=0;i<pts.length;i++){
     const x=m2sx(pts[i].x), y=m2sy(pts[i].z);
@@ -5510,7 +5534,7 @@ function m2Applied(p){
    between where the stroke started and where it ended is replaced by what was
    drawn. It is the tool this needed -- moving a corner point by point is a lot
    of small drags, and a corner is a shape, not twelve positions. */
-let m2Pen=false, m2PenPts=[], m2Was=null;
+let m2Pen=false, m2PenPts=[], m2Was=null, m2Hover=-1;
 /* One step back. Both tools here rewrite a run of the line in one go, so the
    thing you want after a bad one is the line as it was a moment ago, not a
    point-by-point undo. */
@@ -5658,6 +5682,12 @@ function m2Init(){
       m2Draw();
     } else if(m2Pan){
       m2X+=x-m2LX; m2Y+=y-m2LY; m2LX=x; m2LY=y; m2Draw();
+    } else {
+      /* What a click here would pick up, shown before the click. Not knowing
+         whether the pointer is on the line is most of what "I cannot move it"
+         actually is. */
+      const h=m2Hit(x,y);
+      if(h!==m2Hover){ m2Hover=h; c.style.cursor=h>=0?'grab':'default'; m2Draw(); }
     }
   });
   c.addEventListener('pointerup',()=>{
@@ -8724,6 +8754,7 @@ window.SIM={
   },
   mapCopy(){ return m2Copy(true); },
   mapUndo(){ m2Undo(); return tleLines[m2Edge].length; },
+  mapHover(){ return m2Hover; },
   mapPoint(i){ const p=tleLines[m2Edge][i]; return p?{x:p.x,z:p.z}:null; },
   stationAt(s){ const st=tlSt[Math.round(s/TL_STEP)%tlSt.length];
       return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:st.dR,dL:st.dL}:null; },
