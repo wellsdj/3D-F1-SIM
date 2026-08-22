@@ -9,12 +9,13 @@ class EngineAudio {
     minimumPlaybackRate: 0.72,
     maximumPlaybackRate: 1.48,
     throttleVolumeBoost: 0.18,
-    baseVolume: 0.25,
-    rpmVolumeBoost: 0.10,
+    baseVolume: 0.46,
+    rpmVolumeBoost: 0.18,
     rpmSmoothing: 8.5,
     shiftSpeed: 18,
     playbackSmoothing: 0.055,
     volumeSmoothing: 0.075,
+    v10HarmonicVolume: 0.045,
     gearSpeedRangesKph: [
       [0, 55], [34, 96], [64, 142], [104, 194], [148, 252], [188, 360]
     ]
@@ -25,7 +26,7 @@ class EngineAudio {
     this.tuning={...EngineAudio.tuning,...tuning};
     this.gears=this.tuning.gearSpeedRangesKph.map(r=>r.slice());
     this.context=null; this.buffer=null; this.source=null;
-    this.gain=null; this.filter=null; this.readyPromise=null;
+    this.gain=null; this.filter=null; this.synthGain=null; this.oscillators=[]; this.compressor=null; this.readyPromise=null;
     this.rpm=this.tuning.idleRPM; this.gear=1; this.active=false;
     this.throttle=0; this.speedKph=0; this.shiftDrop=0;
   }
@@ -59,7 +60,20 @@ class EngineAudio {
     this.filter=this.context.createBiquadFilter();
     this.filter.type='lowpass'; this.filter.frequency.value=3200; this.filter.Q.value=.35;
     this.gain=this.context.createGain(); this.gain.gain.value=0;
-    this.source.connect(this.filter); this.filter.connect(this.gain); this.gain.connect(this.context.destination);
+    this.compressor=this.context.createDynamicsCompressor();
+    this.compressor.threshold.value=-12; this.compressor.knee.value=18;
+    this.compressor.ratio.value=4; this.compressor.attack.value=.008; this.compressor.release.value=.12;
+    this.synthGain=this.context.createGain(); this.synthGain.gain.value=0;
+    /* A very quiet pair of harmonics gives the short CC0 loop the sharp,
+       high-rev V10 edge without adding another sample or changing physics. */
+    [1,2].forEach((mult,index)=>{
+      const osc=this.context.createOscillator();
+      osc.type=index?'square':'sawtooth'; osc.frequency.value=100;
+      osc.connect(this.synthGain); osc.start(); this.oscillators.push({osc,mult});
+    });
+    this.source.connect(this.filter); this.filter.connect(this.gain);
+    this.gain.connect(this.compressor); this.synthGain.connect(this.compressor);
+    this.compressor.connect(this.context.destination);
     this.source.start();
   }
 
@@ -71,6 +85,7 @@ class EngineAudio {
       const now=this.context.currentTime;
       this.gain.gain.cancelScheduledValues(now);
       this.gain.gain.setTargetAtTime(0,now,this.tuning.volumeSmoothing);
+      if(this.synthGain) this.synthGain.gain.setTargetAtTime(0,now,this.tuning.volumeSmoothing);
     }
   }
 
@@ -117,9 +132,13 @@ class EngineAudio {
       (this.tuning.maximumPlaybackRate-this.tuning.minimumPlaybackRate)*norm;
     const volume=this.active ? this.tuning.baseVolume+
       this.throttle*this.tuning.throttleVolumeBoost+norm*this.tuning.rpmVolumeBoost : 0;
+    const harmonicGain=this.active ? this.tuning.v10HarmonicVolume*(0.45+norm*0.9) : 0;
     const cutoff=1100+norm*6000;
     this.source.playbackRate.setTargetAtTime(rate,now,this.tuning.playbackSmoothing);
     this.gain.gain.setTargetAtTime(volume,now,this.tuning.volumeSmoothing);
+    this.synthGain.gain.setTargetAtTime(harmonicGain,now,this.tuning.volumeSmoothing);
+    const firingHz=Math.max(80,this.rpm/12);
+    this.oscillators.forEach(({osc,mult})=>osc.frequency.setTargetAtTime(firingHz*mult,now,.045));
     this.filter.frequency.setTargetAtTime(cutoff,now,.08);
   }
 }
