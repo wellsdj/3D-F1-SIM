@@ -803,7 +803,7 @@ if('serviceWorker' in navigator){
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake &nbsp; <kbd>A</kbd><kbd>D</kbd> steering</div>
-  <div><kbd>R</kbd> restart the lap &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
+  <div><kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
 </div>
 
 <div id="gridcard">
@@ -861,7 +861,6 @@ if('serviceWorker' in navigator){
           <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
           <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
           <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV director</span></div>
-          <div class="ctrl-row"><kbd>R</kbd><span>Restart the lap from the line</span></div>
           <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
@@ -4485,15 +4484,9 @@ addEventListener('keydown',e=>{
   if(k==='n'){ markExport(); }
   if(k==='q'){ detailLevel=(detailLevel+1)%DETAILS.length; applyDetail(); }
   if(TTREC.playing && (k==='w'||k==='s'||k==='escape')){ replayStop(); return; }
-  if(k==='r'){                                       // back to the line, new lap
-    if(TT.gates.length && trackRoot && FREEROAM){
-      const g=TT.gates[0];
-      carState.wx=g.x; carState.wz=g.z; carState.hdg=Math.atan2(g.dx,g.dz);
-      carState.speed=0; PLAYER.steerIn=0; PLAYER.steerAng=0;
-      PLAYER.groundY=g.y+RIDE; clearDebris();
-      ttStart(false);                 // restart at the countdown, not the drone shots
-    } else resetToTrack();
-  }
+  /* R does nothing. It used to put the car back on the line and start the lap
+     again, which is a keystroke away from throwing away a lap you were in the
+     middle of -- and it sits next to the keys you actually drive with. */
   /* Drawing the AI's lines: K puts the circuit on screen from above and takes
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
