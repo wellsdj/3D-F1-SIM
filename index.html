@@ -694,6 +694,16 @@
                             #cmap{width:120px;height:138px;top:204px} }
   @media (max-height:620px){ #cmap{display:none} }
 </style>
+<link rel="manifest" href="manifest.webmanifest">
+<script>
+/* Registered after load so it never competes with the circuit for bandwidth on
+   the first run. Once it is in, the game opens with no connection at all. */
+if('serviceWorker' in navigator){
+  addEventListener('load',()=>navigator.serviceWorker.register('sw.js')
+    .then(r=>console.log('offline: ready'+(r.active?'':' after the next load')))
+    .catch(e=>console.warn('offline: not available', e)));
+}
+</script>
 </head>
 <body>
 <canvas id="c"></canvas>

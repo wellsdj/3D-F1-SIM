@@ -1,0 +1,10 @@
+{
+  "name": "Spa 2022 — F1 Sim",
+  "short_name": "F1 Sim",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#05070b",
+  "theme_color": "#05070b",
+  "icons": [{ "src": "./home-race.webp", "sizes": "512x512", "type": "image/webp", "purpose": "any" }]
+}
