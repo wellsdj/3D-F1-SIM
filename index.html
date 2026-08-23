@@ -869,6 +869,7 @@ if('serviceWorker' in navigator){
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
           <div class="ctrl-row"><kbd>J</kbd><span>Start a race &mdash; grid, five lights, go</span></div>
+          <div class="ctrl-row"><kbd>G</kbd><span>Paint where the track is &mdash; sets the limits</span></div>
           <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
@@ -4491,10 +4492,19 @@ addEventListener('keydown',e=>{
   /* R does nothing. It used to put the car back on the line and start the lap
      again, which is a keystroke away from throwing away a lap you were in the
      middle of -- and it sits next to the keys you actually drive with. */
+  /* G opens the circuit from above with the brush in hand. The button that used
+     to do this is set to display:none -- it was tidied off the screen as a tool
+     rather than a control -- so until now there was no way to reach the paint at
+     all, which is why it could not be found. */
+  if(k==='g' && FREEROAM && !TTREC.playing && !NET.watching){
+    if(!m2On) m2Tool=m2Tool||'paint';
+    m2Show(!m2On);
+  }
   /* Drawing the AI's lines: K puts the circuit on screen from above and takes
      it away again, and Esc is the same as K once you are in there. */
   if(k==='k' && FREEROAM && !TTREC.playing && !NET.watching) airMode(!AIR.on);
   if(k==='escape' && AIR.on) airMode(false);
+  if(k==='escape' && m2On) m2Show(false);
   /* J starts a race: both cars on the grid, five lights, and away. Pressed
      again it clears the grid and puts things back. */
   if(k==='j') raceStart();
@@ -9193,6 +9203,7 @@ window.SIM={
     c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
     return {handle:bi, brush:m2Brush};
   },
+  paintTool(){ return m2Tool; },
   surf(){ return {w:SURF.w,h:SURF.h,cells:SURF.count,
       hasData:!!SURF.data, minx:SURF.minx, minz:SURF.minz}; },
   surfPaint(x,z,r,on){ surfDisc(x,z,r,on); return SURF.count; },
