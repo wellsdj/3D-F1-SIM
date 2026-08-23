@@ -8157,6 +8157,52 @@ function aiPaceFields(k){
   AI.corners=corners.length;
   return {vf,bf};
 }
+/* A corner whose radius wobbles -- and a hand-clicked hairpin wobbles a lot: La
+   Source measures anywhere from 19 to 66 m across sixty metres of road -- comes
+   out of the two passes as a saw. The speed climbs and is handed back three
+   times inside two seconds, and followed literally that is throttle, brake,
+   throttle, brake: slower than simply holding the speed, and exactly what makes
+   an exit look terrible from behind.
+
+   So a gain that has to be given back within about a second is not taken. The
+   car holds the lower speed through the whole of it and puts the throttle down
+   once, when the corner is actually finished. A gain worth more than a second is
+   a real straight between two corners and is left alone. */
+const AI_HUMP=1.1;                       // seconds of gain not worth the lift
+const AI_HUMP_H=12;                      // and metres per second: above this it is a corner,
+                                         // not a wobble, and the braking zone into it is real
+function aiFlattenHumps(v){
+  const n=AI.n, ds=AI.ds;
+  for(let i=0;i<n;i++){
+    const j=(i+1)%n;
+    if(v[j]>=v[i]) continue;             // not the top of a rise
+    /* The bottom of the fall, not merely the next sample. The rise out of the
+       first apex of a double apex starts lower than the second apex's entry, so
+       comparing against the next sample stopped this dead: the floor has to be
+       the lowest point the car is going to be dragged back down to. */
+    let m=j, guard=0;
+    while(guard++<n && v[(m+1)%n]<v[m]) m=(m+1)%n;
+    const floor=v[m];
+    /* A hump is a small gain given straight back. A braking zone is a large one:
+       the run into La Source falls 38 m/s. Without this bound the walk back ate
+       the whole approach and turned 181 kph into a flat crawl at 101. */
+    if(v[i]-floor > AI_HUMP_H) continue;
+    /* Walk back over the rise that produced the peak, while it is a rise --
+       the moment the profile stops climbing forwards this is the low point it
+       grew out of, or the braking zone on the way in, and neither is a gain
+       anybody chose to take. Clamping to the floor rather than replacing means
+       the parts already below it are left alone. */
+    let t=0;
+    for(let k=1;k<n;k++){
+      const q=((i-k+1)%n+n)%n, r=((i-k)%n+n)%n;
+      if(v[q]<=v[r]) break;              // not a rise: the approach, or the floor
+      t+=2*ds/(v[q]+v[r]);
+      if(t>AI_HUMP) break;               // long enough to be worth taking
+      v[q]=Math.min(v[q], floor);
+      v[r]=Math.min(v[r], floor);
+    }
+  }
+}
 function aiProfile(k, margin){
   const n=AI.n, ds=AI.ds, v=new Float64Array(n), P=AI_PACE;
   const {vf,bf}=aiPaceFields(k);
@@ -8204,6 +8250,21 @@ function aiProfile(k, margin){
       v[j]=Math.min(v[j], Math.sqrt(v[i]*v[i]+2*a*ds));
     }
   }
+  /* Flatten, then let the two passes settle around what is left, then flatten
+     what that produced. Both passes only ever lower a speed, so this converges
+     rather than chasing itself. */
+  for(let round=0; round<2; round++){
+    aiFlattenHumps(v);
+    for(let i=n-1;i>=0;i--){
+      const j=(i+1)%n, B=46*P.brake*bf[i];
+      v[i]=Math.min(v[i], Math.sqrt(v[j]*v[j]+2*B*ds));
+    }
+    for(let i=0;i<n;i++){
+      const j=(i+1)%n, a=26.0*(1-(v[i]/MAXSPEED)**2);
+      v[j]=Math.min(v[j], Math.sqrt(v[i]*v[i]+2*a*ds));
+    }
+  }
+  aiFlattenHumps(v);
   return v;
 }
 /* Three lines, not one.
@@ -8642,7 +8703,18 @@ function aiPedals(C){
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
   const j=(AI.i+Math.round(la/AI.ds))%AI.n;
   const V=AI.vAct||AI.v;                        // the speeds for the line it is on
-  const tgt=Math.min(V[j], V[AI.i]+2)*(AI.speedK||1);
+  /* Aim at the profile a little ahead, and nothing else.
+
+     This used to be min(V[j], V[here]+2): never ask for more than two metres a
+     second above the speed for the point the car is standing on. Going in, where
+     the profile falls, that changes nothing. Coming out, where the profile
+     climbs away, it is the difference between flooring it and creeping -- the
+     acceleration it asks for works out at about a quarter of what the engine
+     has, so the car left every corner as if it were being careful with someone
+     else's gearbox. The profile is already the speed limit at every point and
+     the forward pass built it at full power, so asking for the profile ahead is
+     asking for full throttle exactly where full throttle is what fits. */
+  const tgt=V[j]*(AI.speedK||1);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
   return {thr:0, brk:clamp(-a/46,0,1)};
@@ -8893,7 +8965,7 @@ function aiStep(dt, t){
     AI.outside = Math.abs(AI.off) - AI.room; }
   if(loc.d>AI.worst) AI.worst=loc.d;
   aiTraffic(dt);
-  const ped=aiPedals(C);
+  const ped=aiPedals(C); AI._thr=ped.thr; AI._brk=ped.brk;
   stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(C,dt)}, dt);
   placeCar(C, dt, t);
   AI.t+=dt;
@@ -8942,6 +9014,7 @@ window.SIM={
       room:+(AI.room||0).toFixed(2), out:+(AI.outside||0).toFixed(2),
       worst:+AI.worst.toFixed(2), t:+AI.t.toFixed(2),
       laps:AI.laps.slice(), surf:{...AI.car.surf,y:undefined},
+      thr:+(AI._thr||0).toFixed(2), brk:+(AI._brk||0).toFixed(2),
       steer:+AI.car.steerAng.toFixed(3)}:null; },
   /* Walk the racing line and ask the track-limits test about every metre of it.
      The line is by definition on the circuit, so anything it calls a violation
