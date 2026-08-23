@@ -5434,6 +5434,7 @@ function surfOn(x,z){
 /* A filled disc, which is what a brush is. */
 function surfDisc(x,z,r,on){
   if(!SURF.data) return;
+  const rec=SURF.rec;
   const r2=r*r;
   const i0=Math.max(0,Math.floor(x-r-SURF.minx)), i1=Math.min(SURF.w-1,Math.ceil(x+r-SURF.minx));
   const j0=Math.max(0,Math.floor(z-r-SURF.minz)), j1=Math.min(SURF.h-1,Math.ceil(z+r-SURF.minz));
@@ -5443,8 +5444,8 @@ function surfDisc(x,z,r,on){
       const dx=(i+0.5+SURF.minx)-x;
       if(dx*dx+dz*dz>r2) continue;
       const k=j*SURF.w+i, was=SURF.data[k];
-      if(on&&!was){ SURF.data[k]=1; SURF.count++; }
-      else if(!on&&was){ SURF.data[k]=0; SURF.count--; }
+      if(on&&!was){ if(rec) rec.push(k,was); SURF.data[k]=1; SURF.count++; }
+      else if(!on&&was){ if(rec) rec.push(k,was); SURF.data[k]=0; SURF.count--; }
     }
   }
 }
@@ -5486,7 +5487,35 @@ function surfLoad(){
 }
 function surfClear(){
   if(!SURF.data) return;
+  /* Clearing is undoable too, and cheaply: what it removed is exactly the cells
+     that were set, so the whole mask is kept rather than every index. */
+  surfPush(SURF.data.slice());
   SURF.data.fill(0); SURF.count=0; surfSave();
+}
+/* One step of paint history per stroke. A stroke records only the cells it
+   actually changed -- a brush pass is a few thousand of six and a half million
+   -- so twenty of them cost less than one copy of the mask. A clear keeps a
+   whole copy, because it changes everything. */
+const SURF_UNDO=[];
+function surfPush(whole){ SURF_UNDO.push(whole?{whole}:{cells:SURF.rec});
+                          if(SURF_UNDO.length>20) SURF_UNDO.shift(); }
+function surfUndo(){
+  const u=SURF_UNDO.pop();
+  if(!u) return false;
+  if(u.whole){
+    SURF.data.set(u.whole);
+    SURF.count=0;
+    for(let k=0;k<SURF.data.length;k++) if(SURF.data[k]) SURF.count++;
+  } else {
+    for(let i=u.cells.length-2;i>=0;i-=2){
+      const k=u.cells[i], was=u.cells[i+1];
+      if(SURF.data[k]&&!was) SURF.count--;
+      else if(!SURF.data[k]&&was) SURF.count++;
+      SURF.data[k]=was;
+    }
+  }
+  surfSave();
+  return true;
 }
 
 function m2Sync(){
@@ -5874,6 +5903,8 @@ function m2Init(){
     const [x,y]=pos(e);
     if(m2Tool){
       m2Painting=true; m2PtrX=x; m2PtrY=y;
+      SURF.rec=[];                       // everything this stroke changes
+
       surfDisc(m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
       c.setPointerCapture(e.pointerId); m2Draw(); return;
     }
@@ -5935,7 +5966,12 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
-    if(m2Painting){ m2Painting=false; surfSave(); m2Draw(); m2Info(); return; }
+    if(m2Painting){
+      m2Painting=false;
+      if(SURF.rec&&SURF.rec.length) surfPush();
+      SURF.rec=null;
+      surfSave(); m2Draw(); m2Info(); return;
+    }
     if(m2Pen){ m2PenEnd(); return; }
     if(m2Drag>=0){
       window._m2last=m2Drag;
@@ -5950,7 +5986,10 @@ function m2Init(){
     const [x,y]=pos(e);
     const wx=m2wx(x), wz=m2wz(y);
     m2Sc*=Math.exp(-e.deltaY*0.0016);
-    m2Sc=clamp(m2Sc,0.03,3);
+    /* Forty pixels a metre at the top. Three was a metre of road across three
+       pixels, which is fine for looking at a corner and useless for deciding
+       whether the paint reaches the white line. */
+    m2Sc=clamp(m2Sc,0.03,40);
     m2X=x-wx*m2Sc; m2Y=y-wz*m2Sc;
     m2Draw();
   },{passive:false});
@@ -6850,11 +6889,35 @@ document.getElementById('netinput').addEventListener('keydown',e=>{
 });
 document.getElementById('m2in').onclick=()=>{ m2Edge=0; m2EdgeButtons(); m2Draw(); };
 document.getElementById('m2out').onclick=()=>{ m2Edge=1; m2EdgeButtons(); m2Draw(); };
-document.getElementById('m2copy').onclick=e=>{
-  const t=JSON.stringify(tleLines[m2Edge].map(v=>gridToModel(v)));
-  console.log('track limit line (model coordinates):\n'+t);
-  copyFlash(e.currentTarget,t);
+/* The paint bar. These buttons have been in the markup without a single handler
+   attached to them, which is why none of them did anything: Erase never
+   selected, Clear never cleared, Undo was wired to the line editor's history and
+   Copy handed back the old line rather than the paint. */
+function m2SetTool(t){
+  m2Tool=t;
+  const on=(id,v)=>{ const el=document.getElementById(id); if(el) el.classList.toggle('on',v); };
+  on('m2paint', t==='paint'); on('m2erase', t==='erase'); on('m2lines', !t);
+  ['m2in','m2out','m2pen','m2brushwrap'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display=t?'none':''; });
+  const rw=document.getElementById('m2radwrap'); if(rw) rw.style.display=t?'':'none';
+  const cp=document.getElementById('m2copy'); if(cp) cp.textContent=t?'Copy paint':'Copy both';
+  const c=m2El(); if(c) c.style.cursor=t?'crosshair':'default';
+  m2Draw(); m2Info();
+}
+document.getElementById('m2paint').onclick=()=>m2SetTool('paint');
+document.getElementById('m2erase').onclick=()=>m2SetTool('erase');
+document.getElementById('m2lines').onclick=()=>m2SetTool(null);
+document.getElementById('m2clear').onclick=()=>{ surfClear(); m2Draw(); m2Info(); m2Note('paint cleared'); };
+document.getElementById('m2rad').addEventListener('input',e=>{
+  m2Rad=+e.target.value;
+  document.getElementById('m2radval').textContent=m2Rad+' m';
+  m2Draw();
+});
+document.getElementById('m2undo2').onclick=()=>{
+  if(m2Tool){ if(surfUndo()){ m2Draw(); m2Info(); m2Note('undone'); } else m2Note('nothing to undo'); return; }
+  m2Undo();
 };
+document.getElementById('m2copy').onclick=()=>m2Copy();
 m2Init();
 document.getElementById('replaybtn').onclick=()=>{ TTREC.playing?replayStop():replayStart(); };
 document.getElementById('tledgeA').onclick=()=>{ tleEdge=0;
