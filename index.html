@@ -8170,9 +8170,21 @@ function aiPaceFields(k){
    car holds the lower speed through the whole of it and puts the throttle down
    once, when the corner is actually finished. A gain worth more than a second is
    a real straight between two corners and is left alone. */
-const AI_HUMP=1.1;                       // seconds of gain not worth the lift
-const AI_HUMP_H=12;                      // and metres per second: above this it is a corner,
-                                         // not a wobble, and the braking zone into it is real
+/* How much speed the car may be asked to give back before the giving back is a
+   braking zone rather than a lift.
+
+   This used to be bounded by time as well -- a gain handed back within about a
+   second was dropped and anything longer was kept -- and that is the wrong
+   question. A dip is not acceptable because it is slow to arrive; it is
+   acceptable because it is a corner. Between the apex of one corner and the
+   braking point for the next, the throttle should go down and stay down, and
+   that is true whether the next corner is one second away or six.
+
+   So the only test now is the size of the drop. Under this and it is a lift the
+   car should not have needed: the gain is never taken and the speed is held
+   instead. Over it and it is a real corner ahead, the gain is taken and the
+   brakes do the rest. */
+const AI_HUMP_H=13;                      // m/s given back: under this, do not take the gain
 function aiFlattenHumps(v){
   const n=AI.n, ds=AI.ds;
   for(let i=0;i<n;i++){
@@ -8194,12 +8206,9 @@ function aiFlattenHumps(v){
        grew out of, or the braking zone on the way in, and neither is a gain
        anybody chose to take. Clamping to the floor rather than replacing means
        the parts already below it are left alone. */
-    let t=0;
     for(let k=1;k<n;k++){
       const q=((i-k+1)%n+n)%n, r=((i-k)%n+n)%n;
       if(v[q]<=v[r]) break;              // not a rise: the approach, or the floor
-      t+=2*ds/(v[q]+v[r]);
-      if(t>AI_HUMP) break;               // long enough to be worth taking
       v[q]=Math.min(v[q], floor);
       v[r]=Math.min(v[r], floor);
     }
