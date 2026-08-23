@@ -7440,6 +7440,15 @@ function stepCar(C, inp, dt){
   st.hdg += yawRate*dt;
   st.wx  += Math.sin(st.hdg)*v*dt;
   st.wz  += Math.cos(st.hdg)*v*dt;
+  /* A shove from another car, carried as its own velocity so it moves the car
+     sideways over a few tenths rather than teleporting it, and bleeds away. */
+  if(C.bumpX||C.bumpZ){
+    st.wx += C.bumpX*dt; st.wz += C.bumpZ*dt;
+    const k=Math.pow(0.02, dt/HIT_DECAY);
+    C.bumpX*=k; C.bumpZ*=k;
+    if(Math.abs(C.bumpX)<0.01&&Math.abs(C.bumpZ)<0.01){ C.bumpX=0; C.bumpZ=0; }
+  }
+  if(C.touchT) C.touchT=Math.max(0,C.touchT-dt);
   return yawRate;
 }
 
@@ -8719,6 +8728,87 @@ function aiPedals(C){
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
   return {thr:0, brk:clamp(-a/46,0,1)};
 }
+/* ---------------------------------------------------------------------------
+   Cars touching cars.
+
+   What this is not: a barrier. Hitting the wall is a crash and is handled
+   elsewhere. This is the other thing -- running alongside somebody, catching
+   their wheel with yours, leaning on them through a corner. It should cost a
+   little speed and a little line and nothing else. No stopping dead, no shower
+   of sparks, no invisible wall.
+
+   Each car is a capsule: a segment down its length with a radius, which is a
+   fair description of a car and costs one closest-point-between-segments to
+   test. On contact the two are pushed apart along the line between them, and
+   each takes half of an impulse along that line. The restitution is low --
+   cars are not billiard balls, they are carbon boxes that scrub against each
+   other -- and the only speed lost is a fraction of the closing speed along the
+   contact normal. Two cars running side by side at 300 kph with a hundredth of
+   a metre of overlap lose nothing, which is right: touching at a shallow angle
+   is a scrape, not a shunt.
+
+   The push arrives as a velocity rather than a teleport, so a car that is leant
+   on drifts off line and has to be caught, the way it would. */
+const HIT_R=0.86;            // half the car's width, near enough
+const HIT_HL=1.85;           // half its length, a little short of the real nose
+const HIT_E=0.32;            // restitution: it bumps off, it does not bounce
+const HIT_SCRUB=0.12;        // of the closing speed, lost as scrub
+const HIT_DECAY=0.30;        // seconds for a shove to bleed away
+function carEnds(st){
+  const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
+  return {ax:st.wx-fx*HIT_HL, az:st.wz-fz*HIT_HL, bx:st.wx+fx*HIT_HL, bz:st.wz+fz*HIT_HL, fx, fz};
+}
+/* Closest points between two segments, flattened to 2D -- the cars are on the
+   same road, so height is not what decides whether they are touching. */
+function segClosest(a,b){
+  const ux=a.bx-a.ax, uz=a.bz-a.az, vx=b.bx-b.ax, vz=b.bz-b.az;
+  const wx=a.ax-b.ax, wz=a.az-b.az;
+  const A=ux*ux+uz*uz, B=ux*vx+uz*vz, C=vx*vx+vz*vz, D=ux*wx+uz*wz, E=vx*wx+vz*wz;
+  const den=A*C-B*B;
+  let s = den>1e-9 ? clamp((B*E-C*D)/den,0,1) : 0;
+  let t = C>1e-9 ? clamp((B*s+E)/C,0,1) : 0;
+  s = A>1e-9 ? clamp((B*t-D)/A,0,1) : 0;
+  return { px:a.ax+ux*s, pz:a.az+uz*s, qx:b.ax+vx*t, qz:b.az+vz*t };
+}
+/* One pair. Written for any two cars so the same call serves the AI now and a
+   car on the other end of a connection later. */
+function carsTouch(A, B, dt){
+  if(!A||!B) return false;
+  const sa=A.st, sb=B.st;
+  if((sa.wx-sb.wx)**2 + (sa.wz-sb.wz)**2 > 64) return false;   // 8 m apart: nothing to do
+  const ea=carEnds(sa), eb=carEnds(sb);
+  const c=segClosest(ea,eb);
+  let nx=c.qx-c.px, nz=c.qz-c.pz;
+  let d=Math.hypot(nx,nz);
+  const gap=2*HIT_R;
+  if(d>=gap) return false;
+  if(d<1e-4){ nx=sb.wx-sa.wx; nz=sb.wz-sa.wz; d=Math.hypot(nx,nz)||1; }
+  nx/=d; nz/=d;
+  const overlap=gap-d;
+  // out of each other, half each
+  sa.wx-=nx*overlap*0.5; sa.wz-=nz*overlap*0.5;
+  sb.wx+=nx*overlap*0.5; sb.wz+=nz*overlap*0.5;
+  // closing speed along the contact
+  const vax=Math.sin(sa.hdg)*sa.speed+(A.bumpX||0), vaz=Math.cos(sa.hdg)*sa.speed+(A.bumpZ||0);
+  const vbx=Math.sin(sb.hdg)*sb.speed+(B.bumpX||0), vbz=Math.cos(sb.hdg)*sb.speed+(B.bumpZ||0);
+  const vn=(vbx-vax)*nx+(vbz-vaz)*nz;
+  if(vn<0){                                   // only if they are coming together
+    const j=-(1+HIT_E)*vn*0.5;                // equal cars, half each
+    A.bumpX=(A.bumpX||0)-nx*j; A.bumpZ=(A.bumpZ||0)-nz*j;
+    B.bumpX=(B.bumpX||0)+nx*j; B.bumpZ=(B.bumpZ||0)+nz*j;
+    const scrub=Math.abs(vn)*HIT_SCRUB;
+    sa.speed=Math.max(0, sa.speed-scrub);
+    sb.speed=Math.max(0, sb.speed-scrub);
+  }
+  A.touchT=B.touchT=0.25;                     // for anything that wants to know
+  return true;
+}
+function carContact(dt){
+  if(!AI.car || !AI.on || AI.hold) return;
+  if(NET.watching || TTREC.playing) return;   // not a car you are driving
+  carsTouch(PLAYER, AI.car, dt);
+}
+
 function aiSpawn(){
   if(AI.car||!carObj) return false;
   const g=new THREE.Group(); scene.add(g);
@@ -9114,6 +9204,24 @@ window.SIM={
      without needing a second car to provoke it. */
   linePoint(li,i){ const q=tleLines[li][i]; return q?{x:q.x,z:q.z}:null; },
   camAim(){ return +orbYaw.toFixed(4); },
+  /* One contact, run on two throwaway cars, so the physics can be checked
+     without depending on when frames happen to land. */
+  contactTest(o){
+    const mk=(x,z,h,v)=>({ st:{wx:x,wz:z,hdg:h,speed:v}, bumpX:0, bumpZ:0 });
+    const A=mk(0,0,0,o.va), B=mk(o.dx,o.dz,o.hb||0,o.vb);
+    const hit=carsTouch(A,B,1/60);
+    return { hit,
+      apartBefore:+Math.hypot(o.dx,o.dz).toFixed(2),
+      apartAfter:+Math.hypot(B.st.wx-A.st.wx, B.st.wz-A.st.wz).toFixed(2),
+      youBump:+Math.hypot(A.bumpX,A.bumpZ).toFixed(2),
+      themBump:+Math.hypot(B.bumpX,B.bumpZ).toFixed(2),
+      youKph:+(A.st.speed*3.6).toFixed(1), themKph:+(B.st.speed*3.6).toFixed(1) };
+  },
+  contact(){ return AI.car?{ apart:+Math.hypot(carState.wx-AI.car.st.wx, carState.wz-AI.car.st.wz).toFixed(2),
+      touching:(PLAYER.touchT||0)>0, you:{kph:+(carState.speed*3.6).toFixed(1),
+        bump:+Math.hypot(PLAYER.bumpX||0,PLAYER.bumpZ||0).toFixed(2)},
+      ai:{kph:+(AI.car.st.speed*3.6).toFixed(1),
+        bump:+Math.hypot(AI.car.bumpX||0,AI.car.bumpZ||0).toFixed(2)} }:null; },
   race(){ return {on:RACE.on, phase:RACE.phase, t:+RACE.t.toFixed(2), hold:+RACE.hold.toFixed(2),
       lit:litCols, held:!!AI.hold, startPhase,
       ui:{grid:raceEl('gridcard').classList.contains('show'),
@@ -9439,7 +9547,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); raceStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); netSend(t); }
+  else { controllerPoll(); raceStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
