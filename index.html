@@ -150,7 +150,7 @@
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
   /* Which camera you are looking through, the way a broadcast marks it. */
-  #tvtag{position:fixed;left:20px;top:20px;z-index:8;display:none;
+  #tvtag{position:fixed;left:20px;top:74px;z-index:8;display:none;
          font-family:var(--mono);color:var(--paper);letter-spacing:.18em;
          text-transform:uppercase;text-shadow:0 2px 10px rgba(0,0,0,.85)}
   #tvtag.on{display:block}
@@ -568,7 +568,11 @@
   #customize-home:hover{background:linear-gradient(90deg,rgba(255,176,32,.2),rgba(7,13,22,.56)),url('home-customise.webp') center/cover}
 
   /* ---------------------------------------------------------- lap book */
-  #lapbook{position:fixed;inset:0;z-index:14;display:none;padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px);
+  /* Scrolls. It is a full-screen panel with a fixed height, so on a short window
+     -- or with a few laps in the list -- the buttons at the bottom were simply
+     below the edge with no way to reach them. */
+  #lapbook{position:fixed;inset:0;z-index:14;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
+           padding:clamp(30px,6vw,88px) clamp(24px,8vw,132px) clamp(48px,9vw,120px);
            color:var(--paper);font-family:var(--mono);background:linear-gradient(90deg,rgba(3,7,12,.98),rgba(3,7,12,.77)),url('home-hero.png') center/cover}
   #lapbook.open{display:block}
   #lapbook:before,#customizer:before{content:"";position:absolute;inset:20px;pointer-events:none;border:1px solid rgba(236,234,228,.1)}
@@ -6275,7 +6279,23 @@ function tvPick(t){
 }
 /* Where the car is round the lap, for the director. Track limits already
    works this out every frame for the delta, so it costs nothing here. */
-function tvCarS(){ return tlSt.length ? (tlIdx/tlSt.length)*TT.len : 0; }
+/* Where the car is round the lap, asked for directly.
+
+   This used to read tlIdx -- the index cached inside tlStation -- which is only
+   ever updated as a side effect of something else calling it, and the only
+   caller is the track-limits check. Whenever that did not run, the director's
+   idea of where the car was simply stopped moving, and it held a camera while
+   the car went most of a lap away: measured at 1439, 1657 and 1884 metres from
+   the shot it was still cutting to. That is "TV mode doesn't work".
+
+   It hid from instrumentation, too: a probe that asks tlStation where the car
+   is fixes tlIdx on its way past, so measuring the fault made it correct. It
+   asks for itself now, and nothing else has to have run first. */
+function tvCarS(){
+  if(!tlSt.length) return 0;
+  const st=tlStation(carState.wx, carState.wz);
+  return st ? (tlSt.indexOf(st)/tlSt.length)*TT.len : 0;
+}
 
 /* The tag in the corner: which of the twenty you are watching, or the name of
    the shot when it is not one of them. */
@@ -9224,6 +9244,15 @@ window.SIM={
         bump:+Math.hypot(PLAYER.bumpX||0,PLAYER.bumpZ||0).toFixed(2)},
       ai:{kph:+(AI.car.st.speed*3.6).toFixed(1),
         bump:+Math.hypot(AI.car.bumpX||0,AI.car.bumpZ||0).toFixed(2)} }:null; },
+  tvWhere(){
+    /* What the director thinks the car's lap position is, against where the car
+       actually is, so a stale index shows up as a gap rather than as a bad shot. */
+    const real=(()=>{ const st=tlStation(carState.wx,carState.wz);
+      return st?tlSt.indexOf(st)/tlSt.length*TT.len:-1; })();
+    return { director:+tvCarS().toFixed(0), actual:+real.toFixed(0), tlIdx };
+  },
+  camFov(){ return +camera.fov.toFixed(1); },
+  camPos(){ return [+camera.position.x.toFixed(0), +camera.position.y.toFixed(0), +camera.position.z.toFixed(0)]; },
   race(){ return {on:RACE.on, phase:RACE.phase, t:+RACE.t.toFixed(2), hold:+RACE.hold.toFixed(2),
       lit:litCols, held:!!AI.hold, startPhase,
       ui:{grid:raceEl('gridcard').classList.contains('show'),
