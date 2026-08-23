@@ -3242,9 +3242,11 @@ let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
    the ten cars share the authored racing curve and only their pace, contact
    response and camera focus are simulated here. */
 let watchMode=false, watchModePending=false, watchClock=0, watchCam=2, watchCars=[], watchPalette=[];
+let watchFocusCar=null, watchFocusUntil=0, watchCameraReady=false;
 const WATCH_CAM_NAMES=['Chase leader','Pack cam','TV director'];
 const WATCH_COLORS=[0xe53935,0x18a8e8,0xffa91f,0x9be21b,0xb05cff,0xf2f4f7,0xff5ca8,0x20d6b5,0xffe45b,0x8d96a8];
 const WATCH_TMP_P=new THREE.Vector3(), WATCH_TMP_T=new THREE.Vector3(), WATCH_TMP_N=new THREE.Vector3();
+const WATCH_CAM_POS=new THREE.Vector3(), WATCH_CAM_AIM=new THREE.Vector3();
 let customSpin=true, customDragging=false, customLastX=0;
 let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
 const CUSTOM_BG=new THREE.Color(0x05070b);   // the garage's own black
@@ -4698,8 +4700,9 @@ function watchCarCreate(i){
   const group=new THREE.Group();
   const body=carObj.clone(true);
   body.position.copy(carObj.position); body.rotation.copy(carObj.rotation); body.scale.copy(carObj.scale);
-  body.traverse(o=>{ o.visible=true; if(o.isMesh) o.frustumCulled=false; });
+  body.traverse(o=>{ o.visible=true; o.matrixAutoUpdate=true; if(o.isMesh){ o.frustumCulled=false; o.renderOrder=3; } });
   group.scale.copy(carGroup.scale); group.add(body); scene.add(group); watchTint(body,(watchPalette[i]||WATCH_COLORS[i%WATCH_COLORS.length]));
+  group.visible=true; group.matrixAutoUpdate=true;
   return {group,body,s:-i*7.5,lap:0,speed:50+i*1.9,pace:53+i*1.9+Math.random()*5,
           lateral:(i%2?1:-1)*(1.15+((i/2)|0)*.08),incident:0,incidentKind:'',pos:new THREE.Vector3()};
 }
@@ -4769,9 +4772,9 @@ function watchLeader(){
 function watchFocus(){
   const leader=watchLeader();
   if(!leader) return null;
-  if(watchClock<6) return leader; // onboarding always follows P1
+  if(watchClock<6){ watchFocusCar=leader; watchFocusUntil=watchClock+2; return leader; }
   const incident=watchCars.find(c=>c.incident>0);
-  if(incident) return incident;
+  if(incident && watchFocusCar!==incident){ watchFocusCar=incident; watchFocusUntil=watchClock+3.5; return incident; }
   let best=leader, bestScore=-Infinity;
   for(const c of watchCars){
     let pack=0;
@@ -4779,14 +4782,20 @@ function watchFocus(){
     const score=pack*3+c.lap*TT.len+c.s*.035-(leader.lap*TT.len+leader.s-c.lap*TT.len-c.s)*.02;
     if(score>bestScore){bestScore=score;best=c;}
   }
-  return best;
+  if(!watchFocusCar) watchFocusCar=best;
+  if(watchClock>=watchFocusUntil && best!==watchFocusCar){
+    /* A subject must earn the cut. Holding each subject for several seconds
+       prevents the TV camera from vibrating between two nearly equal packs. */
+    watchFocusCar=best; watchFocusUntil=watchClock+4.5;
+  }
+  return watchFocusCar||leader;
 }
 function watchStartAfterTrack(){
   if(!watchModePending||watchMode) return;
   if(!carObj||!trackRoot){ setTimeout(watchStartAfterTrack,120); return; }
   if(!TT.curve) ttBuild();
   if(!TT.curve||!TT.len){ setTimeout(watchStartAfterTrack,120); return; }
-  watchModePending=false; watchMode=true; watchClock=0; watchCam=2; watchCars=[];
+  watchModePending=false; watchMode=true; watchClock=0; watchCam=2; watchCars=[]; watchFocusCar=null; watchFocusUntil=0; watchCameraReady=false;
   watchPalette=WATCH_COLORS.slice().sort(()=>Math.random()-.5);
   for(let i=0;i<10;i++) watchCars.push(watchCarCreate(i));
   for(const c of watchCars) watchPlace(c);
@@ -4803,7 +4812,7 @@ function watchStop(){
   if(!watchMode&&watchCars.length===0) return;
   watchMode=false;
   watchCars.forEach(c=>{ if(c.group.parent) c.group.parent.remove(c.group); });
-  watchCars=[]; carGroup.visible=true; watchClock=0; watchCam=2; engineAudio.mute();
+  watchCars=[]; carGroup.visible=true; watchClock=0; watchCam=2; watchFocusCar=null; watchCameraReady=false; engineAudio.mute();
 }
 function watchRender(dt){
   if(!watchCars.length) return;
@@ -4822,7 +4831,13 @@ function watchRender(dt){
                p.z-fz*(incident?15:23)-Math.sin(h)*(incident?7:18));
     aim.set(p.x+fx*(incident?4:16),p.y+(incident?1.1:0.6),p.z+fz*(incident?4:16));
   }
-  camera.position.lerp(target,clamp(dt*4.5,0,1)); camera.up.set(0,1,0); camera.lookAt(aim);
+  /* Smooth both the camera rig and its look target. The old direct lookAt
+     followed every focus decision and every tiny tangent change, which read
+     as a violent shake even when the cars themselves were stable. */
+  if(!watchCameraReady){ WATCH_CAM_POS.copy(target); WATCH_CAM_AIM.copy(aim); watchCameraReady=true; }
+  const ease=1-Math.exp(-dt/0.72);
+  WATCH_CAM_POS.lerp(target,ease); WATCH_CAM_AIM.lerp(aim,ease);
+  camera.position.copy(WATCH_CAM_POS); camera.up.set(0,1,0); camera.lookAt(WATCH_CAM_AIM);
   camera.fov=watchCam===1?48:watchCam===2?42:54; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(camera.position); centerNightStars(camera);
   renderer.render(scene,camera);
