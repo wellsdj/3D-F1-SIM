@@ -150,6 +150,26 @@
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
   /* Which camera you are looking through, the way a broadcast marks it. */
+  /* The warning, and the flag you cannot hand back. */
+  #limwarn{position:fixed;left:50%;top:14vh;transform:translateX(-50%) translateY(-10px);
+           z-index:13;display:flex;flex-direction:column;align-items:center;gap:6px;
+           font-family:var(--mono);text-transform:uppercase;text-align:center;
+           background:rgba(10,13,19,.9);border:1px solid rgba(255,176,32,.55);
+           border-left:5px solid #ffb020;border-radius:10px;padding:14px 26px;
+           opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease}
+  #limwarn.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #limwarn b{font-size:15px;letter-spacing:.2em;color:#ffdca6}
+  #limwarn span{font-size:10px;letter-spacing:.16em;color:rgba(223,231,241,.75)}
+  #limwarn.flag{border-color:rgba(255,255,255,.8);border-left-color:#fff}
+  #limwarn.flag b{color:#fff}
+  #bwflag{position:fixed;right:18px;top:170px;z-index:12;display:none;align-items:center;gap:9px;
+          font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;
+          color:#fff;background:rgba(10,13,19,.82);border:1px solid rgba(255,255,255,.3);
+          border-radius:7px;padding:8px 11px}
+  #bwflag.show{display:flex}
+  #bwflag i{width:17px;height:17px;flex:0 0 auto;border:1px solid rgba(255,255,255,.5);
+            background:linear-gradient(135deg,#fff 0 50%,#111 50% 100%)}
+  #bwflag small{color:rgba(255,255,255,.6);font-size:8px;letter-spacing:.13em}
   #tvtag{position:fixed;left:20px;top:74px;z-index:8;display:none;
          font-family:var(--mono);color:var(--paper);letter-spacing:.18em;
          text-transform:uppercase;text-shadow:0 2px 10px rgba(0,0,0,.85)}
@@ -747,6 +767,8 @@ if('serviceWorker' in navigator){
   <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
   <div id="netmsg"></div>
 </div>
+<div id="limwarn"></div>
+<div id="bwflag"><i></i><span>BLACK &amp; WHITE FLAG</span><small id="bwpen">+5.0s at the flag</small></div>
 <div id="tvtag"><span id="tvtagname">CAM 01</span><small id="tvtagof">of 20</small></div>
 <div id="airwrap">
   <canvas id="aircanvas" width="1600" height="1000"></canvas>
@@ -5036,7 +5058,7 @@ function ttStep(dt){
     return;
   }
   TT.t+=dt;
-  tlCheck();
+  tlCheck(dt);
   ttSplit();
   recStep(TT.t);
   const x0=TT.prevX, z0=TT.prevZ, x1=carState.wx, z1=carState.wz;
@@ -5053,6 +5075,7 @@ function ttStep(dt){
    which gate you missed rather than leaving you to guess. */
 function ttLine(){
   const missed=TT.hit.indexOf(false);
+  if(RACE.on) limitsAtLine();
   /* You start sitting on the line, so the first thing you do is cross it. That
      is not a lap and it is not a deleted lap either -- it is the beginning.
      The test for it is exact rather than a threshold on the clock: a lap has
@@ -5482,8 +5505,31 @@ function surfUnpack(txt){
   return true;
 }
 function surfSave(){ try{ localStorage.setItem(SURF_KEY, surfPack()); }catch(e){} }
+/* The circuit, painted by hand, baked into the file.
+
+   This is what the track limits are now judged against: not a pair of surveyed
+   lines but the actual painted surface, 75,951 m2 of it. It ships with the
+   game so a fresh browser has the right track without anyone painting first.
+
+   The version is here so this can replace whatever an older browser has saved
+   -- the paint that was in localStorage before this was a different, sparser
+   job -- while still leaving anything painted afterwards alone. */
+const SURF_BAKE_VER=1, SURF_BAKE_KEY='f1sim.paint.baked';
+const SURF_BAKED="{\"v\":1,\"w\":1569,\"h\":2334,\"x\":-552,\"z\":-491,\"r\":\"4ihz.9.17a.d.176.i.171.m.16y.p.16v.r.16t.u.16q.x.16n.10.16k.13.16h.16.16e.1a.16a.1e.166.1g.164.1j.162.1m.15z.1n.15x.1q.15v.1s.15t.1u.15r.1w.15p.20.15l.22.15j.t.1.1a.15h.q.7.19.15g.n.e.17.15d.n.g.17.15b.m.j.17.15a.l.m.15.159.l.p.15.157.k.s.13.156.k.v.15.152.j.x.15.150.j.z.15.14z.j.10.15.14y.i.12.15.14w.j.13.14.14w.i.14.15.14v.i.16.15.14t.h.18.15.14r.i.1b.14.14p.h.1e.12.14p.h.1g.11.14n.h.1i.12.14l.h.1k.11.14k.h.1l.10.14j.h.1n.10.14i.h.1o.11.14f.h.1s.y.14f.h.1t.z.14d.h.1w.x.14c.h.1y.x.149.i.1z.w.149.h.21.x.146.i.22.w.145.i.24.x.143.i.25.y.141.i.26.10.13x.j.27.z.13x.j.28.y.13w.j.2b.w.13w.j.2e.y.13q.j.2i.v.13q.j.2k.u.13p.i.2m.t.13p.i.2n.s.13o.i.2o.u.13m.i.2q.t.13l.i.2r.s.13k.i.2t.r.13k.h.2v.s.13h.i.2w.u.13e.h.2y.v.13b.i.2z.u.13b.h.31.t.13b.h.32.t.139.h.35.s.138.h.35.u.137.g.37.s.136.g.38.t.134.h.3b.r.133.g.3d.r.131.h.3f.p.130.i.3g.p.12z.h.3i.p.12y.h.3i.q.12w.i.3i.q.12w.i.3j.p.12w.i.3m.n.12v.h.3n.n.12u.i.3o.o.12r.i.3p.p.12q.h.3r.o.12q.h.3s.o.12p.g.3u.n.12p.f.3w.n.12n.g.3x.m.12m.h.3x.m.12m.h.3y.m.12l.h.3z.m.12k.h.3z.m.12j.h.3z.n.12j.h.3z.p.12g.h.40.p.12f.i.43.o.12d.i.44.n.12d.i.44.n.12d.h.45.o.12b.i.47.m.12b.i.48.l.12b.i.49.k.12b.i.49.m.128.i.4b.l.128.i.4c.k.127.i.4e.j.127.i.4e.j.126.i.4f.j.126.i.4g.j.124.i.4h.l.122.h.4j.k.121.i.4j.k.121.i.4k.j.121.i.4k.k.11z.j.4k.l.11y.i.4l.l.11y.i.4l.l.11x.j.4m.l.11w.j.4m.m.11v.i.4n.m.11v.i.4o.m.11t.i.4p.m.11t.i.4p.m.11u.g.4r.m.11s.h.4r.m.11r.i.4s.m.11p.j.4s.m.11p.i.4u.l.11p.i.4w.j.11p.h.4x.j.11p.h.4y.i.11o.i.4y.i.11o.h.4z.i.11n.i.4z.j.11m.h.50.j.11l.i.4z.k.11l.i.50.j.11k.i.52.j.11j.i.52.j.11j.i.52.j.11j.h.53.j.11i.i.54.i.11i.h.55.i.11i.g.56.i.11h.h.56.j.11g.h.56.i.11h.h.56.i.11g.h.58.h.11g.h.58.h.11g.h.59.h.11e.h.5a.h.11e.h.5b.g.11d.i.5b.g.11d.h.5c.h.11c.h.5c.g.11d.h.5c.g.11c.h.5d.g.11b.i.5d.g.11b.h.5e.g.11b.h.5f.f.11b.h.5f.f.11a.i.5f.g.119.h.5h.f.118.i.5h.g.117.h.5i.f.117.i.5i.f.117.i.5i.f.116.i.5j.f.116.i.5j.e.117.h.5j.f.116.i.5j.f.116.i.5j.f.116.i.5j.g.114.i.5k.g.114.h.5m.f.114.h.5l.g.114.h.5l.f.114.h.5m.f.113.i.5m.f.113.i.5m.g.112.h.5n.g.111.i.5n.g.111.h.5o.g.111.h.5o.f.112.g.5q.e.112.g.5p.f.111.g.5q.f.111.g.5q.f.110.h.5q.f.110.h.5q.f.110.g.5r.f.10z.h.5r.f.10y.h.5s.f.10y.h.5s.f.10y.g.5s.g.10y.g.5t.f.10x.h.5t.f.10x.h.5t.f.10x.h.5t.f.10w.h.5u.f.10w.h.5u.f.10v.i.5u.f.10v.h.5u.g.10v.h.5u.g.10u.i.5u.f.10v.h.5u.g.10v.h.5v.f.10v.g.5w.f.10u.h.5w.f.10u.g.5x.e.10v.f.5x.f.10u.f.5y.f.10u.e.5z.e.10u.f.5z.e.10u.g.5y.e.10t.h.5y.e.10t.h.5y.f.10s.h.1z.2.3x.f.10t.g.20.1.3w.g.10s.g.21.1.3w.g.10r.h.5y.g.10q.h.5z.f.10r.h.5z.f.10q.h.60.e.10r.g.61.e.10r.g.61.e.10q.g.62.f.10p.g.62.f.10o.h.62.f.10o.h.63.e.10n.h.64.d.10n.i.64.d.10m.i.65.d.10m.i.64.e.10m.i.63.f.10m.i.63.f.10m.i.63.g.10l.h.64.g.10k.i.65.f.10k.h.66.f.10j.i.66.f.10j.h.67.e.10k.h.66.f.10j.i.66.f.10j.h.67.e.10k.h.67.e.10k.g.68.e.10j.h.67.e.10j.i.67.e.10j.i.67.e.10j.i.67.e.10i.i.67.g.10h.i.67.g.10g.i.68.g.10g.i.1e.1.4u.f.10g.h.1e.1.4v.f.10f.i.1d.2.4v.f.10f.i.1c.2.4w.f.10e.i.6b.f.10e.i.6b.f.10d.j.6b.f.10d.j.6b.f.10d.i.6b.f.10d.i.6c.f.10d.i.6c.f.10d.h.6d.f.10c.i.6d.f.10c.i.6d.f.10c.h.6e.f.10b.i.6f.e.10b.i.6f.e.10b.h.6f.e.10c.h.6f.e.10b.i.6f.e.10b.h.6g.e.10b.h.6g.d.10b.h.6h.d.10b.h.6h.d.10a.i.6h.d.10a.i.6h.d.10a.h.6i.d.109.i.6i.d.109.h.6j.d.109.h.6j.d.108.i.6j.d.108.i.6j.d.107.i.6j.e.107.i.6j.e.106.i.6k.e.106.i.6k.e.105.i.6l.e.105.i.6l.e.105.i.6l.e.105.i.6l.e.105.h.6m.d.105.h.6m.e.105.h.6m.e.104.h.6n.f.103.h.6m.f.103.i.6m.f.103.h.6n.f.103.h.6n.f.103.g.6o.f.102.h.6o.f.102.h.b.1.6c.f.101.h.a.1.6e.e.102.h.8.2.6f.e.102.h.6.3.6g.e.101.i.4.2.6j.e.101.h.3.2.6l.e.101.h.6q.e.100.h.6r.f.zz.h.6r.e.100.h.6r.e.zz.i.6q.g.zy.h.6r.g.zy.h.6r.g.zx.i.6q.h.zx.h.6r.h.zx.h.6r.h.zw.h.6t.f.zw.h.6u.f.zw.g.6u.g.zw.f.6v.g.zw.g.6u.g.zw.g.6u.g.zv.h.6u.g.zu.i.6u.g.zt.i.6v.f.zu.i.6v.f.zu.i.6v.f.zu.h.6w.f.zt.i.6v.g.zt.h.6w.g.zs.i.6w.g.zs.i.6w.g.zr.i.6x.f.zs.i.6x.f.zs.h.6y.f.zr.i.6y.f.zr.i.6y.e.zs.h.6z.e.zr.i.6z.d.zs.i.6z.e.zr.h.6z.f.zq.i.70.e.zq.h.70.e.zq.i.70.e.zq.i.70.f.zo.i.71.g.zn.i.71.f.zn.j.71.f.zn.j.71.f.zn.j.71.f.zn.i.72.f.zm.i.73.f.zm.i.73.f.zl.i.74.f.zl.i.74.e.zm.h.75.e.zl.i.75.e.zl.i.75.e.zl.h.76.e.zl.h.75.f.zk.h.76.f.zk.g.77.f.zj.i.76.f.zj.h.77.f.zi.i.77.f.zi.h.77.g.zi.g.79.f.zh.h.79.f.zh.h.79.f.zg.i.79.f.zg.i.79.e.zh.h.7a.e.zg.i.7a.d.zh.i.7a.d.zh.h.7b.d.zh.h.7b.d.zg.h.7c.d.zg.h.7c.d.zf.i.7b.e.zf.h.7c.d.zg.h.7c.d.zf.i.7c.d.zf.h.7d.d.ze.i.7d.d.ze.i.7c.e.zd.j.7c.e.zd.i.7e.d.zd.i.7e.d.zd.h.7f.e.zb.i.7f.e.za.j.7f.e.za.i.7g.f.z8.i.7h.f.z8.i.7h.f.z7.j.7h.g.z6.i.7j.f.z6.i.7j.h.z4.i.7k.g.z3.i.7l.g.z3.i.7l.i.z1.i.7l.j.yz.i.7m.j.yz.i.7n.j.yx.i.7p.j.yw.j.7p.j.yv.i.7q.k.yu.i.7r.k.ys.j.7s.k.yr.i.7s.l.yr.i.7u.k.yq.h.7w.j.yq.g.7y.j.yo.h.7z.j.yn.h.80.j.yl.h.81.k.yk.h.82.k.yi.h.83.l.yh.h.83.m.yf.h.85.l.ye.j.85.k.ye.j.87.j.yc.k.87.j.yc.j.88.j.yc.j.8b.h.ya.j.8d.h.y9.j.8d.i.y8.j.8d.i.y7.j.8e.i.y7.j.8f.h.y7.j.8g.h.y5.k.8g.h.y5.j.8i.h.y4.j.8i.h.y4.i.8j.h.y4.h.8k.h.y4.h.8l.g.y3.i.8l.g.y3.i.8l.g.y2.j.8l.g.y2.i.8o.d.y3.i.8o.d.y2.i.8p.d.y2.h.8p.e.y1.i.8q.d.y0.i.8r.d.y0.i.8q.e.y0.h.8r.d.y0.i.8r.d.y0.h.8s.e.xz.h.8r.e.y0.g.8s.e.y0.g.8s.e.xz.h.8s.e.xz.g.8t.d.y0.f.8u.d.xz.g.8t.d.y0.f.8u.d.xz.h.8t.c.y0.h.8t.c.y0.h.8s.c.y0.h.8t.c.y0.h.8t.b.y1.h.8s.b.y1.h.8t.b.y1.h.8s.b.y1.h.8t.b.y1.h.8s.b.y2.h.8s.b.y1.h.8s.b.y2.h.8s.b.y2.h.8r.b.y3.g.8s.b.y3.g.8r.b.y3.g.8s.b.y3.g.8r.b.y3.h.8r.b.y3.g.8r.c.y3.g.8r.b.y4.g.8q.c.y3.g.8r.b.y4.g.8q.c.y4.f.8r.b.y5.f.8q.c.y5.e.8r.c.y5.e.8q.c.y6.e.8q.c.y5.f.8q.b.y6.e.8q.b.y7.d.8q.b.y8.c.8r.a.y8.d.8q.a.y7.e.8q.b.y6.e.8r.a.y7.d.8r.a.y7.e.8r.9.y7.e.8r.a.y6.d.8t.9.y6.d.8t.a.y5.d.8t.a.y5.d.8t.b.y3.d.8u.b.y3.d.8u.b.y2.e.8v.a.y1.f.8v.a.y0.g.8v.a.wx.e.o.g.8x.a.wu.m.g.h.8y.a.wr.z.1.3.1.i.8z.9.wq.1m.90.a.wn.1o.90.a.wm.1o.91.a.wl.1p.91.b.wj.1o.93.b.wi.1o.95.a.wh.1o.96.b.wg.1n.98.a.wf.1o.98.a.wf.i.5.11.98.a.we.f.k.r.97.a.we.e.s.k.97.b.wc.e.13.2.7.1.97.b.wc.e.al.a.wc.d.am.b.wb.c.an.b.wb.c.ao.a.wb.c.ao.a.wb.c.ao.a.wb.c.ao.a.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.a.wb.b.ap.a.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.9.wb.c.ap.a.wa.c.ap.a.wa.c.ap.a.wb.c.ap.a.wa.c.ap.a.wa.c.ap.a.wa.c.ap.a.wa.c.ap.a.wa.c.ap.a.wa.c.aq.9.wa.c.aq.a.wa.b.aq.a.wa.c.ap.a.wa.c.ap.a.wa.c.aq.9.wa.c.aq.a.w9.c.aq.a.w9.c.ar.9.w9.c.ar.9.wa.b.ar.a.w9.c.aq.a.w9.c.ar.9.w9.c.ar.9.w9.c.ar.a.w8.c.ar.a.w8.c.as.9.w8.c.as.9.w9.c.ar.a.w8.c.ar.a.w8.c.as.a.w7.c.as.a.w7.c.as.a.w7.c.at.a.w6.c.at.a.w7.b.at.a.w6.c.at.b.w6.b.au.b.w5.c.at.b.w5.c.au.b.w4.c.au.c.w3.c.av.b.w3.c.av.c.w2.c.aw.b.w3.b.ax.b.w1.c.ax.c.w0.d.ax.b.w1.c.ax.c.w0.c.ay.c.vz.c.ay.c.vz.c.az.c.vy.d.az.b.vz.c.az.c.vy.c.b0.b.vy.c.b1.b.vx.c.b1.b.vx.c.b1.c.vx.b.b2.c.vw.b.b2.d.vv.b.b3.c.vv.b.b4.c.vu.b.b4.c.vu.b.b5.c.vt.c.b5.c.vs.c.b6.c.vr.b.b7.c.vr.c.b7.c.vq.c.b8.c.vp.d.b8.c.vo.d.b8.c.vp.c.b9.c.vo.c.ba.c.vn.c.bb.c.vm.c.bc.c.vl.c.bc.c.vl.c.bd.c.vk.c.be.c.vj.c.bf.c.vi.c.bf.c.vi.d.bf.c.vi.c.bg.c.vh.c.bh.c.vg.c.bh.d.vf.c.bi.c.vg.b.bi.d.vf.b.bj.c.vf.c.bi.d.ve.c.bj.d.vd.c.bk.c.vd.c.bl.c.vc.c.bm.c.vb.c.bm.c.vb.c.bm.d.va.c.bn.d.v9.c.bp.c.v9.b.bp.c.v9.c.bo.d.v8.c.bo.d.v8.c.bo.e.v7.c.bp.e.v6.c.bp.e.v6.c.bq.e.v5.c.bq.f.v4.c.br.f.v4.c.br.f.v3.c.bs.e.v3.c.bt.e.v2.c.bu.e.v1.c.bu.f.v0.c.bv.f.uz.d.bv.e.v0.c.bw.e.uz.c.bw.f.uy.c.bx.f.ux.c.by.e.ux.c.bz.e.uw.c.bz.f.uv.c.c0.e.uw.b.c1.e.uv.b.c1.f.uu.b.c2.e.uu.c.c1.f.ut.c.c2.e.ut.c.c3.e.us.c.c4.d.us.c.c4.e.us.b.c5.d.us.b.c6.d.ur.c.c5.d.ur.c.c6.c.ur.c.c8.b.uq.c.c9.a.uq.d.ca.9.uq.c.cb.a.uo.c.cc.a.un.c.cd.a.um.c.cd.b.ul.d.cc.c.uk.d.cc.d.uj.d.cd.d.ui.d.cd.d.ui.d.ce.d.ui.c.cf.c.ui.c.cg.c.uh.c.ch.b.uh.c.ci.b.ug.c.ci.b.ug.c.cj.b.uf.c.cj.b.uf.c.ck.b.ue.c.ck.b.ue.d.cj.c.ue.c.ck.c.ud.c.cl.c.uc.c.cl.c.uc.c.cm.c.ub.c.cm.d.ua.d.cm.d.ua.c.cn.c.ua.c.co.c.u9.c.co.d.u8.c.cp.c.u8.c.cq.c.u7.c.cr.c.u6.d.cq.c.u7.c.cr.c.u6.c.cr.d.u5.c.cs.d.u4.c.ct.c.u5.b.cu.c.u4.c.ct.d.u3.c.cu.c.u3.c.cv.c.u2.c.cv.d.u1.c.cw.c.u1.c.cx.c.u0.c.cy.c.tz.c.cy.c.u0.b.cz.c.tz.b.d0.c.ty.b.d0.c.ty.c.d0.c.tx.d.d0.c.tx.c.d0.d.tw.d.d0.d.tv.d.d1.c.tv.d.d1.d.tu.d.d2.d.tu.d.d2.c.tu.d.d3.c.tt.d.d4.c.ts.d.d4.d.tr.d.d5.c.tr.d.d6.c.tq.e.d6.b.tq.e.d6.c.tq.d.d7.c.tp.e.d6.d.to.e.d7.c.tp.d.d8.c.to.d.d8.d.tn.d.d9.d.tn.c.da.d.tm.c.db.d.tl.c.db.d.tl.c.dc.d.tl.c.dc.c.tl.c.dd.c.tk.c.de.c.tj.c.de.c.tk.b.df.c.tj.b.dg.b.tj.c.df.c.tj.b.dg.b.tj.b.dh.b.ti.b.dh.c.th.b.di.c.th.b.dh.d.tg.b.di.c.tg.b.di.d.tg.b.di.d.tf.b.dj.c.tf.b.dk.c.te.b.dl.b.tf.b.dk.d.td.b.dl.d.tc.b.dm.d.tb.c.dl.d.tc.b.dm.d.tb.b.dn.d.ta.b.do.d.t9.b.do.d.t9.c.do.d.t9.b.dp.d.t8.c.dp.c.t9.b.dp.d.t8.b.dq.c.t8.c.dq.b.t8.c.dr.b.t8.b.dr.c.t7.b.ds.c.t6.c.dr.e.t5.b.ds.d.t5.b.ds.e.t4.c.ds.d.t5.b.dt.d.t4.c.dt.c.t5.b.du.c.t4.b.dv.b.t5.b.dv.b.t4.b.dv.c.t3.b.dw.c.t2.c.dv.c.t3.b.dw.c.t2.b.dw.d.t2.b.dw.c.t2.b.dx.c.t2.a.dy.c.t1.b.dx.c.t2.a.dy.c.t1.b.dy.c.t0.b.dy.c.t0.b.dz.c.t0.b.dz.b.t0.b.dz.c.t0.a.e0.c.sz.b.e0.c.sz.a.e0.d.sy.b.e0.d.sx.b.e0.d.sy.a.e1.d.sx.b.e1.c.sx.b.e2.b.sy.a.e3.b.sx.b.e2.b.sx.b.e3.b.sx.b.e2.c.sw.b.e3.b.sw.c.e2.c.sw.b.e3.b.sw.c.e2.b.sw.c.e3.b.sw.c.e2.c.sv.c.e3.b.sw.b.e3.c.sv.c.e3.c.sv.b.e3.c.sv.b.e4.c.sv.b.e3.c.sv.b.e4.c.sv.b.e4.b.sv.b.e5.a.sw.b.e4.c.su.b.e4.d.su.b.e4.c.su.c.e3.d.su.b.e4.c.su.b.e4.d.st.c.e3.d.su.b.e3.e.st.b.e4.d.su.b.e4.d.st.b.e5.c.st.c.e4.c.su.b.e4.d.st.c.e3.d.st.c.e4.c.su.b.e6.b.st.c.e5.b.su.b.e6.a.sv.b.e5.b.su.b.e5.b.su.b.e6.b.su.b.e5.b.su.b.e5.b.sv.b.e5.b.su.b.e5.c.su.b.e5.b.su.b.e5.c.su.a.e6.b.su.b.e5.b.su.b.e6.b.su.b.e5.b.su.b.e6.b.su.a.e6.b.su.b.e6.b.st.b.e6.b.su.b.e6.a.su.b.e6.b.st.b.e6.b.su.b.e6.b.st.b.e6.b.st.c.e5.c.st.b.e6.b.st.b.e6.c.st.b.e5.c.st.b.e5.c.su.b.e5.c.st.c.e4.c.st.c.e4.c.su.c.e4.c.st.c.e4.c.su.b.e4.c.su.c.e3.c.sv.b.e4.b.sv.c.e3.c.sv.b.e4.b.sv.c.e4.b.sv.b.e4.b.sv.b.e4.b.sw.b.e3.b.sw.b.e3.c.sw.a.e3.c.sw.a.e4.b.sx.a.e3.b.sx.a.e3.c.sw.b.e3.b.sx.a.e4.a.sx.b.e3.b.sw.b.e3.b.sx.a.e4.a.sx.b.e3.b.sx.a.e4.a.sx.b.e3.a.sx.b.e3.b.sx.b.e2.b.sx.b.e3.b.sx.b.e2.b.sx.b.e3.a.sy.b.e2.b.sx.b.e2.b.sy.b.e2.a.sy.b.e2.b.sy.b.e1.b.sy.b.e2.a.sy.b.e2.a.sz.a.e2.b.sy.a.e3.a.sy.b.e2.a.sz.a.e2.b.sy.b.e1.c.sy.a.e1.d.sx.b.e0.d.sy.a.e0.d.sy.b.dz.d.sy.c.dz.d.sy.b.dz.d.sy.c.dz.d.sy.b.dy.e.sz.a.dz.e.sy.a.dz.e.sy.a.e0.d.sz.a.e0.c.sz.a.e0.c.sz.b.e0.b.t0.a.e0.b.t0.b.e0.b.sz.b.e0.b.t0.a.e1.a.t0.b.e0.a.t1.a.e0.b.t0.b.dz.b.t1.a.dz.b.t1.b.dz.a.t2.b.dy.b.t1.b.dy.b.t1.c.dx.b.t2.b.dy.b.t1.c.dx.b.t1.d.dx.b.t1.c.dx.b.t1.c.dy.b.t0.c.dy.b.t1.b.dy.c.t0.b.dy.c.t1.b.dx.d.t0.c.dx.c.t1.b.dx.c.t1.b.dx.d.t1.a.dy.c.t1.b.dx.d.t1.b.dx.c.t1.b.dx.c.t2.b.dw.d.t1.b.dx.c.t1.c.dw.d.t1.c.dv.d.t1.c.dw.c.t1.d.dv.d.t1.c.dv.d.t1.c.dw.c.t2.c.dv.c.t2.c.dv.c.t3.b.dv.c.t3.b.dw.c.t3.a.dw.c.t3.a.dw.c.t4.a.dw.b.t4.a.dw.c.t4.a.dv.c.t4.a.dw.b.t4.a.dw.c.t4.a.dw.b.t4.a.dw.b.t4.b.dw.b.t3.b.dw.b.t4.b.dw.a.t4.c.dv.b.t3.c.dv.b.t3.c.dw.a.t4.c.dv.b.t4.b.dw.a.t4.c.dv.a.t4.c.dv.b.t4.c.du.b.t4.c.dv.a.t4.c.dv.b.t4.b.dv.b.t4.c.dv.a.t5.b.dv.a.t5.b.dv.b.t4.c.dv.a.t5.b.dv.a.t5.c.du.b.t4.c.dv.a.t5.c.du.a.t6.b.du.a.t6.c.dt.b.t6.b.du.a.t7.a.du.a.t7.a.du.b.t6.b.dt.b.t6.b.du.a.t7.a.du.b.t6.a.du.b.t6.a.dv.b.t6.a.du.b.t6.a.du.b.t6.a.dv.a.t6.a.dv.a.t6.a.dv.b.t5.b.du.b.t5.b.du.c.t4.b.du.c.t5.a.dv.c.t4.a.dv.c.t4.a.dv.d.t4.a.dv.c.t4.a.dv.d.t3.a.dv.d.t3.a.dw.d.t2.a.dw.d.t2.a.dx.c.t2.a.dx.d.t1.b.dw.d.t2.a.dw.d.t2.a.dx.c.t2.a.dx.d.t1.9.dy.d.t1.a.dy.c.t1.a.dy.c.t1.a.dy.d.t0.a.dz.c.t1.9.dz.c.t1.9.dz.c.t1.9.e0.b.t1.9.e0.c.sz.a.e1.b.sz.a.e1.b.sz.a.e1.b.sz.a.e2.b.sy.a.e2.b.sy.a.e2.c.sx.a.e3.b.sx.a.e3.b.sx.a.e3.c.sw.a.e4.b.sw.a.e4.c.sv.a.e4.c.sv.9.e5.c.sv.9.e6.c.st.a.e6.c.st.a.e6.c.st.a.e7.b.st.a.e7.c.sr.a.e8.c.sr.a.e9.b.sr.a.e9.b.sr.a.e9.c.sq.a.ea.b.sq.a.ea.b.sp.b.eb.b.so.b.eb.b.so.b.ec.b.sn.a.ed.c.sm.a.ed.c.sl.b.ee.b.sl.a.ef.c.sk.a.ef.d.sj.a.ef.d.si.b.eg.c.si.b.eg.d.sh.a.eh.d.sh.a.eh.e.se.c.ei.d.sd.c.ej.e.sc.c.ek.d.sc.b.el.d.sb.c.el.e.sa.c.el.d.sb.c.em.c.sa.c.en.c.sa.c.en.c.s9.c.eo.d.s8.c.ep.c.s8.c.ep.d.s7.b.er.c.s6.c.er.d.s5.b.es.d.s5.b.et.c.s4.c.et.d.s3.c.et.d.s2.c.ev.c.s2.c.ev.c.s2.b.ew.d.s0.c.ex.c.s0.b.ey.c.s0.b.ez.c.ry.c.ez.c.ry.b.f1.b.ry.b.f1.c.rw.c.f1.c.rw.c.f2.c.rv.c.f2.c.ru.c.f3.c.ru.c.f4.c.rt.b.f5.c.rs.c.f5.d.rr.b.f6.d.rr.b.f7.c.rq.c.f7.d.rp.b.f8.d.rp.b.f8.d.ro.b.fa.c.ro.b.fa.d.rm.b.fb.d.rm.b.fb.d.rl.c.fc.c.rl.b.fd.d.rj.c.fd.d.rj.b.fe.d.rj.b.fe.e.rh.b.fg.d.rh.b.fg.d.rg.c.fg.d.rg.b.fh.e.rf.b.fh.e.re.b.fj.d.re.b.fj.e.rd.a.fl.d.rd.9.fm.e.rb.b.fm.e.ra.a.fo.d.r9.b.fp.c.r9.b.fp.c.r8.b.fr.b.r8.b.fr.c.r6.b.fs.c.r6.b.ft.b.r5.c.ft.b.r5.b.fv.b.r3.c.fv.b.r2.c.fw.b.r2.c.fw.c.r0.d.fx.b.r0.c.fy.b.r0.c.fy.c.qy.c.g0.b.qy.c.g0.c.qx.b.g1.c.qx.b.g2.c.qw.a.g3.c.qv.b.g3.c.qu.c.g3.c.qu.b.g5.c.qs.c.g5.c.qs.c.g6.b.qr.d.g6.c.qq.c.g7.c.qq.c.g8.b.qp.d.g8.b.qp.c.ga.a.qp.c.ga.b.qn.c.gb.b.qn.c.gb.b.qm.c.gd.a.qm.c.gd.b.ql.b.gf.a.qk.c.gf.a.qk.c.gf.b.qi.d.gf.b.qi.c.gh.a.qh.d.gh.b.qg.c.gi.b.qg.c.gj.b.qf.c.gj.c.qd.c.gk.c.qd.c.gk.d.qc.b.gl.d.qc.b.gl.e.qa.b.gm.e.qa.b.gn.d.qa.b.gn.e.q9.a.go.e.q8.b.go.e.q7.b.gq.e.q6.b.gq.e.q5.b.gr.e.q5.b.gr.f.q3.b.gt.e.q3.b.gt.e.q3.b.gu.d.q3.a.gv.e.q1.b.gw.d.q1.a.gx.d.q0.b.gx.e.pz.a.gz.d.py.b.gz.e.px.b.gz.e.pw.b.h1.e.pv.b.h1.e.pv.a.h3.d.pu.b.h3.e.pt.b.h3.e.ps.c.h3.e.ps.b.h5.e.pr.b.h5.e.pr.b.h6.d.pq.c.h6.d.pq.b.h7.e.pp.b.h8.d.po.b.ha.c.po.b.ha.c.pn.c.hb.b.pn.b.hc.c.pl.b.he.b.pl.b.he.b.pk.b.hf.b.pk.b.hg.a.pk.a.hh.a.pj.b.hh.b.pi.a.hi.b.ph.b.hj.a.ph.b.hj.b.pf.b.hk.b.pf.b.hk.b.pe.b.hm.b.pd.b.hm.c.pb.b.hn.c.pa.c.ho.c.p9.b.hp.c.p8.c.hp.d.p7.b.hq.d.p6.c.hr.d.p5.c.hr.d.p4.c.hs.d.p4.c.ht.d.p2.c.hv.c.p2.c.hv.d.p0.d.hw.c.p0.c.hx.d.oy.d.hy.c.oy.d.hy.c.oy.c.hz.c.ox.d.hz.d.ow.c.i1.c.ov.c.i2.c.ou.d.i2.c.ou.c.i4.c.ot.b.i5.c.os.b.i6.c.os.b.i7.b.or.b.i8.c.oq.b.i8.c.op.c.i9.b.oo.c.ia.c.on.c.ia.c.om.c.ib.c.ol.c.ic.c.ol.c.ic.d.oj.c.id.d.oi.d.id.e.oh.c.ie.e.og.d.ie.e.og.c.if.e.of.c.ih.e.od.c.ii.e.od.c.ii.e.oc.c.ik.d.ob.c.il.e.oa.c.im.d.o9.c.in.d.o8.c.ip.d.o7.c.ip.d.o6.c.ir.d.o5.c.is.c.o4.c.it.d.o3.b.iv.c.o2.c.iv.d.o0.c.ix.c.nz.d.ix.c.ny.d.iy.d.nx.d.iy.d.nw.c.j0.d.nv.c.j1.d.nu.d.j2.c.nu.c.j3.c.nt.d.j4.b.ns.d.j5.b.nr.d.j7.b.np.d.j8.b.np.c.j9.c.nn.c.jb.b.nm.c.jc.c.nk.d.jc.c.nj.d.jd.d.nh.d.je.d.ng.d.jf.d.ng.c.jh.d.ne.d.jh.d.nc.e.ji.d.nb.f.8c.19.6.5.9n.d.n9.f.85.22.9d.d.n8.f.80.2n.8y.d.n7.f.7v.2y.8u.d.n6.f.7s.34.8r.d.n5.f.7o.3e.8m.d.n4.f.7m.3k.8k.c.n3.g.7j.3q.8i.c.n1.g.7i.3u.8g.d.mz.f.7g.14.1.2.t.21.8e.c.my.e.7g.10.1q.1f.8c.c.my.d.7f.v.2i.w.8b.b.mx.e.7d.s.2t.r.8a.b.mw.e.7c.s.2z.p.88.b.mv.e.7a.r.38.m.86.c.ms.f.78.r.3c.n.84.c.mr.f.77.p.3j.l.83.d.mo.g.76.o.3p.k.81.d.mm.h.75.n.3v.j.80.c.ml.g.76.l.40.i.7z.d.mj.h.74.l.45.g.7z.c.mj.g.73.l.48.h.7y.b.mi.g.73.k.4b.h.7y.b.mh.f.72.k.4f.h.7w.b.me.h.71.k.4j.g.7v.b.md.h.71.k.4m.f.7v.a.md.g.71.i.4q.g.7t.b.ma.h.70.h.4v.f.7s.b.m9.g.71.g.4y.f.7r.b.m8.g.70.h.50.f.7q.b.m7.g.6z.i.52.f.7p.b.m6.g.6z.h.55.g.7n.c.m4.g.6y.h.59.f.7m.c.m3.g.6y.g.5c.f.7m.b.m2.h.6x.g.5e.f.7l.c.m0.h.6x.g.5g.f.7l.b.ly.i.6x.h.5h.e.7l.c.lw.i.6x.h.5j.e.7l.b.lu.j.6x.f.5n.e.7k.b.lt.j.6x.f.5p.e.7j.b.ls.i.6y.f.5r.e.7j.a.lq.j.6y.f.5s.e.7j.b.ln.j.6z.f.5v.c.7j.b.lm.j.6z.e.5y.c.7j.b.lj.k.6z.e.60.c.7i.b.lh.k.70.d.63.c.7h.c.lf.k.70.d.65.c.7g.c.le.j.72.c.66.d.7g.c.lc.j.72.c.68.c.7g.c.la.j.73.c.6a.c.7f.c.l9.j.73.d.6b.b.7g.b.l7.k.72.e.6d.b.7f.c.l5.k.72.e.6e.b.7f.c.l4.j.74.c.6h.b.7e.c.l2.k.74.c.6j.a.7f.c.kz.k.74.d.6k.b.7e.c.kx.k.75.d.6m.b.7e.b.kv.k.77.c.6n.b.7e.b.ks.l.78.c.6p.b.7d.c.kq.l.78.d.6q.a.7e.b.kp.k.79.d.6r.b.7d.c.km.k.7a.d.6t.a.7e.b.kl.k.7a.d.6u.a.7f.b.kj.j.7c.c.6w.a.7e.b.kh.j.7d.d.6w.a.7f.a.kf.k.7e.b.6y.b.7e.b.kc.k.7f.c.6z.a.7e.b.kb.j.7h.b.71.a.7d.c.k8.k.7h.c.71.a.7d.c.k6.l.7h.c.72.a.7d.c.k4.l.7j.b.74.a.7c.d.k2.l.7j.b.75.a.7d.c.k0.l.7k.c.76.9.7d.c.jy.m.7k.c.77.a.7c.d.jv.n.7l.c.78.9.7c.d.jt.n.7m.c.79.a.7b.e.jq.o.7n.b.7a.a.7b.e.jp.n.7o.c.7a.b.7a.e.jm.o.7p.c.7b.b.7a.e.jk.n.7s.c.7c.a.7b.e.ji.m.7t.c.7d.a.7c.d.jg.m.7v.b.7e.a.7d.c.je.m.7x.b.7f.9.7d.c.jc.m.7y.b.7g.9.7e.c.j9.m.7z.b.7h.a.7d.c.j8.m.80.b.7h.a.7d.c.j7.l.81.b.7i.a.7d.c.j5.l.83.b.7i.b.7d.b.j4.k.84.c.7i.b.7d.c.j1.k.86.b.7k.a.7d.d.iy.k.87.c.7k.b.7d.c.ix.j.89.c.7k.b.7d.c.iw.k.89.c.7k.b.7d.c.is.m.8a.c.7m.a.7d.c.ir.l.8c.c.7m.a.7e.c.ip.l.8d.c.7m.a.7e.c.in.l.8e.c.7o.9.7e.d.ik.m.8f.c.7o.a.7d.d.ih.o.8g.b.7p.a.7e.d.ie.o.8h.c.7p.a.7e.d.ic.o.8j.b.7q.a.7e.d.ib.o.8k.b.7q.b.7e.c.i9.o.8l.c.7r.a.7e.c.i7.p.8m.b.7s.a.7f.c.i4.n.8p.c.7s.b.7e.c.i2.o.8q.c.7t.a.7e.c.i1.m.8s.c.7u.a.7f.c.hy.m.8u.c.7u.a.7f.c.hx.l.8w.b.7v.a.7g.b.hw.k.8x.c.7w.9.7h.b.ht.l.8x.c.7x.9.7i.a.hr.m.8x.d.7x.9.7i.a.hq.l.8z.d.7x.9.7i.a.ho.m.90.c.7z.9.7h.b.hl.l.92.d.7z.9.7h.b.hk.k.94.c.80.9.7i.a.hi.k.95.d.80.a.7h.b.hg.k.96.c.81.a.7h.b.he.l.97.c.82.a.7g.c.hb.j.9a.c.83.a.7h.c.h8.l.9a.c.83.a.7h.c.h7.l.9b.b.84.a.7i.c.h4.j.9e.c.84.a.7i.c.h3.i.9g.b.86.9.7i.c.h2.h.9i.b.86.9.7i.c.h1.h.9i.c.86.9.7i.c.gz.h.9k.c.86.a.7h.c.gx.i.9l.c.87.9.7h.c.gv.i.9n.c.87.a.7h.b.gu.h.9o.b.89.a.7h.c.gr.i.9p.b.89.a.7i.b.gq.h.9r.b.89.a.7i.c.gj.3.2.f.9u.a.8a.a.7j.c.gg.k.9w.a.8a.b.7i.c.gf.j.9x.a.8b.c.7i.b.gf.h.9z.a.8c.b.7j.b.gb.j.9z.b.8c.b.7j.b.ga.i.a1.a.8d.b.7k.a.g7.k.a1.b.8e.b.7j.b.g4.l.a2.b.8e.b.7j.b.g2.l.a4.a.8f.b.7j.c.fz.m.a5.a.8g.a.7k.b.fy.l.a6.b.8g.a.7k.b.fw.l.a8.b.8g.a.7l.a.fv.l.a9.a.8h.a.7l.a.ft.l.ab.a.8h.b.7k.b.fq.l.ac.b.8h.b.7k.b.fo.l.ae.a.8j.a.7l.a.fn.l.af.a.8j.a.7l.b.fk.l.ag.a.8k.a.7l.b.fi.l.ai.a.8k.b.7l.b.ff.l.ak.a.8l.a.7l.b.fe.k.al.a.8m.a.7m.a.fc.k.am.b.8m.a.7m.b.fa.j.ao.a.8n.a.7m.b.f8.k.ao.b.8n.b.7l.b.f7.j.aq.b.8o.a.7l.c.f5.j.ar.b.8o.a.7l.c.f4.j.ar.c.8o.a.7m.b.f3.j.as.b.8q.9.7m.c.f0.j.au.b.8q.9.7m.c.ez.h.aw.c.8q.9.7n.b.ex.i.ax.b.8r.a.7m.b.ev.j.ay.b.8s.9.7m.c.et.i.b0.a.8t.a.7m.b.es.i.b0.b.8t.a.7m.c.ep.i.b2.a.8u.b.7l.c.eo.i.b3.a.8u.b.7m.c.em.i.b3.a.8v.b.7m.c.el.h.b5.a.8v.b.7n.b.ek.g.b6.b.8w.a.7n.c.eh.h.b7.a.8x.a.7n.c.ef.g.b9.b.8x.b.7n.b.ee.g.ba.b.8x.b.7n.b.ed.g.bb.a.8z.a.7n.c.eb.g.bb.b.8z.a.7o.b.ea.g.bc.a.90.a.7o.b.e9.g.bd.a.90.b.7n.c.e7.g.bd.b.90.b.7o.b.e6.g.be.a.92.a.7o.b.e4.h.be.b.92.a.7o.c.e2.f.bh.a.93.a.7o.c.e1.f.bi.a.93.a.7p.b.e0.e.bk.a.93.a.7p.c.dx.f.bk.a.94.b.7o.c.dw.f.bl.a.95.a.7p.b.du.g.bl.b.95.a.7p.c.ds.g.bm.b.96.9.7p.c.dr.g.bn.b.96.9.7q.b.dq.g.bn.b.97.a.7p.c.do.f.bp.b.97.a.7p.c.dn.f.bq.b.97.a.7q.c.dl.f.bq.b.99.a.7p.c.dj.g.br.b.99.a.7p.c.di.g.bs.b.99.a.7p.d.dh.e.bu.a.9a.a.7p.d.dg.e.bu.b.9b.9.7q.d.de.e.bu.c.9b.a.7p.d.dd.e.bv.b.9c.a.7p.e.db.e.bv.b.9d.a.7p.e.da.e.bw.b.9e.9.7p.e.d9.e.bx.b.9e.a.7p.d.d8.e.bx.b.9f.a.7p.e.d6.e.by.b.9f.a.7p.e.d6.d.by.c.9f.a.7p.e.d5.d.bz.b.9g.b.7o.f.d3.d.c0.b.9g.b.7q.e.d1.d.c1.b.9h.a.7q.e.d0.d.c1.c.9h.a.7r.d.cz.d.c2.b.9i.a.7r.d.cy.d.c2.c.9j.a.7s.b.cx.d.c3.b.9k.a.7s.b.cw.d.c4.b.9k.a.7t.a.cv.d.c5.b.9k.a.7t.a.cu.d.c5.b.9l.b.7s.a.ct.d.c6.b.9m.a.7s.9.ct.d.c7.a.9n.a.7s.9.cs.e.c6.b.9n.a.7s.a.cq.e.c7.b.9n.b.7r.a.cp.e.c7.b.9o.b.7r.b.cn.e.c7.c.9o.b.7r.b.cm.e.c8.c.9p.a.7r.c.cl.d.c9.c.9p.a.7s.b.cj.e.ca.b.9q.a.7t.b.ch.f.ca.b.9q.b.7s.b.cg.f.ca.c.9r.a.7t.b.ce.f.cb.b.9s.a.7t.b.ce.d.cc.c.9s.a.7u.a.cd.d.cd.c.9t.a.7t.b.cb.d.ce.b.9u.a.7t.b.ca.d.ce.c.9u.a.7u.a.c9.e.ce.c.9u.a.7u.b.c7.e.cf.b.9w.9.7v.a.c6.e.cf.c.9w.9.7v.b.c4.d.ch.b.9x.a.7u.b.c3.e.cg.c.9x.a.7v.a.c3.d.ch.c.9x.a.7v.b.c1.c.ci.c.9y.b.7u.b.c0.c.cj.c.9z.a.7v.a.bz.d.cj.c.9z.a.7v.b.bx.d.ck.c.9z.a.7v.b.bw.d.cl.b.a1.9.7w.a.bv.d.cl.c.a1.a.7v.b.bt.d.cm.b.a2.a.7w.a.bs.d.cm.c.a2.a.7w.a.br.d.co.b.a2.a.7w.b.bp.d.co.b.a4.a.7v.b.bn.e.cp.b.a4.a.7w.a.bm.f.co.c.a4.a.7w.b.bk.f.cp.b.a6.9.7x.b.bi.e.cq.c.a6.9.7x.b.bi.e.cq.c.a6.a.7w.b.bh.d.cr.c.a7.a.7x.a.bg.d.cs.c.a7.a.7x.a.bf.d.ct.b.a8.a.7x.b.bd.e.cs.c.a8.b.7w.b.bc.e.ct.c.a8.b.7x.a.bb.e.cu.b.aa.a.7x.a.ba.e.cv.b.aa.a.7x.a.b9.e.cv.c.aa.a.7x.b.b8.d.cw.b.ab.a.7y.b.b6.d.cx.b.ac.a.7x.b.b5.d.cx.c.ac.a.7x.b.b4.d.cy.b.ad.a.7y.b.b2.d.cy.c.ad.b.7x.b.b1.e.cy.c.ae.a.7y.a.b1.d.cz.b.af.a.7y.b.az.d.cz.c.af.a.7z.a.ay.e.cz.c.af.a.7z.a.aw.f.d0.c.ag.a.7y.b.au.f.d0.c.ah.a.7y.b.au.e.d1.c.ah.a.7z.a.at.d.d2.c.ai.a.7z.a.at.c.d3.c.ai.b.7y.b.ar.c.d3.c.ak.a.7z.a.aq.c.d4.c.ak.a.7z.a.ap.c.d5.b.al.a.7z.a.ao.c.d5.c.al.a.7z.a.an.d.d6.b.al.a.7z.a.an.c.d6.b.an.a.7y.b.ak.d.d7.b.an.a.7y.b.aj.e.d6.c.an.b.7y.a.aj.c.d8.b.ap.a.7y.a.ai.c.d8.c.ap.a.7y.a.ah.c.d9.b.aq.a.7y.a.ah.c.d8.c.ar.a.7x.a.ag.c.d9.c.ar.a.7x.b.ae.c.da.c.ar.a.7x.b.ae.b.da.c.as.a.7y.a.ad.c.da.c.as.b.7x.a.ac.c.da.c.au.a.7x.a.ab.c.db.b.av.a.7w.b.aa.c.dc.b.av.a.7w.b.a9.d.db.c.av.a.7w.b.a8.d.dc.b.aw.a.7w.b.a8.c.dd.b.ax.9.7w.b.a7.c.df.a.ax.a.7v.b.a6.c.df.b.ax.a.7v.b.a6.b.dg.a.ay.a.7v.b.a5.b.dh.a.az.9.7v.b.a4.c.dg.b.az.a.7u.b.a4.b.dg.b.b0.a.7u.b.a3.b.dh.b.b0.a.7t.c.a2.c.dg.b.b1.b.7s.c.a1.c.dh.b.b2.a.7s.c.a0.c.di.b.b2.a.7r.d.a0.c.dh.b.b3.b.7q.d.9z.c.di.b.b3.b.7q.d.9y.c.dj.a.b5.a.7p.e.9x.d.di.b.b5.a.7p.d.9y.c.dj.b.b5.a.7o.e.9x.d.dj.a.b6.a.7n.e.9x.d.dj.b.b7.a.7m.d.9y.c.dk.a.b8.a.7l.e.9x.c.dl.a.b8.a.7l.d.9y.b.dl.b.b8.a.7k.d.9y.b.dm.a.ba.9.7j.e.9x.b.dn.a.bb.9.7i.d.9y.a.dn.b.bb.9.7h.d.9y.b.dn.a.bc.9.7h.c.9z.a.do.a.bc.a.7f.c.9z.b.dn.a.bd.a.7e.c.9z.b.do.a.bd.b.7c.d.9z.a.do.b.bd.b.7a.e.9z.b.do.a.be.b.78.g.9y.c.dn.b.bf.a.77.g.9y.c.do.b.bf.a.76.g.9z.b.dp.b.bf.b.73.h.9z.c.dp.a.bg.b.71.i.9z.c.dp.b.bh.a.70.i.9z.c.dq.a.bi.a.6y.j.a0.b.dr.a.bi.a.6x.j.a1.b.dq.a.bk.9.6v.j.a2.b.dr.a.bk.a.6s.j.a4.b.dq.b.bk.a.6r.j.a4.b.dr.a.bl.a.6p.j.a5.b.ds.a.bm.9.6o.j.a6.b.dr.b.bm.a.6m.i.a7.b.ds.a.bn.a.6l.h.a8.c.ds.a.bn.a.6j.i.a9.b.ds.b.bo.a.6h.h.aa.c.ds.a.bp.a.6g.g.ac.b.dt.a.bp.a.6f.g.ac.b.dt.b.bp.b.6e.e.ae.b.dt.a.br.a.6d.e.ae.b.du.a.br.a.6c.e.ae.c.du.9.bs.a.6b.d.ag.b.du.9.bu.a.69.d.ag.c.du.9.bu.a.68.d.ah.b.du.a.bu.b.67.c.ah.b.dv.a.bu.b.66.c.ai.b.dv.a.bv.a.65.c.ai.b.dv.a.bx.9.65.c.ai.b.dv.a.bx.a.63.c.ai.b.dw.a.bx.a.62.c.ai.b.dw.a.by.a.62.b.aj.b.dv.b.bz.a.60.b.aj.c.dv.b.bz.a.60.b.aj.b.dw.b.c0.9.5z.b.aj.c.dv.b.c1.a.5y.b.aj.b.dw.b.c1.a.5x.b.aj.b.dx.a.c2.a.5x.b.aj.b.dx.a.c3.9.5y.9.aj.b.dx.a.c4.a.5w.a.aj.b.dx.a.c4.a.5w.9.ak.b.dw.a.c5.b.5v.8.ak.b.dx.a.c6.a.5v.8.ak.a.dy.a.c6.a.5u.9.aj.a.dy.b.c6.a.5u.9.aj.a.dy.a.c8.a.5t.9.ai.a.dz.a.c8.a.5t.9.ai.a.dy.b.c8.a.5s.9.ai.b.dy.a.c9.b.5r.9.ai.b.dx.b.ca.a.5r.9.ah.b.dy.a.cb.b.5q.9.ah.b.dx.b.cb.b.5p.9.ah.b.dy.b.cc.b.5o.9.ah.b.dy.a.cd.b.5o.9.ah.a.dz.a.cd.b.5o.9.ag.b.dz.a.ce.a.5o.9.ag.b.dy.a.cf.a.5o.9.af.b.dz.a.cf.a.5o.9.af.b.dy.a.ch.a.5n.9.af.a.dz.a.ch.a.5n.9.ae.b.dz.a.ch.b.5m.9.ae.b.dz.9.cj.a.5m.9.ae.a.e0.9.cj.a.5m.9.ad.a.e0.a.cj.b.5l.9.ad.a.dz.a.cl.a.5l.9.ad.a.dy.b.cl.a.5l.a.ab.b.dy.b.cm.a.5k.a.ab.b.dy.a.cn.a.5k.b.a9.b.dz.a.cn.b.5j.b.a9.b.dy.b.co.a.5j.b.a8.b.dz.b.co.a.5j.a.a9.b.dy.c.co.b.5j.a.a8.a.dz.b.cq.a.5j.a.a7.b.dy.b.cr.a.5j.b.a6.b.dy.b.cr.b.5j.a.a6.a.dz.a.ct.a.5j.a.a5.b.dy.b.ct.b.5i.b.a4.b.dy.a.cu.b.5j.a.a4.a.dy.b.cv.a.5j.b.a2.b.dy.a.cw.b.5i.b.a2.b.dx.b.cw.b.5j.a.a2.a.dx.b.cy.b.5i.b.a0.a.9m.1.4b.b.cy.b.5i.b.a0.a.9e.9.4b.a.cz.b.5j.a.9z.b.98.s.3x.b.d0.a.5j.a.9z.b.94.10.3s.b.d2.a.5i.b.9y.a.8z.1a.3n.b.d3.a.5j.a.9y.a.8v.1h.3j.b.d4.a.5j.a.9y.9.8u.1o.3d.b.d6.a.5i.a.9x.a.8t.1r.3b.b.d6.a.5i.b.9w.a.8q.1w.38.b.d7.b.5h.b.9w.a.8p.1y.36.c.d8.a.5i.a.9v.b.8n.13.1.y.33.c.d9.b.5h.b.9u.a.8m.q.o.s.30.c.da.b.5h.b.9u.a.8l.o.v.q.2x.c.dc.a.5i.a.9t.a.8k.n.12.n.2v.c.dd.b.5h.a.9t.a.8i.l.19.n.2r.c.de.b.5h.a.9s.b.8h.k.1f.l.2p.b.dg.b.5h.a.9r.a.8g.j.1k.k.2m.d.dg.b.5h.a.9r.a.8f.h.1o.l.2j.d.di.b.5g.a.9q.b.8e.g.1s.k.2h.e.di.b.5g.a.9q.a.8d.h.1v.k.2d.f.dj.b.5g.b.9p.a.8c.g.1y.k.2b.e.dm.a.5g.c.9n.b.8b.g.21.k.28.e.dn.a.5g.d.9m.b.8a.f.26.j.25.e.dp.9.5h.c.9m.a.89.g.29.i.22.f.dq.a.5g.c.9l.b.87.g.2c.j.1y.g.dr.b.5g.b.9l.b.86.g.2e.k.1v.g.ds.b.5h.b.9k.a.85.h.2h.k.1r.h.du.b.5g.b.9j.b.84.h.2j.l.1m.i.dw.b.5h.a.9j.a.84.h.2m.l.1g.l.dy.b.5g.a.9j.a.83.g.2q.m.1b.l.e0.b.5g.b.9h.a.83.g.2s.n.16.n.e2.a.5g.b.9h.a.83.f.2v.o.y.q.e4.b.5g.a.9g.b.83.d.2z.r.r.q.e6.b.5g.a.9g.a.85.c.32.x.a.w.e9.a.5g.b.9e.b.84.c.36.1y.eb.b.5f.b.9e.b.83.d.38.1v.ec.b.5g.a.9e.b.83.d.3a.1r.ef.a.5g.a.9d.b.83.c.3g.1k.ei.b.5g.a.9c.b.82.c.3i.1e.eo.a.5g.a.9c.a.83.c.3k.19.er.b.5f.a.9c.a.82.c.3o.12.ev.b.5g.9.9c.a.81.d.3w.r.ey.b.5g.a.9a.a.82.c.jn.b.5f.a.9a.a.81.c.jo.b.5f.a.9a.a.81.b.jq.a.5f.a.99.a.81.c.jq.a.5f.b.98.a.81.b.jr.b.5f.a.98.a.80.b.jt.a.5f.a.98.a.7z.b.ju.b.5f.a.96.b.7z.b.ju.c.5e.a.96.a.7z.b.jw.b.5f.9.96.a.7z.b.jw.b.5f.a.95.9.7z.b.jy.a.5f.a.94.a.7z.b.jy.b.5f.9.94.a.7y.b.k0.a.5f.9.94.a.7y.b.k0.a.5f.a.92.a.7y.b.k1.b.5e.a.92.a.7x.c.k2.a.5f.9.92.a.7w.c.k3.b.5e.a.91.a.7w.b.k5.a.5e.a.91.a.7v.b.k6.a.5e.a.91.a.7v.b.k6.b.5d.b.90.9.7v.c.k6.b.5e.a.90.9.7v.b.k7.b.5e.b.8z.9.7u.c.k8.b.5d.b.8y.a.7u.b.k9.b.5e.b.8x.a.7t.b.ka.b.5e.b.8x.a.7t.b.kb.b.5e.a.8x.a.7s.b.kc.b.5e.a.8x.9.7t.a.kd.b.5e.a.8x.9.7s.b.ke.b.5d.b.8w.9.7r.b.kf.b.5d.b.8w.9.7r.b.kg.b.5c.b.8w.9.7q.b.kh.b.5d.b.8v.9.7q.b.kh.c.5c.b.8u.a.7p.b.kj.b.5d.a.8u.a.7o.c.kj.b.5d.a.8u.a.7o.b.kl.a.5d.a.8u.a.7n.c.km.9.5d.a.8u.a.7m.c.kn.a.5c.a.8v.9.7m.b.ko.b.5b.a.8v.9.7l.b.kq.a.5b.b.8u.9.7l.b.kq.b.5b.a.8u.9.7k.b.ks.a.5a.b.8u.a.7j.b.ks.b.59.b.8u.a.7i.b.kt.b.59.b.8u.a.7h.c.ku.a.5a.a.8u.a.7h.b.kv.b.59.a.8u.a.7g.b.kx.a.58.b.8u.a.7g.b.kx.b.58.a.8u.a.7f.b.ky.b.58.a.8u.a.7e.c.kz.a.57.b.8u.a.7e.b.l0.b.57.a.8v.a.7c.b.l2.a.57.a.8v.a.7b.c.l2.b.56.a.8v.a.7a.c.l3.b.55.b.8v.a.7a.c.l4.b.54.b.8w.a.78.c.l5.b.54.b.8w.a.78.b.l7.a.54.b.8w.a.77.c.l7.b.53.a.8x.a.76.c.l8.b.53.a.8y.a.75.b.la.a.53.a.8y.a.74.c.la.a.53.a.8y.a.74.b.lb.b.52.a.8y.b.72.b.ld.a.50.c.8y.b.72.b.ld.a.50.b.90.a.71.b.le.a.50.b.90.a.71.a.lg.a.4z.b.90.b.6z.b.lg.a.4y.b.92.a.6z.a.lh.a.4y.b.92.a.6y.b.li.a.4x.b.92.b.6x.a.lj.a.4x.a.94.a.6w.a.lk.a.4w.b.94.a.6w.a.lk.a.4w.a.95.b.6u.a.lm.9.4v.b.96.a.6t.b.ll.a.4v.b.96.a.6t.a.lm.a.4u.b.98.a.6r.b.lm.a.4u.b.98.a.6q.b.ln.a.4t.c.98.b.6p.b.ln.a.4s.c.9a.b.6n.b.lo.a.4s.b.9b.b.6n.b.lo.a.4r.b.9d.b.6l.b.lp.a.4q.c.9d.c.6k.a.lq.a.4p.c.9f.b.6j.b.lq.a.4o.c.9g.c.6h.c.lq.a.4n.c.9i.b.6h.b.lr.a.4m.c.9k.a.6g.b.ls.a.4l.c.9l.b.6f.b.ls.a.4k.d.9m.b.6d.b.ls.b.4j.d.9n.c.6c.a.lt.b.4i.d.9p.c.6a.b.lt.a.4i.e.9p.c.6a.a.lu.a.4g.f.9r.c.68.a.lv.a.4f.e.9u.c.67.a.lu.a.4f.e.9v.d.65.a.lv.a.4e.f.9w.d.63.b.lv.a.4d.f.9x.d.63.a.lv.a.4d.f.9z.d.61.a.lw.a.4b.g.a1.d.5z.b.lv.b.4a.g.a3.d.5x.b.lw.a.4a.g.a4.e.5v.c.lv.b.49.g.a6.d.5v.b.lv.b.48.g.a9.d.5t.c.lu.c.47.g.ab.d.5s.b.lv.b.46.h.ad.d.5q.c.lu.c.45.h.af.d.5o.c.lv.b.43.j.ag.f.5m.b.lv.c.42.i.aj.f.5k.c.lu.c.42.i.al.e.5k.b.lv.b.43.h.an.f.5i.b.lu.c.40.i.aq.f.5g.b.lu.c.40.g.au.f.5f.b.lt.c.40.g.aw.f.5d.b.lt.d.3y.h.ay.g.5a.c.lr.e.3y.g.b1.g.59.b.lr.e.3y.g.b3.h.56.b.lr.d.3z.g.b6.h.54.b.lp.f.3y.g.b7.i.52.b.lp.f.3x.g.ba.i.51.b.ln.g.3x.g.bc.k.4w.c.ln.g.3x.f.bf.k.4v.c.ll.h.3w.f.bi.k.4t.c.ll.h.3w.g.bk.j.4s.c.lj.h.3w.g.bo.i.4q.c.lj.h.3w.g.bs.h.4n.d.lh.i.3v.h.bu.h.4m.c.lh.h.3v.h.by.h.4k.b.lg.h.3w.g.c2.g.4h.d.lf.h.3w.g.c4.h.4f.c.lf.h.3w.g.c6.i.4c.b.lg.g.3w.h.c8.i.4b.b.le.g.3y.g.cb.i.48.b.ld.h.3y.g.cd.i.47.a.ld.h.3x.h.cg.i.45.a.lb.h.3x.h.ck.i.42.a.la.i.3x.g.cn.i.40.b.l9.i.3w.g.cr.i.3y.b.l7.j.3w.g.ct.i.3w.b.l6.j.3x.g.cw.h.3v.b.l5.j.3x.g.cy.i.3s.b.l5.j.3x.g.d0.i.3r.b.l4.i.3x.g.d3.j.3o.b.l4.h.3y.g.d6.j.3l.b.l3.h.3z.g.d8.k.3j.b.l1.i.3z.g.da.k.3h.b.l1.h.40.f.de.i.3g.c.l0.h.3z.g.dh.i.3d.c.kz.i.3z.g.dj.j.3b.b.ky.i.3z.h.do.h.38.b.kx.j.3z.g.dr.i.36.b.kw.i.40.g.ds.j.34.b.kw.h.41.g.dv.i.33.b.ku.i.40.g.dy.j.30.b.ku.h.41.f.e2.i.2y.c.kt.h.3z.h.e4.i.2x.b.ks.h.40.h.e7.h.2v.b.kr.i.40.g.eb.h.2t.b.kp.i.41.f.ef.h.2q.b.kp.h.42.f.ei.h.2o.a.ko.i.41.g.ek.h.2m.b.kn.h.42.g.el.i.2k.b.kn.h.42.g.eo.i.2i.b.km.h.42.f.es.h.2g.b.km.g.43.f.eu.i.2e.b.kk.h.42.g.ex.i.2b.b.kk.h.40.i.ez.i.29.c.kh.i.42.h.f1.i.27.c.kh.h.43.h.f4.i.25.c.kg.h.43.g.f7.i.23.c.kg.h.42.h.fa.i.20.d.kf.h.41.i.fd.h.1y.d.kd.i.42.i.fg.h.1v.d.kd.i.41.i.fj.h.1t.e.kc.h.42.h.fm.h.1r.e.kb.h.43.g.fp.i.1p.d.ka.i.42.f.fu.i.1m.d.ka.h.43.g.fv.i.1j.e.ka.h.42.h.fx.i.1h.f.k8.i.42.h.g0.i.1d.g.k8.h.43.g.g3.j.1a.g.k8.h.43.g.g6.i.17.g.k8.i.43.g.g9.j.12.h.k8.h.43.h.gc.i.z.i.k7.i.44.h.ge.k.s.k.k6.h.46.g.gh.l.n.m.k6.h.47.f.gk.o.1.1.a.q.k6.i.47.e.go.1n.k6.h.47.e.gr.1k.k7.h.47.d.gv.1h.k7.g.47.e.gy.1c.k9.g.46.g.gz.19.ka.f.47.g.h2.15.kb.e.47.h.h7.z.kb.f.47.g.hb.u.kd.f.46.h.hg.m.kh.d.46.h.hn.3.ku.d.46.h.12k.d.45.h.12l.d.46.g.12m.c.46.g.12m.c.45.g.12n.c.45.g.12n.c.44.g.12o.d.43.g.12o.c.44.g.12p.c.42.h.12q.b.41.i.12q.b.41.h.12s.b.40.h.12s.b.40.g.12u.b.3z.g.12v.a.3z.g.12v.b.3y.g.12w.b.3v.h.12y.a.3v.h.12y.b.3u.h.12z.b.3t.g.131.a.3s.h.132.a.3q.i.132.a.3q.i.133.a.3o.j.134.9.3o.j.135.9.3m.i.138.9.3l.i.138.a.3j.i.13a.a.3i.h.13c.a.3h.h.13d.a.3g.h.13e.a.3f.h.13f.b.3d.g.13h.b.3c.g.13i.b.3b.f.13k.b.39.g.13l.b.38.g.13m.b.37.g.13n.b.36.g.13o.b.33.i.13p.b.33.h.13q.b.32.g.13t.a.31.h.13t.b.2y.i.13u.b.2x.i.13w.a.2v.j.13x.a.2u.i.13z.a.2s.j.140.a.2r.k.140.b.2p.k.141.c.2n.k.142.c.2m.k.144.b.2k.h.149.b.2i.h.14c.b.2g.h.14d.b.2e.h.14f.c.2c.h.14h.c.29.i.14i.d.27.i.14k.c.27.h.14l.d.25.h.14n.c.23.i.14p.c.20.j.14q.d.1y.j.14s.e.1u.k.14u.e.1s.k.14w.e.1q.j.14y.f.1o.i.151.f.1m.g.155.f.1j.h.156.g.1h.g.159.g.1f.g.15b.h.1b.h.15c.i.18.i.15e.j.14.j.15g.k.10.j.15j.n.t.k.15l.p.o.m.15n.u.4.1.9.p.15p.1v.15r.1s.15v.1o.15y.1l.161.1j.163.1g.166.1d.169.19.16d.13.16j.x.16q.q.16x.8.17f.4.4sa5\"}";
 function surfLoad(){
-  try{ const t=localStorage.getItem(SURF_KEY); if(t) surfUnpack(t); }catch(e){}
+  try{
+    const adopted=+(localStorage.getItem(SURF_BAKE_KEY)||0);
+    if(adopted!==SURF_BAKE_VER){
+      if(surfUnpack(SURF_BAKED)){
+        localStorage.setItem(SURF_BAKE_KEY, String(SURF_BAKE_VER));
+        surfSave();
+        return;
+      }
+    }
+    const t=localStorage.getItem(SURF_KEY);
+    if(t && surfUnpack(t)) return;
+    surfUnpack(SURF_BAKED);
+  }catch(e){ try{ surfUnpack(SURF_BAKED); }catch(e2){} }
 }
 function surfClear(){
   if(!SURF.data) return;
@@ -6932,21 +6978,96 @@ document.getElementById('tlclear').onclick=()=>{ tleLines[tleEdge]=[]; tleSave()
   tleRedraw(); tlePanel(); ttRemeasure(); };
 document.getElementById('tlcopy').onclick=e=>{ const t=tleText();
   console.log('track limit edges (model coordinates):\n'+t); copyFlash(e.currentTarget,t); };
-function tlCheck(){
+/* Track limits.
+
+   All four wheels have to be on the paint. Being off is not the offence,
+   though: staying off is. A wheel clipping the far side of a kerb for a tenth
+   of a second is racing, so the clock only starts once every wheel is past the
+   paint and only counts as an offence after three tenths of a second. Come
+   back inside before that and nothing happened.
+
+   The lap is no longer deleted for it. Deleting a lap says nothing during a
+   race, and a race is the only thing being driven at the moment. */
+const TL_GRACE=0.30;
+let _tlOff=0, _tlCounted=false;
+function tlCheck(dt){
   if(!TT.live || TT.cd>0 || CARPTS.length!==4) return;
   let on=0;
   for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
-  if(on>0){ _tlFrames=0; return; }
-  if(++_tlFrames<2) return;                      // one frame is noise, not a lap
-  _tlFrames=0;
+  if(on>0){ _tlOff=0; _tlCounted=false; return; }
+  _tlOff+=(dt||STEP);
+  if(_tlOff<TL_GRACE || _tlCounted) return;
+  _tlCounted=true;
+  limitsHit();
   /* TT.started means "a checkpoint gate has been reached", not "the timed
      run is under way". The first gate is beyond Eau Rouge, so using it here
      made the entire opening section immune to track limits. TT.live plus the
      countdown guard above already says the run has begun; if this happens
      before the initial start-line crossing, ttLine's first-cross reset safely
      clears it. */
-  ttVoid('track limits');
 }
+/* Three strikes.
+
+   First offence and second offence are warnings. The third is a black and
+   white flag, which is not itself a penalty -- nothing is added and nothing is
+   taken away while you are driving -- but it cannot be handed back, and it
+   costs five seconds at the flag. Offences after that do not stack: the flag is
+   the state, and there is only one of it.
+
+   The five seconds land on your race time when you cross the line, so a lead
+   smaller than five seconds is a lead you lose, exactly as it works on a
+   Sunday. */
+const LIMITS={ count:0, flag:false, pen:0, msg:'', msgT:0 };
+const LIMITS_PEN=5.0;
+function limitsReset(){
+  LIMITS.count=0; LIMITS.flag=false; LIMITS.pen=0; LIMITS.msg=''; LIMITS.msgT=0;
+  _tlOff=0; _tlCounted=false;
+  limitsPaint();
+}
+function limitsHit(){
+  if(LIMITS.flag){ limitsSay('TRACK LIMITS','black and white flag already shown'); return; }
+  LIMITS.count++;
+  if(LIMITS.count>=3){
+    LIMITS.flag=true;
+    limitsSay('BLACK AND WHITE FLAG','track limits \u2014 five seconds at the flag');
+  } else {
+    limitsSay('TRACK LIMITS', 'warning '+LIMITS.count+' of 3');
+  }
+  limitsPaint();
+}
+function limitsSay(head,sub){
+  LIMITS.msg=head+'\n'+sub; LIMITS.msgT=3.2;
+  const el=document.getElementById('limwarn');
+  if(el){
+    el.innerHTML='<b>'+head+'</b><span>'+sub+'</span>';
+    el.classList.toggle('flag', LIMITS.flag);
+    el.classList.add('show');
+  }
+}
+function limitsStep(dt){
+  if(LIMITS.msgT>0){
+    LIMITS.msgT-=dt;
+    if(LIMITS.msgT<=0){ const el=document.getElementById('limwarn'); if(el) el.classList.remove('show'); }
+  }
+}
+/* The flag stays on the screen for as long as you hold it, because you do. */
+function limitsPaint(){
+  const f=document.getElementById('bwflag');
+  if(!f) return;
+  f.classList.toggle('show', LIMITS.flag);
+  const p=document.getElementById('bwpen');
+  if(p) p.textContent=LIMITS.pen?('+'+LIMITS.pen.toFixed(1)+'s'):'+5.0s at the flag';
+}
+/* Crossing the line with the flag is where it is paid. */
+function limitsAtLine(){
+  if(LIMITS.flag && !LIMITS.pen){
+    LIMITS.pen=LIMITS_PEN;
+    limitsSay('FIVE SECOND PENALTY','black and white flag \u2014 added to your race time');
+    limitsPaint();
+  }
+  return LIMITS.pen;
+}
+
 /* A lap that is gone. The clock is not wiped and no banner is thrown across
    the screen: the time turns red, it says underneath what killed it, and it
    keeps running until you come back round to the line, which is where a lap
@@ -9038,6 +9159,7 @@ function raceStart(opts){
   racePlace('ai', 1);                   // alongside
   AI.on=true; AI.hold=true; AI.laps=[];
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
+  limitsReset();
   RACE.hold=RACE_HOLD[0]+Math.random()*(RACE_HOLD[1]-RACE_HOLD[0]);
   /* Pinned by the same lever the other circuit's start uses: anything that is
      not 'go' holds the car on the line. */
@@ -9266,6 +9388,14 @@ window.SIM={
     c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
     return {handle:bi, brush:m2Brush};
   },
+  limits(){ return {count:LIMITS.count, flag:LIMITS.flag, pen:LIMITS.pen,
+                    off:+_tlOff.toFixed(2), counted:_tlCounted,
+                    warn:document.getElementById('limwarn').classList.contains('show'),
+                    flagShown:document.getElementById('bwflag').classList.contains('show'),
+                    text:document.getElementById('limwarn').textContent}; },
+  limitsHit(){ limitsHit(); },
+  atLine(){ return limitsAtLine(); },
+  wheelsOn(){ let n=0; for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) n++; return n; },
   paintTool(){ return m2Tool; },
   surf(){ return {w:SURF.w,h:SURF.h,cells:SURF.count,
       hasData:!!SURF.data, minx:SURF.minx, minz:SURF.minz}; },
@@ -9652,7 +9782,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); raceStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); raceStep(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
