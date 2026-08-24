@@ -150,6 +150,29 @@
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
   /* Which camera you are looking through, the way a broadcast marks it. */
+  #result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
+          z-index:15;display:none;font-family:var(--mono);min-width:min(460px,88vw);
+          background:linear-gradient(180deg,rgba(12,15,21,.95),rgba(8,10,14,.97));
+          border:1px solid rgba(255,255,255,.14);border-radius:14px;overflow:hidden;
+          box-shadow:0 30px 90px rgba(0,0,0,.7)}
+  #result.show{display:block}
+  #result .head{display:flex;justify-content:space-between;padding:13px 18px;
+          background:linear-gradient(90deg,rgba(255,176,32,.18),transparent);
+          border-bottom:1px solid rgba(255,255,255,.1)}
+  #result .head b{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#fff}
+  #result .head span{font-size:10px;letter-spacing:.14em;color:rgba(223,231,241,.6);text-transform:uppercase}
+  #result .rows{max-height:min(52vh,400px);overflow-y:auto}
+  #result .slot{display:flex;align-items:center;gap:14px;padding:11px 18px;
+          border-bottom:1px solid rgba(255,255,255,.05)}
+  #result .slot.you{background:rgba(255,176,32,.12)}
+  #result .pos{font-size:18px;font-weight:600;color:#fff;width:42px;font-variant-numeric:tabular-nums}
+  #result .who{flex:1}
+  #result .who b{display:block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fff}
+  #result .who .pen{font-size:9px;letter-spacing:.12em;color:#ffb020;text-transform:uppercase}
+  #result .tag{font-size:12px;color:rgba(223,231,241,.85);font-variant-numeric:tabular-nums}
+  #result button{display:block;width:calc(100% - 36px);margin:14px 18px 16px;padding:11px;
+          font:inherit;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+          color:#0c0f15;background:var(--amber);border:0;border-radius:8px;cursor:pointer}
   /* The warning, and the flag you cannot hand back. */
   #limwarn{position:fixed;left:50%;top:14vh;transform:translateX(-50%) translateY(-10px);
            z-index:13;display:flex;flex-direction:column;align-items:center;gap:6px;
@@ -372,6 +395,9 @@
             border-bottom:1px solid rgba(255,255,255,.1)}
   #gridcard .head b{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:#fff}
   #gridcard .head span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;opacity:.55;color:var(--paper)}
+  /* Not #gridlist -- that id already belongs to another element on the page,
+     so getElementById handed back the wrong one and the rows went nowhere. */
+  #racegrid{max-height:min(46vh,340px);overflow-y:auto}
   #gridcard .slot{display:flex;align-items:center;gap:14px;padding:13px 18px;
             border-bottom:1px solid rgba(255,255,255,.05)}
   #gridcard .slot:last-child{border-bottom:0}
@@ -767,6 +793,7 @@ if('serviceWorker' in navigator){
   <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
   <div id="netmsg"></div>
 </div>
+<div id="result"></div>
 <div id="limwarn"></div>
 <div id="bwflag"><i></i><span>BLACK &amp; WHITE FLAG</span><small id="bwpen">+5.0s at the flag</small></div>
 <div id="tvtag"><span id="tvtagname">CAM 01</span><small id="tvtagof">of 20</small></div>
@@ -834,10 +861,7 @@ if('serviceWorker' in navigator){
 
 <div id="gridcard">
   <div class="head"><b>Starting grid</b><span>Spa 2022 &middot; 1 lap</span></div>
-  <div class="slot you"><div class="pos">P1</div>
-    <div class="who"><b>You</b><span>McLaren MCL39</span></div><div class="tag">Pole</div></div>
-  <div class="slot"><div class="pos">P2</div>
-    <div class="who"><b id="gridai">AI</b><span>McLaren MCL39</span></div><div class="tag">Row 1</div></div>
+  <div id="racegrid"></div>
   <div class="pace">
     <div class="paceline"><span>AI pace</span><b id="pacenum">7</b><em id="pacename">Quick</em></div>
     <input id="paceslider" type="range" min="0" max="10" step="1" value="7">
@@ -5075,7 +5099,6 @@ function ttStep(dt){
    which gate you missed rather than leaving you to guess. */
 function ttLine(){
   const missed=TT.hit.indexOf(false);
-  if(RACE.on) limitsAtLine();
   /* You start sitting on the line, so the first thing you do is cross it. That
      is not a lap and it is not a deleted lap either -- it is the beginning.
      The test for it is exact rather than a threshold on the clock: a lap has
@@ -5083,6 +5106,11 @@ function ttLine(){
      without driving. Until then, crossing the line just starts the clock
      again. */
   if(!TT.started){ ttReset(); return; }
+  /* A lap has actually been driven by this point -- TT.started means a gate was
+     taken, and the gates are out on the circuit. Putting the finish before this
+     guard ended the race on the run down to Eau Rouge, because the grid sits
+     behind the line and the first thing anybody does is cross it. */
+  if(RACE.on && RACE.phase==='racing'){ limitsAtLine(); raceFinish(); }
   if(missed>=0 || TT.void){
     const why = TT.void ? TT.why : ('missed gate '+(missed+1));
     if(missed>=0){ const pip=document.querySelectorAll('#ttpips i')[missed];
@@ -8595,7 +8623,7 @@ function aiOffsetField(which){
   };
   const fit=arr=>{
     for(let i=0;i<n;i++){
-      const lim=aiRoomNear(i, arr[i]>0?1:-1, AI_LINES.window);
+      const lim=aiRoomNear(AI, i, arr[i]>0?1:-1, AI_LINES.window);
       arr[i]=clamp(arr[i], -lim, lim);
     }
     return arr;
@@ -8644,17 +8672,24 @@ function aiBuildLines(margin){
 }
 /* Where on the line the car is. Searched forward from where it was, because it
    is going forwards, with a full sweep only if it has been put somewhere else. */
-function aiLocate(x,z){
-  const n=AI.n; let bi=AI.i, bd=Infinity;
-  for(let d=-8;d<=60;d++){
-    const i=((AI.i+d)%n+n)%n;
-    const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2;
+/* Where a driver is on the lap, and how far off the line.
+
+   This used to read and write AI.i -- one index, on the shared object. With a
+   grid that meant nine cars all clobbering the same number and none of them
+   advancing their own, so eight of them aimed for ever at the point they
+   started from and drove into the countryside: 2374 m off the line at the
+   worst. It walks from the driver's own index now and writes back to it. */
+function aiLocate(d, x, z){
+  const n=d.n; let bi=d.i|0, bd=Infinity;
+  for(let o=-8;o<=60;o++){
+    const i=((bi+o)%n+n)%n;
+    const q=(d.x[i]-x)**2+(d.z[i]-z)**2;
     if(q<bd){ bd=q; bi=i; }
   }
   if(bd>60*60){
-    for(let i=0;i<n;i++){ const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2; if(q<bd){bd=q;bi=i;} }
+    for(let i=0;i<n;i++){ const q=(d.x[i]-x)**2+(d.z[i]-z)**2; if(q<bd){bd=q;bi=i;} }
   }
-  AI.i=bi; return {i:bi, d:Math.sqrt(bd)};
+  d.i=bi; return {i:bi, d:Math.sqrt(bd)};
 }
 /* Traffic.
 
@@ -8684,28 +8719,55 @@ function aiLocate(x,z){
    against someone reeling it in rather than only against someone already past. */
 const AI_TRAF={ look:75, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, hold:1.25,
                 overlap:18, giveK:0.94, pinK:0.82 };
-function aiPlayerRel(){
-  if(!AI.n || !booted) return null;
-  const n=AI.n, px=carState.wx, pz=carState.wz;
-  let bi=AI._pi||0, bd=Infinity;
-  for(let d=-120;d<=120;d++){
-    const i=((bi+d)%n+n)%n;
-    const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2;
+/* Where another car is, relative to this one: how far up or down the road, and
+   which side of the line. It used to ask only about the player, because there
+   was only ever the player and one AI. With a full grid every driver has to see
+   every other one, or nine cars drive through each other on the way to Eau
+   Rouge. */
+function aiRelTo(d, px, pz, kph, who){
+  if(!d.n || !booted) return null;
+  const n=d.n;
+  /* Search out from where this driver is, not from a cached index. The cache
+     belonged to the days of one rival; with nine of them every call would move
+     it somewhere else and the next call would start from the wrong place and
+     fall through to sweeping all seven thousand points. Anyone worth knowing
+     about is within a couple of hundred metres anyway. */
+  let bi=d.i|0, bd=Infinity;
+  for(let o=-200;o<=200;o++){
+    const i=((bi+o)%n+n)%n;
+    const q=(d.x[i]-px)**2+(d.z[i]-pz)**2;
     if(q<bd){ bd=q; bi=i; }
   }
-  if(bd>90*90){
-    for(let i=0;i<n;i++){ const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2; if(q<bd){bd=q;bi=i;} }
+  if(bd>150*150){
+    for(let i=0;i<n;i++){ const q=(d.x[i]-px)**2+(d.z[i]-pz)**2; if(q<bd){bd=q;bi=i;} }
   }
-  AI._pi=bi;
   // signed gap along the lap: +ve means the player is up the road from the AI
-  let d=(bi-AI.i)*AI.ds;
-  if(d>AI.len/2) d-=AI.len;
-  if(d<-AI.len/2) d+=AI.len;
+  let g=(bi-d.i)*d.ds;
+  if(g>d.len/2) g-=d.len;
+  if(g<-d.len/2) g+=d.len;
   const j=(bi+1)%n;
-  const tx=AI.x[j]-AI.x[bi], tz=AI.z[j]-AI.z[bi], tl=Math.hypot(tx,tz)||1;
-  const lat=((px-AI.x[bi])*(tz/tl) - (pz-AI.z[bi])*(tx/tl));   // +ve = right of the line
-  return {i:bi, gap:d, lat, kph:carState.speed*3.6,
-          apart:Math.hypot(px-AI.car.st.wx, pz-AI.car.st.wz)};
+  const tx=d.x[j]-d.x[bi], tz=d.z[j]-d.z[bi], tl=Math.hypot(tx,tz)||1;
+  const lat=((px-d.x[bi])*(tz/tl) - (pz-d.z[bi])*(tx/tl));   // +ve = right of the line
+  return {i:bi, gap:g, lat, kph, who,
+          apart:Math.hypot(px-d.car.st.wx, pz-d.car.st.wz)};
+}
+/* The one that matters. Everyone within reach is considered and the closest
+   along the road wins, because that is the car you are about to be involved
+   with -- not the one that happens to be nearest as the crow flies. */
+function aiRivalRel(d){
+  let best=null, bestD=Infinity;
+  const look=(x,z,kph,who)=>{
+    const r=aiRelTo(d,x,z,kph,who);
+    if(!r) return;
+    const near=Math.abs(r.gap);
+    if(near<bestD && near<AI_TRAF.look*1.6){ bestD=near; best=r; }
+  };
+  look(carState.wx, carState.wz, carState.speed*3.6, 'player');
+  for(const o of AIS){
+    if(o===d || !o.car || !o.on) continue;
+    look(o.car.st.wx, o.car.st.wz, o.car.st.speed*3.6, o);
+  }
+  return best;
 }
 /* How much room there is either side of the line here, from the survey. */
 function aiRoom(i, side, keep){
@@ -8717,11 +8779,11 @@ function aiRoom(i, side, keep){
    metres in advance and driven with a lag, so an offset that fits at this
    station and not at the one twenty metres later is an offset that puts a wheel
    out twenty metres later. */
-function aiRoomNear(i, side, span){
-  const n=AI.n, step=Math.max(1,Math.round(4/AI.ds));
+function aiRoomNear(d, i, side, span){
+  const n=d.n, step=Math.max(1,Math.round(4/d.ds));
   let r=99;
-  for(let d=-span; d<=span; d+=step*AI.ds)
-    r=Math.min(r, aiRoom(((i+Math.round(d/AI.ds))%n+n)%n, side, AI_LINES.keep));
+  for(let d=-span; d<=span; d+=step*d.ds)
+    r=Math.min(r, aiRoom(((i+Math.round(d/d.ds))%n+n)%n, side, AI_LINES.keep));
   return r;
 }
 /* And how much there is for the next stretch of it, which is the number that
@@ -8730,11 +8792,11 @@ function aiRoomNear(i, side, span){
    the AI hanging three metres off the line into Les Combes, where the road
    narrows -- which is how it ended up 0.43 m outside the white line while
    getting past a stopped car. */
-function aiRoomAhead(side, metres){
-  const n=AI.n, step=Math.max(1,Math.round(4/AI.ds));
+function aiRoomAhead(d, side, metres){
+  const n=d.n, step=Math.max(1,Math.round(4/d.ds));
   let r=99;
-  for(let d=0; d<Math.round(metres/AI.ds); d+=step)
-    r=Math.min(r, aiRoom((AI.i+d)%n, side));
+  for(let d=0; d<Math.round(metres/d.ds); d+=step)
+    r=Math.min(r, aiRoom((d.i+d)%n, side));
   return r;
 }
 /* Which of the three lines to be on, and why.
@@ -8755,19 +8817,19 @@ function aiRoomAhead(side, metres){
    Each line carries its own speeds, so defending into a corner is genuinely
    slower than not defending -- which is the cost of defending, and it should be
    there. */
-function aiTraffic(dt){
-  const T=AI_TRAF, C=AI.car;
-  const rel=aiPlayerRel();
-  AI.mode='clear'; AI.line='race'; AI.speedK=1;
-  if(rel && Math.abs(rel.gap)<T.look && AI.field){
+function aiTraffic(d, dt){
+  const T=AI_TRAF, C=d.car;
+  const rel=aiRivalRel(d);
+  d.mode='clear'; d.line='race'; d.speedK=1;
+  if(rel && Math.abs(rel.gap)<T.look && d.field){
     const mine=C.st.speed*3.6, theirs=rel.kph;
     /* How much quicker you are, averaged over about half a second rather than
        read off this frame. Instantaneously, a car that has not braked yet is
        forty kph quicker at every braking point, and deciding on that had the AI
        standing aside in the middle of a corner it was in the process of
        defending -- then going back to defending when the brakes came off. */
-    AI._dv = (AI._dv||0) + ((theirs-mine)-(AI._dv||0))*(1-Math.exp(-dt/0.55));
-    const dv=AI._dv;
+    d._dv = (d._dv||0) + ((theirs-mine)-(d._dv||0))*(1-Math.exp(-dt/0.55));
+    const dv=d._dv;
     /* Standing aside is for someone quicker than this car really is, which is
        not the same as quicker than it is going while it defends. Measured
        against its own speed, defending cancelled itself: the moment it took the
@@ -8775,22 +8837,22 @@ function aiTraffic(dt){
        kph quicker, that read as a blue flag, and it pulled over and let them
        past. The reference is the racing line's pace at this point of the
        circuit -- what it would be doing if you were not there. */
-    AI._dvRace = (AI._dvRace||0)
-      + ((theirs-AI.v[AI.i]*3.6)-(AI._dvRace||0))*(1-Math.exp(-dt/0.55));
+    d._dvRace = (d._dvRace||0)
+      + ((theirs-d.v[d.i]*3.6)-(d._dvRace||0))*(1-Math.exp(-dt/0.55));
     const behind=rel.gap<0;
     // which way the inside is here, including on the approach to the corner
-    const inDir=Math.sign(AI.field.in[AI.i])||1;
+    const inDir=Math.sign(d.field.in[d.i])||1;
     const youInside=Math.abs(rel.lat)>0.8 && Math.sign(rel.lat)===inDir;
-    if(behind && AI._dvRace>T.blue){             // far quicker: let it go
-      AI.mode='yield'; AI.line=youInside?'in':'out'; AI.speedK=T.yieldK;
+    if(behind && d._dvRace>T.blue){             // far quicker: let it go
+      d.mode='yield'; d.line=youInside?'in':'out'; d.speedK=T.yieldK;
     } else if(behind && dv>-T.race){             // gaining, or matching: defend
-      AI.mode='defend'; AI.line='in';
+      d.mode='defend'; d.line='in';
     } else if(!behind && dv<-2){                 // you are in the way: go by
-      AI.mode='pass'; AI.line=youInside?'out':'in';
-      const clear=Math.abs(AI.lat-rel.lat)>T.clear;
-      if(rel.gap<14 && !clear) AI.speedK=Math.min(1, theirs/Math.max(1,mine));
+      d.mode='pass'; d.line=youInside?'out':'in';
+      const clear=Math.abs(d.lat-rel.lat)>T.clear;
+      if(rel.gap<14 && !clear) d.speedK=Math.min(1, theirs/Math.max(1,mine));
     } else if(rel.apart<14){                     // side by side: take the other line
-      AI.mode='hold'; AI.line=youInside?'out':'in';
+      d.mode='hold'; d.line=youInside?'out':'in';
     }
   }
   /* Committed to, not re-decided every frame. Sampled frame by frame the choice
@@ -8798,14 +8860,14 @@ function aiTraffic(dt){
      mind sixty times a second weaves instead of racing. A line is held for a
      second and a bit unless the situation changes category, and standing aside
      for someone far quicker is allowed to interrupt immediately. */
-  if(AI.line!==AI._lineWas){
-    if(AI.mode!=='yield' && (AI._lineHeld||0)>0 && AI.line!=='race'){
-      AI.line=AI._lineWas;                      // not yet: keep the one it is on
-    } else { AI._lineWas=AI.line; AI._lineHeld=AI_TRAF.hold; }
+  if(d.line!==d._lineWas){
+    if(d.mode!=='yield' && (d._lineHeld||0)>0 && d.line!=='race'){
+      d.line=d._lineWas;                      // not yet: keep the one it is on
+    } else { d._lineWas=d.line; d._lineHeld=AI_TRAF.hold; }
   }
-  AI._lineHeld=Math.max(0,(AI._lineHeld||0)-dt);
-  if(AI.forced){ AI.line=AI.forced; AI.mode='forced'; AI.speedK=1; }
-  let want=AI.field?AI.field[AI.line][AI.i]:0;
+  d._lineHeld=Math.max(0,(d._lineHeld||0)-dt);
+  if(d.forced){ d.line=d.forced; d.mode='forced'; d.speedK=1; }
+  let want=d.field?d.field[d.line][d.i]:0;
   /* And then the part that overrides all of it: if you are actually there, that
      is not a place it may drive.
 
@@ -8821,37 +8883,37 @@ function aiTraffic(dt){
      edge -- it stays on the road and comes off the throttle instead. That is
      the one case where it gives up the corner rather than the space. */
   if(rel && Math.abs(rel.gap)<AI_TRAF.overlap){
-    const side=Math.sign(AI.lat-rel.lat) || -Math.sign(rel.lat) || 1;
+    const side=Math.sign(d.lat-rel.lat) || -Math.sign(rel.lat) || 1;
     const bound=rel.lat+side*AI_TRAF.clear;
     let w = side>0 ? Math.max(want,bound) : Math.min(want,bound);
-    const lim=aiRoomNear(AI.i, side, 30);
+    const lim=aiRoomNear(d, d.i, side, 30);
     if(Math.abs(w)>lim){                       // no road left on that side
       w=side*lim;
-      AI.pinned=true;
-      AI.speedK=Math.min(AI.speedK, AI_TRAF.pinK);
-    } else AI.pinned=false;
+      d.pinned=true;
+      d.speedK=Math.min(d.speedK, AI_TRAF.pinK);
+    } else d.pinned=false;
     if(Math.abs(w-want)>0.5){                  // shoved off its line: ease off
-      AI.speedK=Math.min(AI.speedK, AI_TRAF.giveK);
-      AI._urgent=true;                         // and move over like it means it
+      d.speedK=Math.min(d.speedK, AI_TRAF.giveK);
+      d._urgent=true;                         // and move over like it means it
     }
     want=w;
-  } else AI.pinned=false;
-  AI.want=want;
-  AI.vAct=(AI.vline&&AI.vline[AI.line])||AI.v;
+  } else d.pinned=false;
+  d.want=want;
+  d.vAct=(d.vline&&d.vline[d.line])||d.v;
   /* Twice the rate when it is getting out of your way. The normal ease is set
      for changing line, which is something a car does over a couple of seconds;
      leaving room for a car that is already beside it is not that, and at the
      slower rate the gap it opened lagged a good half metre behind the gap it
      had decided on. */
-  const step=(AI._urgent?T.ease*2.4:T.ease)*dt;
-  AI._urgent=false;
-  AI.lat += clamp(AI.want-AI.lat, -step, step);
+  const step=(d._urgent?T.ease*2.4:T.ease)*dt;
+  d._urgent=false;
+  d.lat += clamp(d.want-d.lat, -step, step);
   /* And whatever it is doing, it is pulled back inside the white line here --
      the offset is eased, so a road that narrows faster than the ease can answer
      would otherwise carry it out. */
-  const lim=aiRoom(AI.i, AI.lat>0?1:-1);
-  AI.lat=clamp(AI.lat, -lim, lim);
-  if(Math.abs(AI.lat)<0.02) AI.lat=0;
+  const lim=aiRoom(d.i, d.lat>0?1:-1);
+  d.lat=clamp(d.lat, -lim, lim);
+  if(Math.abs(d.lat)<0.02) d.lat=0;
 }
 /* Pure pursuit for the steering: aim at a point down the line and turn along
    the arc that reaches it. The lookahead grows with speed, or a car doing 300
@@ -8872,7 +8934,7 @@ function aiTraffic(dt){
    arc; a second copy of it is not anticipation, it is turning twice as hard as
    the corner asks and then correcting. */
 const AI_TUNE={ look0:5, lookK:0.32, lookMin:8, lookMax:42, lead:1.6, ff:0.0, ffAt:0.12 };
-function aiSteer(C, dt){
+function aiSteer(d, C, dt){
   const st=C.st, v=st.speed;
   const T=AI_TUNE;
   /* Straight speed-scaled lookahead. Capping it to a fraction of the corner
@@ -8883,15 +8945,15 @@ function aiSteer(C, dt){
      the line at the Bus Stop. A short lookahead destabilises far more than a
      long one understeers, so the cap is gone. */
   const look=clamp(T.look0+v*T.lookK, T.lookMin, T.lookMax);
-  const j=(AI.i+Math.round(look/AI.ds))%AI.n;
+  const j=(d.i+Math.round(look/d.ds))%d.n;
   /* Aimed at the line, or beside it. The offset is carried into the target
      point rather than added to the steering, so every other thing that reads
      the line -- the speed for it, the room beside it -- is unchanged. */
-  let ax=AI.x[j], az=AI.z[j];
-  if(AI.lat){
-    const j2=(j+1)%AI.n;
-    const tx=AI.x[j2]-AI.x[j], tz=AI.z[j2]-AI.z[j], tl=Math.hypot(tx,tz)||1;
-    ax+= (tz/tl)*AI.lat; az+= -(tx/tl)*AI.lat;
+  let ax=d.x[j], az=d.z[j];
+  if(d.lat){
+    const j2=(j+1)%d.n;
+    const tx=d.x[j2]-d.x[j], tz=d.z[j2]-d.z[j], tl=Math.hypot(tx,tz)||1;
+    ax+= (tz/tl)*d.lat; az+= -(tx/tl)*d.lat;
   }
   const dx=ax-st.wx, dz=az-st.wz;
   const dist=Math.hypot(dx,dz)||1;
@@ -8910,8 +8972,8 @@ function aiSteer(C, dt){
      exactly -- it was measured to build the speed profile -- so the wheel can be
      turning before the error exists. */
   if(T.ff>0){
-    const f=(AI.i+Math.round(Math.max(2,v*T.ffAt)/AI.ds))%AI.n;
-    const dFF=Math.atan(WHEELBASE*AI.ks[f]);
+    const f=(d.i+Math.round(Math.max(2,v*T.ffAt)/d.ds))%d.n;
+    const dFF=Math.atan(WHEELBASE*d.ks[f]);
     want += -dFF*STEER_RATIO/(STEER_LOCK*lockF)*T.ff;
   }
   want=clamp(want,-1,1);
@@ -8923,11 +8985,11 @@ function aiSteer(C, dt){
    what the engine or the brakes can give. Feed-forward, not a chase -- the
    profile already knows where the braking points are, so the car brakes on
    arrival at one rather than on noticing it is too fast. */
-function aiPedals(C){
+function aiPedals(d, C){
   const v=C.st.speed;
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
-  const j=(AI.i+Math.round(la/AI.ds))%AI.n;
-  const V=AI.vAct||AI.v;                        // the speeds for the line it is on
+  const j=(d.i+Math.round(la/d.ds))%d.n;
+  const V=d.vAct||d.v;                        // the speeds for the line it is on
   /* Aim at the profile a little ahead, and nothing else.
 
      This used to be min(V[j], V[here]+2): never ask for more than two metres a
@@ -8939,7 +9001,7 @@ function aiPedals(C){
      else's gearbox. The profile is already the speed limit at every point and
      the forward pass built it at full power, so asking for the profile ahead is
      asking for full throttle exactly where full throttle is what fits. */
-  const tgt=V[j]*(AI.speedK||1);
+  const tgt=V[j]*(d.speedK||1);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
   return {thr:0, brk:clamp(-a/46,0,1)};
@@ -9019,35 +9081,66 @@ function carsTouch(A, B, dt){
   A.touchT=B.touchT=0.25;                     // for anything that wants to know
   return true;
 }
+/* Everyone against everyone. With one AI this was you and it; with a grid it
+   has to be every pair, or cars occupy the same piece of road at the first
+   corner and simply pass through each other. */
 function carContact(dt){
-  if(!AI.car || !AI.on || AI.hold) return;
   if(NET.watching || TTREC.playing) return;   // not a car you are driving
-  carsTouch(PLAYER, AI.car, dt);
+  const live=AIS.filter(d=>d.car&&d.on&&!d.hold);
+  for(const d of live) carsTouch(PLAYER, d.car, dt);
+  for(let a=0;a<live.length;a++)
+    for(let b=a+1;b<live.length;b++) carsTouch(live[a].car, live[b].car, dt);
 }
 
-function aiSpawn(){
-  if(AI.car||!carObj) return false;
+/* The grid.
+
+   Every driver inherits from AI, which holds the things that are the same for
+   all of them -- the line, the curvature, the speed profile, the corner table --
+   while anything a driver does for itself lands on the driver: where it is on
+   the lap, which line it has taken, what its pedals are doing, who it is racing.
+   Reading falls through to the shared copy, writing does not, so one racing line
+   is solved once and nine cars drive it.
+
+   AIS[0] is AI itself, so everything built when there was one car still works. */
+const AIS=[AI];
+function aiField(n){
+  while(AIS.length<n){
+    const d=Object.create(AI);
+    /* every mutable field gets its own copy, or it would read the leader's */
+    Object.assign(d,{ car:null, obj:null, on:false, hold:false, i:0, t:0, lap:0,
+                      laps:[], worst:0, lat:0, want:0, speedK:1, mode:'clear',
+                      line:'race', off:0, room:99, outside:0, err:0, trace:null,
+                      _pi:0, _prev:0, _next:0, _thr:0, _brk:0, _dv:0, _dvRace:0,
+                      _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0 });
+    AIS.push(d);
+    aiSpawnOne(d);
+  }
+  return AIS;
+}
+function aiSpawn(){ return aiSpawnOne(AI); }
+function aiSpawnOne(d){
+  if(d.car||!carObj) return false;
   const g=new THREE.Group(); scene.add(g);
   const m=carObj.clone(true);
-  g.add(m); AI.obj=g;
-  AI.car=makeCar(g,false);                      // no aids: it steers with a number
-  AI.car.gripMul=1;                             // the player's grip, exactly
+  g.add(m); d.obj=g;
+  d.car=makeCar(g,false);                       // no aids: it steers with a number
+  d.car.gripMul=1;                              // the player's grip, exactly
   return true;
 }
-function aiPlace(i, flying){
-  if(!AI.car) return;
-  const st=AI.car.st, n=AI.n;
-  i=((i|0)%n+n)%n; AI.i=i;
-  st.wx=AI.x[i]; st.wz=AI.z[i];
+function aiPlace(d, i, flying){
+  if(!d.car) return;
+  const st=d.car.st, n=d.n;
+  i=((i|0)%n+n)%n; d.i=i;
+  st.wx=d.x[i]; st.wz=d.z[i];
   const j=(i+1)%n;
-  st.hdg=Math.atan2(AI.x[j]-AI.x[i], AI.z[j]-AI.z[i]);
-  st.speed=flying?AI.v[i]:0; AI.car.steerIn=0; AI.car.steerAng=0; AI.car.slipAng=0;
-  AI.car.groundY=AI.y[i]+RIDE;
+  st.hdg=Math.atan2(d.x[j]-d.x[i], d.z[j]-d.z[i]);
+  st.speed=flying?d.v[i]:0; d.car.steerIn=0; d.car.steerAng=0; d.car.slipAng=0;
+  d.car.groundY=d.y[i]+RIDE;
   /* Prime the surface at the spawn. Without this the first few frames report
      no surface at all -- probeCar has not run yet -- which reads in a trace as
      the car starting off the asphalt when it is sitting on the racing line. */
-  probeCar(st.wx, st.wz, st.hdg, AI.y[i], AI.car.surf);
-  AI.t=0; AI.lap=0; AI.worst=0; AI._prev=i;
+  probeCar(st.wx, st.wz, st.hdg, d.y[i], d.car.surf);
+  d.t=0; d.lap=0; d.worst=0; d._prev=i;
 }
 /* ---------------------------------------------------------------------------
    The race start.
@@ -9067,6 +9160,71 @@ function aiPlace(i, flying){
    same startPhase the other circuit uses, and the AI by a flag it checks before
    it steps, so there is one release and both of them answer to it. */
 const RACE={ on:false, phase:'', t:0, hold:0, ready:false };
+const RACE_CARS=10;   // you and nine others, on the ten painted slots
+/* One lap, so the line is the finish. Everyone's race time runs from lights out
+   and stops when they cross it; the penalty is added to yours afterwards, which
+   is the whole point of it -- five seconds is only a punishment if somebody is
+   within five seconds. */
+const RESULT={ on:false, rows:[], you:0, _left:-1 };
+function raceClock(dt){
+  if(!RACE.on || RACE.phase!=='racing') return;
+  raceResultTick();
+  RACE.raceT=(RACE.raceT||0)+dt;
+  for(const d of AIS){
+    if(!d.car || !d.on || d.finish) continue;
+    if(d._prevLap>d.n*0.9 && d.i<d.n*0.1) d.finish=RACE.raceT;
+    d._prevLap=d.i;
+  }
+}
+/* You crossing the line is the end of your race, not the end of the race. The
+   first version classified everyone still out on the circuit as a
+   non-finisher, which is not what nine cars half a lap behind are: they are
+   racing. The result goes up with your time on it and fills in underneath as
+   each of them comes home. */
+function raceFinish(){
+  if(RESULT.on) return;
+  RESULT.on=true; RESULT.you=RACE.raceT;
+  raceResultRows();
+}
+function raceResultRows(){
+  const rows=[{who:'You', t:RESULT.you, pen:LIMITS.pen, you:true}];
+  AIS.forEach((d,k)=>{ if(d.car&&d.on)
+    rows.push({who:GRID_NAMES[k%GRID_NAMES.length], t:d.finish||null, pen:0,
+               run:(d.i||0)*d.ds}); });
+  const done=rows.filter(r=>r.t), out=rows.filter(r=>!r.t);
+  done.forEach(r=>r.total=r.t+r.pen);
+  done.sort((a,b)=>a.total-b.total);
+  out.sort((a,b)=>(b.run||0)-(a.run||0));      // whoever is furthest round leads
+  RESULT.rows=done.concat(out);
+  raceResultUI();
+}
+/* Keeps filling in until the last of them is home. */
+function raceResultTick(){
+  if(!RESULT.on) return;
+  const left=AIS.filter(d=>d.car&&d.on&&!d.finish).length;
+  if(left!==RESULT._left){ RESULT._left=left; raceResultRows(); }
+}
+function raceResultUI(){
+  const box=raceEl('result'); if(!box) return;
+  const lead=RESULT.rows[0];
+  let html='<div class="head"><b>Result</b><span>Spa 2022 &middot; 1 lap</span></div><div class="rows">';
+  RESULT.rows.forEach((r,i)=>{
+    const gap = r.total==null ? 'still racing'
+              : i===0 ? fmtTime(r.total)
+              : '+'+(r.total-lead.total).toFixed(3);
+    html+='<div class="slot'+(r.you?' you':'')+'"><div class="pos">P'+(i+1)+'</div>'+
+          '<div class="who"><b>'+r.who+'</b>'+
+          (r.pen?'<span class="pen">+'+r.pen.toFixed(1)+'s track limits</span>':'')+
+          '</div><div class="tag">'+gap+'</div></div>';
+  });
+  html+='</div><button id="resultclose">Done</button>';
+  box.innerHTML=html; box.classList.add('show');
+  document.getElementById('resultclose').onclick=()=>{ box.classList.remove('show'); raceEnd(); };
+}
+function fmtTime(t){
+  const m=Math.floor(t/60), s=t-m*60;
+  return m+':'+(s<10?'0':'')+s.toFixed(3);
+}
 /* Nought to ten, and ten is the car that was ten seconds a lap quicker than a
    person. Seven is the one that had a driver in front of it. Below seven the
    two levers move together and hard -- less of the grip asked for in a corner
@@ -9126,10 +9284,31 @@ function raceHeading(x,z){
   const T=TT.curve.getTangentAt(bu);
   return Math.atan2(T.x,T.z);
 }
+/* A grid slot is where the car's nose goes, not where its middle goes. The
+   marker is the front of the box and the front wing stops at it.
+
+   How far forward the nose actually is gets measured off the model rather than
+   taken from CAR_LEN. Half of CAR_LEN put every car 0.53 m past its point,
+   because the length the physics uses is not the length of the thing you can
+   see -- that has a front wing on the end of it. */
+let _raceNose=0;
+function raceNose(){
+  if(_raceNose) return _raceNose;
+  if(!carGroup) return CAR_LEN/2;
+  const box=new THREE.Box3().setFromObject(carGroup);
+  const o=carGroup.position, h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+  let ahead=0;
+  for(const cx of [box.min.x,box.max.x]) for(const cz of [box.min.z,box.max.z])
+    ahead=Math.max(ahead, (cx-o.x)*fx + (cz-o.z)*fz);
+  _raceNose=ahead+0.10;                  // and a hand's width behind the line
+  return _raceNose;
+}
 function racePlace(car, slot){
   if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
-  const g=gridPts[slot] || gridPts[0];
-  const hdg=raceHeading(g.x,g.z);
+  const g0=gridPts[slot] || gridPts[0];
+  const hdg=raceHeading(g0.x,g0.z);
+  const back=raceNose();
+  const g={ x:g0.x-Math.sin(hdg)*back, z:g0.z-Math.cos(hdg)*back, y:g0.y };
   const ground=groundAt(g.x,g.z,1e9);
   const y=(ground.hit?ground.y:g.y);
   if(car==='player'){
@@ -9139,13 +9318,15 @@ function racePlace(car, slot){
     carGroup.position.set(g.x, PLAYER.groundY, g.z);
     clearDebris();
   } else {
-    const st=AI.car.st;
+    const d=(car&&car.car)?car:AI;              // a driver, or the original one
+    const st=d.car.st;
     st.wx=g.x; st.wz=g.z; st.hdg=hdg; st.speed=0;
-    AI.car.steerIn=0; AI.car.steerAng=0; AI.car.slipAng=0;
-    AI.car.groundY=y+RIDE;
-    probeCar(st.wx, st.wz, st.hdg, y, AI.car.surf);
-    AI.i=aiLocate(st.wx,st.wz).i;
-    AI.lat=0; AI.want=0; AI._dv=0; AI._dvRace=0;
+    d.car.steerIn=0; d.car.steerAng=0; d.car.slipAng=0;
+    d.car.groundY=y+RIDE;
+    probeCar(st.wx, st.wz, st.hdg, y, d.car.surf);
+    d.i=aiLocate(d, st.wx, st.wz).i;
+    d.lat=0; d.want=0; d._dv=0; d._dvRace=0;
+    if(d.obj) d.obj.position.set(g.x, y+RIDE, g.z);
   }
 }
 function raceStart(opts){
@@ -9154,12 +9335,23 @@ function raceStart(opts){
   if(RACE.on){ raceEnd(); return false; }
   if(!AI.car && !aiSpawn()) return false;
   if(!AI.n) aiBuild();
-  AI.obj.visible=true;
+  aiField(RACE_CARS-1);                 // you, and nine of them
   racePlace('player', 0);               // pole
-  racePlace('ai', 1);                   // alongside
-  AI.on=true; AI.hold=true; AI.laps=[];
+  for(let k=0;k<AIS.length;k++){
+    const d=AIS[k];
+    if(!d||!d.car) continue;
+    racePlace(d, k+1);                  // slot 0 is yours, they fill 1 to 9
+    d.obj.visible=true;
+    d.on=true; d.hold=true; d.laps=[]; d.t=0; d.worst=0;
+    /* Nobody's foot comes off the clutch at the same instant. Two hundred to
+       two hundred and fifty milliseconds, drawn per car per start, which is
+       what separates a good getaway from a bad one. */
+    d.react=0.20+Math.random()*0.05; d._react=0;
+  }
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
+  RACE.raceT=0; RESULT.on=false; RESULT.rows=[]; RESULT.you=0; RESULT._left=-1;
+  for(const d of AIS){ d.finish=0; d._prevLap=d.i; }
   RACE.hold=RACE_HOLD[0]+Math.random()*(RACE_HOLD[1]-RACE_HOLD[0]);
   /* Pinned by the same lever the other circuit's start uses: anything that is
      not 'go' holds the car on the line. */
@@ -9172,6 +9364,7 @@ function raceStart(opts){
   if(!(opts&&opts.keepIntro)){ TT.live=false; TT.drone=0; }
   ttReset();
   setLights(0);
+  raceGridList();
   raceEl('gridcard').classList.add('show');
   raceEl('lights').classList.remove('show');
   raceEl('lightsout').classList.remove('show');
@@ -9181,8 +9374,8 @@ function raceStart(opts){
 }
 function raceEnd(){
   RACE.on=false; RACE.phase='';
-  AI.hold=false; AI.on=false;
-  if(AI.obj) AI.obj.visible=false;
+  for(const d of AIS){ d.hold=false; d.on=false; d.react=0;
+                       if(d.obj) d.obj.visible=false; }
   startPhase='go';
   setLights(0);
   ['gridcard','lights','lightsout'].forEach(id=>raceEl(id).classList.remove('show'));
@@ -9190,6 +9383,23 @@ function raceEnd(){
 }
 /* The sequence itself, on the world clock rather than on timers, so it cannot
    drift away from the cars it is holding. */
+/* The grid, written out. Ten cars is a list rather than two lines of markup,
+   and it names who is where before the lights come on. */
+const GRID_NAMES=['Verstappen','Norris','Leclerc','Piastri','Russell','Hamilton',
+                  'Sainz','Alonso','Gasly','Ocon','Albon','Hulkenberg'];
+function raceGridList(){
+  const box=raceEl('racegrid');
+  if(!box) return;
+  const row=(pos,name,sub,tag,you)=>
+    '<div class="slot'+(you?' you':'')+'"><div class="pos">P'+pos+'</div>'+
+    '<div class="who"><b>'+name+'</b><span>'+sub+'</span></div>'+
+    '<div class="tag">'+tag+'</div></div>';
+  let html=row(1,'You','McLaren MCL39','Pole',true);
+  for(let k=2;k<=RACE_CARS;k++)
+    html+=row(k, GRID_NAMES[(k-2)%GRID_NAMES.length], 'McLaren MCL39',
+              'Row '+Math.ceil(k/2));
+  box.innerHTML=html;
+}
 function raceUI(){
   const sl=raceEl('paceslider'), num=raceEl('pacenum'), nm=raceEl('pacename');
   if(!sl) return;
@@ -9230,7 +9440,8 @@ function raceStep(dt){
       lo.classList.add('show');
       setTimeout(()=>lo.classList.remove('show'),1300);
       // one release, both cars
-      startPhase='go'; AI.hold=false;
+      startPhase='go';
+      for(const d of AIS){ d.hold=false; d._react=0; }
       document.body.classList.remove('racestart');
       TT.live=true; TT.t=0; ttReset();
     }
@@ -9246,50 +9457,61 @@ function aiToggle(){
   /* Put out just ahead of the player, at the speed the line carries there, so
      it arrives already going rather than accelerating from a standstill in
      front of you. */
-  const loc=aiLocate(carState.wx, carState.wz);
-  aiPlace((loc.i+40)%AI.n, true);
+  const loc=aiLocate(AI, carState.wx, carState.wz);
+  aiPlace(AI, (loc.i+40)%AI.n, true);
   AI.on=true;
   return true;
 }
-function aiStep(dt, t){
-  if(!AI.on||!AI.car) return;
-  const C=AI.car, st=C.st;
-  if(AI.hold){                      // on the grid, waiting for the lights
+function aiStepAll(dt, t){ for(const d of AIS) aiStep(d, dt, t); }
+function aiStep(d, dt, t){
+  if(!d.on||!d.car) return;
+  const C=d.car, st=C.st;
+  if(d.hold){                      // on the grid, waiting for the lights
     st.speed=0; C.steerIn=0; C.steerAng=0;
     placeCar(C, dt, t);
     return;
   }
-  const loc=aiLocate(st.wx,st.wz);
-  AI.err=loc.d;
+  if(d.react>0){                   // lights out, but this one has not gone yet
+    d._react=(d._react||0)+dt;
+    if(d._react<d.react){
+      st.speed=0; C.steerIn=0; C.steerAng=0;
+      placeCar(C, dt, t);
+      return;
+    }
+    d.react=0;
+  }
+  const loc=aiLocate(d, st.wx, st.wz);
+  d.err=loc.d;
   /* Signed, and against the room the survey says is there. Distance from the
      line means nothing on its own -- a metre off at Blanchimont is nothing and
      a metre off at the Bus Stop is in the wall. */
-  { const i=loc.i, j=(i+1)%AI.n;
-    const tx=AI.x[j]-AI.x[i], tz=AI.z[j]-AI.z[i], tl=Math.hypot(tx,tz)||1;
-    AI.off=((st.wx-AI.x[i])*(tz/tl) - (st.wz-AI.z[i])*(tx/tl));  // +ve = right
+  { const i=loc.i, j=(i+1)%d.n;
+    const tx=d.x[j]-d.x[i], tz=d.z[j]-d.z[i], tl=Math.hypot(tx,tz)||1;
+    d.off=((st.wx-d.x[i])*(tz/tl) - (st.wz-d.z[i])*(tx/tl));  // +ve = right
     const stn=tlStation(st.wx,st.wz);
-    AI.room = stn ? (AI.off>0 ? stn.dR : stn.dL) : 99;
-    AI.outside = Math.abs(AI.off) - AI.room; }
-  if(loc.d>AI.worst) AI.worst=loc.d;
-  aiTraffic(dt);
-  const ped=aiPedals(C); AI._thr=ped.thr; AI._brk=ped.brk;
-  stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(C,dt)}, dt);
+    d.room = stn ? (d.off>0 ? stn.dR : stn.dL) : 99;
+    d.outside = Math.abs(d.off) - d.room; }
+  if(loc.d>d.worst) d.worst=loc.d;
+  if(C.surf && C.surf.ok && (C.surf.grass||C.surf.loose)) d._offN=(d._offN||0)+1;
+  aiTraffic(d, dt);
+  const ped=aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
+  stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(d, C, dt)}, dt);
   placeCar(C, dt, t);
-  AI.t+=dt;
+  d.t+=dt;
   /* Recorded in here rather than polled from outside: a headless browser asking
      for the state every frame runs the world at a tenth of real time, and the
      answer to "where exactly did it lose the line" needs every metre of it. */
-  if(AI.trace && AI.t>=(AI._next||0)){
-    AI._next=AI.t+0.05;
-    AI.trace.push([+AI.t.toFixed(2), +(AI.i*AI.ds).toFixed(1), +(st.speed*3.6).toFixed(1),
-                   +(AI.v[AI.i]*3.6).toFixed(1), +AI.err.toFixed(2), +AI.off.toFixed(2),
-                   +AI.outside.toFixed(2), +C.steerAng.toFixed(3),
+  if(d.trace && d.t>=(d._next||0)){
+    d._next=d.t+0.05;
+    d.trace.push([+d.t.toFixed(2), +(d.i*d.ds).toFixed(1), +(st.speed*3.6).toFixed(1),
+                   +(d.v[d.i]*3.6).toFixed(1), +d.err.toFixed(2), +d.off.toFixed(2),
+                   +d.outside.toFixed(2), +C.steerAng.toFixed(3),
                    C.surf.ok?(C.surf.grass?2:C.surf.loose?3:1):0]);
-    if(AI.trace.length>40000) AI.trace.shift();
+    if(d.trace.length>40000) d.trace.shift();
   }
   // a lap is complete when the station index wraps past where it started
-  if(AI._prev>AI.n*0.9 && AI.i<AI.n*0.1){ AI.laps.push(+AI.t.toFixed(2)); AI.t=0; }
-  AI._prev=AI.i;
+  if(d._prev>d.n*0.9 && d.i<d.n*0.1){ d.laps.push(+d.t.toFixed(2)); d.t=0; }
+  d._prev=d.i;
 }
 
 window.SIM={
@@ -9309,7 +9531,7 @@ window.SIM={
       lap:+(function(){let t=0;for(let i=0;i<AI.n;i++){const j=(i+1)%AI.n;
         t+=2*AI.ds/(AI.v[i]+AI.v[j]);}return t;})().toFixed(2),
       top:+(Math.max(...AI.v)*3.6).toFixed(0), min:+(Math.min(...AI.v)*3.6).toFixed(0)}:null; },
-  aiStart(i,flying,margin){ aiSpawn(); aiBuild(margin); aiPlace(i||0,flying);
+  aiStart(i,flying,margin){ aiSpawn(); aiBuild(margin); aiPlace(AI, i||0, flying);
       AI.on=true; AI.hold=false; AI.laps=[]; return !!AI.car; },
   aiStop(){ AI.on=false; },
   get ai(){ return AI.car?{on:AI.on, i:AI.i, x:+AI.car.st.wx.toFixed(1), z:+AI.car.st.wz.toFixed(1), s:+(AI.i*AI.ds).toFixed(1),
@@ -9387,6 +9609,42 @@ window.SIM={
     c.dispatchEvent(new PointerEvent('pointermove',{clientX:sx,clientY:sy,bubbles:true}));
     c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
     return {handle:bi, brush:m2Brush};
+  },
+  driver(i){ return AIS[i]; },
+  allLaps(){ return AIS.map(d=>d.laps||[]); },
+  allWorst(){ return AIS.map(d=>d.worst||0); },
+  allOffTrack(){ return AIS.map(d=>d._offN||0); },
+  driverS(){ return AIS.map(d=>+((d.i||0)*d.ds).toFixed(0)); },
+  gridCheck(){
+    /* How far the front of each car actually is from its grid point, measured
+       off the rendered model rather than off the number it was placed with. */
+    if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
+    const out=[];
+    const look=(obj, st, slot, who)=>{
+      const g=gridPts[slot]; if(!g||!obj) return;
+      const box=new THREE.Box3().setFromObject(obj);
+      const c=box.getCenter(new THREE.Vector3()), sz=box.getSize(new THREE.Vector3());
+      const hdg=st.hdg, fx=Math.sin(hdg), fz=Math.cos(hdg);
+      const half=Math.abs(sz.x*fx)+Math.abs(sz.z*fz);
+      const nose=(c.x+fx*half/2 - g.x)*fx + (c.z+fz*half/2 - g.z)*fz;
+      out.push({who, slot, nose:+nose.toFixed(2), len:+half.toFixed(2)});
+    };
+    look(carGroup, carState, 0, 'you');
+    AIS.forEach((d,k)=>{ if(d.car) look(d.obj, d.car.st, k+1, 'ai'+k); });
+    return out;
+  },
+  field(){
+    const live=AIS.filter(d=>d.car);
+    let closest=999;
+    const all=[carState].concat(live.map(d=>d.car.st));
+    for(let a=0;a<all.length;a++) for(let b=a+1;b<all.length;b++)
+      closest=Math.min(closest, Math.hypot(all[a].wx-all[b].wx, all[a].wz-all[b].wz));
+    return { n:live.length, visible:live.filter(d=>d.obj&&d.obj.visible).length,
+             on:live.filter(d=>d.on).length,
+             react:live.map(d=>+(d.react||0).toFixed(3)),
+             moving:live.filter(d=>d.car.st.speed>1).length,
+             kph:live.map(d=>Math.round(d.car.st.speed*3.6)),
+             closest:+closest.toFixed(2) };
   },
   limits(){ return {count:LIMITS.count, flag:LIMITS.flag, pen:LIMITS.pen,
                     off:+_tlOff.toFixed(2), counted:_tlCounted,
@@ -9470,7 +9728,7 @@ window.SIM={
   gridOrder(){
     if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
     return gridPts.slice(0,4).map((g,i)=>({slot:i+1,
-      s:+(aiLocate(g.x,g.z).i*AI.ds).toFixed(1)}));
+      s:+(aiLocate(AI, g.x, g.z).i*AI.ds).toFixed(1)}));
   },
   aiForce(line){ AI.forced=line||null; return AI.forced; },
   aiLines(){
@@ -9489,7 +9747,7 @@ window.SIM={
   },
   aiPace(o){ Object.assign(AI_PACE,o||{}); return {...AI_PACE}; },
   aiTune(o){ Object.assign(AI_TUNE,o||{}); return {...AI_TUNE}; },
-  aiRun(s0, flying, margin){ aiSpawn(); aiBuild(margin); aiPlace(Math.round(s0/AI.ds), flying!==false);
+  aiRun(s0, flying, margin){ aiSpawn(); aiBuild(margin); aiPlace(AI, Math.round(s0/AI.ds), flying!==false);
       AI.on=true; AI.hold=false; AI.laps=[]; AI.worst=0; AI.trace=[]; AI._next=0; return true; },
   aiProfileAt(s){ const i=Math.round(s/AI.ds)%AI.n;
       return {s, kph:+(AI.v[i]*3.6).toFixed(1), R:+(1/Math.max(1e-9,AI.k[i])).toFixed(0)}; },
@@ -9782,7 +10040,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); raceStep(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStep(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
