@@ -150,6 +150,15 @@
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
   /* Which camera you are looking through, the way a broadcast marks it. */
+  #racepos{position:fixed;left:20px;bottom:96px;z-index:12;display:none;align-items:baseline;gap:7px;
+           font-family:var(--mono);color:#fff;background:rgba(10,13,19,.72);
+           border:1px solid rgba(255,255,255,.14);border-left:3px solid var(--amber);
+           border-radius:7px;padding:9px 14px}
+  #racepos.show{display:flex}
+  #racepos b{font-size:23px;font-weight:600;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+  #racepos b.lap{font-size:17px}
+  #racepos small{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(223,231,241,.6)}
+  #racepos i{width:1px;height:17px;background:rgba(255,255,255,.18);margin:0 4px}
   #result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
           z-index:15;display:none;font-family:var(--mono);min-width:min(460px,88vw);
           background:linear-gradient(180deg,rgba(12,15,21,.95),rgba(8,10,14,.97));
@@ -550,6 +559,12 @@
   #qualifying-load .weather-choice:hover{transform:translateY(-3px);background:rgba(255,176,32,.13);border-color:#ffb020}
   #qualifying-load .weather-choice.on{background:rgba(255,176,32,.16);border-color:#ffb020;box-shadow:0 0 0 1px rgba(255,176,32,.24),0 0 24px rgba(255,176,32,.12)}
   #qualifying-load .weather-choice:disabled{cursor:default;opacity:.68}
+  /* Pressed: it says so at once, then the whole row bows out over half a second
+     while the circuit keeps loading behind it. */
+  #qualifying-load .weather-choice.picked{background:rgba(215,38,56,.22);border-color:#d72638;
+     box-shadow:0 0 0 1px rgba(215,38,56,.4),0 0 26px rgba(215,38,56,.22);transform:translateY(-2px)}
+  #qualifying-weather.answered{opacity:0;pointer-events:none;transform:translateY(-4px);
+     transition:opacity .5s ease,transform .5s ease}
   @media(max-width:600px){#qualifying-load .weather-options{grid-template-columns:1fr;max-width:280px;margin:auto;width:100%}
     #qualifying-load .weather-choice{min-height:0}}
   @keyframes qualifying-spin{to{transform:rotate(360deg)}}
@@ -793,6 +808,7 @@ if('serviceWorker' in navigator){
   <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
   <div id="netmsg"></div>
 </div>
+<div id="racepos"></div>
 <div id="result"></div>
 <div id="limwarn"></div>
 <div id="bwflag"><i></i><span>BLACK &amp; WHITE FLAG</span><small id="bwpen">+5.0s at the flag</small></div>
@@ -860,7 +876,7 @@ if('serviceWorker' in navigator){
 </div>
 
 <div id="gridcard">
-  <div class="head"><b>Starting grid</b><span>Spa 2022 &middot; 1 lap</span></div>
+  <div class="head"><b>Starting grid</b><span>Spa 2022 &middot; 5 laps</span></div>
   <div id="racegrid"></div>
   <div class="pace">
     <div class="paceline"><span>AI pace</span><b id="pacenum">7</b><em id="pacename">Quick</em></div>
@@ -5110,7 +5126,12 @@ function ttLine(){
      taken, and the gates are out on the circuit. Putting the finish before this
      guard ended the race on the run down to Eau Rouge, because the grid sits
      behind the line and the first thing anybody does is cross it. */
-  if(RACE.on && RACE.phase==='racing'){ limitsAtLine(); raceFinish(); }
+  if(RACE.on && RACE.phase==='racing'){
+    RACE.lapN=(RACE.lapN||0)+1;
+    limitsAtLine();
+    if(RACE.lapN>=RACE_LAPS) raceFinish();
+    else racePositions();
+  }
   if(missed>=0 || TT.void){
     const why = TT.void ? TT.why : ('missed gate '+(missed+1));
     if(missed>=0){ const pip=document.querySelectorAll('#ttpips i')[missed];
@@ -8745,7 +8766,7 @@ function aiLocate(d, x, z){
    begin early. Changing line is now a thing you do about a car you can nearly
    touch. */
 const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, threat:2,
-                hold:1.25, overlap:12, giveK:0.94, pinK:0.82 };
+                hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:7.0, follow:60, abreast:2.6, followK:0.85 };
 /* Where another car is, relative to this one: how far up or down the road, and
    which side of the line. It used to ask only about the player, because there
    was only ever the player and one AI. With a full grid every driver has to see
@@ -8946,12 +8967,59 @@ function aiTraffic(d, dt){
   } else d.pinned=false;
   d.want=want;
   d.vAct=(d.vline&&d.vline[d.line])||d.v;
+
+  /* What the cars around it allow, as opposed to what the corner allows.
+
+     The profile answers "how fast may I take this corner", which is the right
+     question with an empty road and the wrong one arriving at a hairpin four
+     abreast. Braking at the absolute limit is only available to the car on the
+     racing line with nobody beside it. Two things are added here:
+
+     Following. Never close on the car in front faster than you could still
+     slow to its speed in the gap that is left. That alone stops a queue from
+     arriving at the same apex together.
+
+     Room. A car shoved wide of the line is not on the line the profile was
+     solved for -- it has a tighter corner to take and less road to take it in.
+     The further off it has been pushed, the more of the corner speed it gives
+     back, and only where the corner is actually slow: this costs nothing at
+     Blanchimont and everything at La Source, which is where they were ending up
+     in the gravel. */
+  let cap=Infinity;
+  const look=(x,z,vth,lat)=>{
+    const n=d.n, i=d.i;
+    let gap=Infinity;
+    for(let m=1;m<=Math.round(AI_TRAF.follow/d.ds);m++){
+      const q=(i+m)%n;
+      if((d.x[q]-x)**2+(d.z[q]-z)**2 < AI_TRAF.abreast*AI_TRAF.abreast){ gap=m*d.ds; break; }
+    }
+    if(gap===Infinity) return;
+    const room=Math.max(0, gap-CAR_LEN*1.5);
+    const allow=Math.sqrt(vth*vth + 2*46*AI_TRAF.followK*room);
+    if(allow<cap) cap=allow;
+  };
+  look(carState.wx, carState.wz, carState.speed, 0);
+  for(const o of AIS){
+    if(o===d||!o.car||!o.on) continue;
+    look(o.car.st.wx, o.car.st.wz, o.car.st.speed, o.lat||0);
+  }
+  const wide=Math.abs(d.lat||0);
+  if(wide>1.2){
+    const slow=d.v[d.i]<45;                       // a corner worth respecting
+    if(slow) cap=Math.min(cap, d.v[d.i]*(1-Math.min(0.16,(wide-1.2)*0.05)));
+  }
+  d.capV=cap;
   /* Twice the rate when it is getting out of your way. The normal ease is set
      for changing line, which is something a car does over a couple of seconds;
      leaving room for a car that is already beside it is not that, and at the
      slower rate the gap it opened lagged a good half metre behind the gap it
      had decided on. */
-  const step=(d._urgent?T.ease*2.4:T.ease)*dt;
+  /* Coming off the grid the move across is made slowly -- a car peeling out of
+     its box takes the run to the first corner to reach the line, it does not
+     snap onto it in the first second. Full rate again after that. */
+  const grid=(d._gridT!==undefined && d._gridT<AI_TRAF.gridBlend)
+    ? 0.14+0.86*(d._gridT/AI_TRAF.gridBlend) : 1;
+  const step=(d._urgent?T.ease*2.4:T.ease)*grid*dt;
   d._urgent=false;
   d.lat += clamp(d.want-d.lat, -step, step);
   /* And whatever it is doing, it is pulled back inside the white line here --
@@ -9049,7 +9117,8 @@ function aiPedals(d, C){
      the forward pass built it at full power, so asking for the profile ahead is
      asking for full throttle exactly where full throttle is what fits. */
   const K=(d.speedK||1);
-  const tgt=V[j]*K;
+  /* The corner's speed, or what the traffic allows, whichever is less. */
+  const tgt=Math.min(V[j]*K, d.capV===undefined?Infinity:d.capV);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
 
@@ -9091,7 +9160,7 @@ function aiPedals(d, C){
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
-    const there=V[q]*K;
+    const there=Math.min(V[q]*K, d.capV===undefined?Infinity:d.capV);
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
     if(cap<capMin) capMin=cap;
     if(v>cap){
@@ -9279,7 +9348,8 @@ function aiField(n){
                       _pi:0, _prev:0, _next:0, _thr:0, _brk:0, _dv:0, _dvRace:0,
                       _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
                       _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
-                      _prevLap:0, outside:0, room:99, _onBrakes:false, _brkS:0 });
+                      _prevLap:0, outside:0, room:99, _onBrakes:false, _brkS:0,
+                      _gridT:undefined, lapN:0, capV:Infinity });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -9332,6 +9402,7 @@ function aiPlace(d, i, flying){
    it steps, so there is one release and both of them answer to it. */
 const RACE={ on:false, phase:'', t:0, hold:0, ready:false };
 const RACE_CARS=10;   // you and nine others, on the ten painted slots
+const RACE_LAPS=5;    // the distance
 /* One lap, so the line is the finish. Everyone's race time runs from lights out
    and stops when they cross it; the penalty is added to yours afterwards, which
    is the whole point of it -- five seconds is only a punishment if somebody is
@@ -9343,9 +9414,42 @@ function raceClock(dt){
   RACE.raceT=(RACE.raceT||0)+dt;
   for(const d of AIS){
     if(!d.car || !d.on || d.finish) continue;
-    if(d._prevLap>d.n*0.9 && d.i<d.n*0.1) d.finish=RACE.raceT;
+    if(d._prevLap>d.n*0.9 && d.i<d.n*0.1){
+      d.lapN=(d.lapN||0)+1;
+      if(d.lapN>=RACE_LAPS) d.finish=RACE.raceT;
+    }
     d._prevLap=d.i;
   }
+  racePositions();
+}
+/* Where everybody is, in order.
+
+   Progress is laps done plus how far round this one, so it is one number per
+   car and sorting it is the classification. Yours is measured the same way off
+   the same stations, so there is no argument about whose metre is whose. */
+function raceProgress(){
+  const L=TT.len||1;
+  const rows=[{you:true, name:'You', prog:(RACE.lapN||0)*L + tvCarS(), fin:RESULT.you||0}];
+  for(const d of AIS){
+    if(!d.car||!d.on) continue;
+    rows.push({you:false, name:d.name||'AI', prog:(d.lapN||0)*L + (d.i||0)*d.ds, fin:d.finish||0});
+  }
+  /* Anyone home is ahead of anyone still out, in the order they finished. */
+  rows.sort((a,b)=> (a.fin&&b.fin) ? a.fin-b.fin
+                  : a.fin ? -1 : b.fin ? 1 : b.prog-a.prog);
+  return rows;
+}
+function racePositions(){
+  const rows=raceProgress();
+  RACE.pos=rows.findIndex(r=>r.you)+1;
+  RACE.field=rows.length;
+  const el=raceEl('racepos');
+  if(!el) return;
+  if(RACE.phase!=='racing' && !RESULT.on){ el.classList.remove('show'); return; }
+  el.classList.add('show');
+  const lap=Math.min(RACE_LAPS,(RACE.lapN||0)+1);
+  el.innerHTML='<b>P'+RACE.pos+'</b><small>of '+RACE.field+'</small>'
+              +'<i></i><b class="lap">'+lap+'</b><small>/ '+RACE_LAPS+' laps</small>';
 }
 /* You crossing the line is the end of your race, not the end of the race. The
    first version classified everyone still out on the circuit as a
@@ -9358,10 +9462,11 @@ function raceFinish(){
   raceResultRows();
 }
 function raceResultRows(){
+  const L=TT.len||1;
   const rows=[{who:'You', t:RESULT.you, pen:LIMITS.pen, you:true}];
   AIS.forEach((d,k)=>{ if(d.car&&d.on)
-    rows.push({who:GRID_NAMES[k%GRID_NAMES.length], t:d.finish||null, pen:0,
-               run:(d.i||0)*d.ds}); });
+    rows.push({who:d.name||GRID_NAMES[k%GRID_NAMES.length], t:d.finish||null, pen:0,
+               run:(d.lapN||0)*L+(d.i||0)*d.ds}); });
   const done=rows.filter(r=>r.t), out=rows.filter(r=>!r.t);
   done.forEach(r=>r.total=r.t+r.pen);
   done.sort((a,b)=>a.total-b.total);
@@ -9378,7 +9483,7 @@ function raceResultTick(){
 function raceResultUI(){
   const box=raceEl('result'); if(!box) return;
   const lead=RESULT.rows[0];
-  let html='<div class="head"><b>Result</b><span>Spa 2022 &middot; 1 lap</span></div><div class="rows">';
+  let html='<div class="head"><b>Result</b><span>Spa 2022 &middot; '+RACE_LAPS+' laps</span></div><div class="rows">';
   RESULT.rows.forEach((r,i)=>{
     const gap = r.total==null ? 'still racing'
               : i===0 ? fmtTime(r.total)
@@ -9496,7 +9601,19 @@ function racePlace(car, slot){
     d.car.groundY=y+RIDE;
     probeCar(st.wx, st.wz, st.hdg, y, d.car.surf);
     d.i=aiLocate(d, st.wx, st.wz).i;
-    d.lat=0; d.want=0; d._dv=0; d._dvRace=0;
+    /* Where this grid box actually is, sideways, relative to the racing line.
+
+       It used to be set to zero, which told the car it was already on the line
+       when it was three metres off it in a painted box. At lights out every one
+       of them therefore steered hard for the line at once -- the whole field
+       diving left off the grid together, which is the one thing a start never
+       looks like. Starting from the truth means they pull away down their own
+       lane and have to work their way across. */
+    { const n=d.n, i=d.i, j=(i+1)%n;
+      const tx=d.x[j]-d.x[i], tz=d.z[j]-d.z[i], tl=Math.hypot(tx,tz)||1;
+      d.lat=((g.x-d.x[i])*(tz/tl) - (g.z-d.z[i])*(tx/tl));
+      d.want=d.lat; }
+    d._dv=0; d._dvRace=0; d._gridT=0;
     if(d.obj) d.obj.position.set(g.x, y+RIDE, g.z);
   }
 }
@@ -9521,8 +9638,8 @@ function raceStart(opts){
   }
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
-  RACE.raceT=0; RESULT.on=false; RESULT.rows=[]; RESULT.you=0; RESULT._left=-1;
-  for(const d of AIS){ d.finish=0; d._prevLap=d.i; }
+  RACE.raceT=0; RACE.lapN=0; RACE.pos=1; RESULT.on=false; RESULT.rows=[]; RESULT.you=0; RESULT._left=-1;
+  for(const d of AIS){ d.finish=0; d.lapN=0; d._prevLap=d.i; }
   RACE.hold=RACE_HOLD[0]+Math.random()*(RACE_HOLD[1]-RACE_HOLD[0]);
   /* Pinned by the same lever the other circuit's start uses: anything that is
      not 'go' holds the car on the line. */
@@ -9662,6 +9779,7 @@ function aiStep(d, dt, t){
     const stn=tlStation(st.wx,st.wz);
     d.room = stn ? (d.off>0 ? stn.dR : stn.dL) : 99;
     d.outside = Math.abs(d.off) - d.room; }
+  if(d._gridT!==undefined) d._gridT+=dt;
   if(loc.d>d.worst) d.worst=loc.d;
   /* Measuring what the field actually spends its time doing. */
   { const st2=d._stat||(d._stat={n:0,race:0,clear:0,slow:0,pin:0,sk:0,thr:0});
@@ -9838,6 +9956,14 @@ window.SIM={
                     text:document.getElementById('limwarn').textContent}; },
   limitsHit(){ limitsHit(); },
   tlLock(){ return +_tlLock.toFixed(2); },
+  standings(){ return { pos:RACE.pos, field:RACE.field, lap:RACE.lapN,
+                        laps:RACE_LAPS, order:raceProgress().map(r=>r.name),
+                        hud:document.getElementById('racepos').textContent }; },
+  gridLat(){ return AIS.filter(d=>d.car).map(d=>+ (d.lat||0).toFixed(2)); },
+  turnOne(){ return AIS.filter(d=>d.car).map(d=>({
+      name:d.name, s:Math.round((d.i||0)*d.ds), kph:Math.round(d.car.st.speed*3.6),
+      lat:+(d.lat||0).toFixed(1), cap:d.capV===Infinity?null:Math.round(d.capV*3.6),
+      grass:!!(d.car.surf&&d.car.surf.ok&&(d.car.surf.grass||d.car.surf.loose)) })); },
   myStyle(){ const out={...carStyle}; const m=styleTargets.body[0];
              out.actual=m&&m.color?('#'+m.color.getHexString()):null; return out; },
   liveries(){ return AIS.filter(d=>d.obj).map(d=>{
@@ -10713,8 +10839,10 @@ function qualifyingLoadSetStatus(text){
 function qualifyingWeatherReset(){
   qualifyingWeatherChoice='';
   qualifyingStartQueued=false;
+  if(qualifyingWeatherEl) qualifyingWeatherEl.classList.remove('answered');
   qualifyingWeatherButtons.forEach(btn=>{
     btn.classList.remove('on');
+    btn.classList.remove('picked');
     btn.setAttribute('aria-pressed','false');
     btn.disabled=false;
   });
@@ -10731,6 +10859,7 @@ function qualifyingBegin(){
     return;
   }
   qualifyingLoadSetStatus('Starting '+TIME_OF_DAY[qualifyingWeatherChoice].label.toLowerCase()+' session');
+  try{ applyTimeOfDay(qualifyingWeatherChoice); }catch(e){}   // in case it could not be set at the time
   ttStart();
   /* And straight onto the grid. Pressing a key to make a race happen was never
      the idea: you come out of the loading screen into the drone shot with both
@@ -10740,13 +10869,24 @@ function qualifyingBegin(){
 }
 function qualifyingChooseWeather(kind){
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
+  /* The answer is taken the moment you give it.
+
+     The panel appeared while the circuit was still loading, so a press could
+     land before anything was ready to act on it and nothing visible happened --
+     you pressed again, and again. Now the choice is recorded and acknowledged
+     first, the panel marks what you picked and fades out, and the loading
+     carries on underneath. When it finishes it already has your answer.
+
+     Setting the sky is the part that needs a loaded scene, so it goes last and
+     inside a guard: if it cannot run yet it is applied on the way in instead. */
   qualifyingWeatherChoice=kind;
-  applyTimeOfDay(kind);
   qualifyingWeatherButtons.forEach(btn=>{
     const on=btn.dataset.weather===kind;
-    btn.classList.toggle('on',on);
+    btn.classList.toggle('picked',on);
     btn.setAttribute('aria-pressed',on?'true':'false');
   });
+  if(qualifyingWeatherEl) qualifyingWeatherEl.classList.add('answered');
+  try{ applyTimeOfDay(kind); }catch(e){ /* not built yet; qualifyingBegin does it */ }
   if(qualifyingTrackReady) qualifyingBegin();
   else qualifyingLoadSetStatus('Loading '+(TRACK&&TRACK.name||'the circuit'));
 }
