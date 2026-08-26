@@ -7017,15 +7017,24 @@ document.getElementById('tlcopy').onclick=e=>{ const t=tleText();
    The lap is no longer deleted for it. Deleting a lap says nothing during a
    race, and a race is the only thing being driven at the moment. */
 const TL_GRACE=0.30;
-let _tlOff=0, _tlCounted=false;
+/* And once it has said something, it says nothing for five seconds.
+
+   Coming back onto the circuit after a wide moment often means clipping the
+   paint again a second later while the car is gathered up, and being told off
+   three times for one mistake is not officiating, it is nagging. One excursion
+   is one offence; the next one cannot be counted until five seconds have gone
+   by. */
+const TL_QUIET=5.0;
+let _tlOff=0, _tlCounted=false, _tlLock=0;
 function tlCheck(dt){
   if(!TT.live || TT.cd>0 || CARPTS.length!==4) return;
   let on=0;
   for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
   if(on>0){ _tlOff=0; _tlCounted=false; return; }
   _tlOff+=(dt||STEP);
-  if(_tlOff<TL_GRACE || _tlCounted) return;
+  if(_tlOff<TL_GRACE || _tlCounted || _tlLock>0) return;
   _tlCounted=true;
+  _tlLock=TL_QUIET;
   limitsHit();
   /* TT.started means "a checkpoint gate has been reached", not "the timed
      run is under way". The first gate is beyond Eau Rouge, so using it here
@@ -7049,17 +7058,17 @@ const LIMITS={ count:0, flag:false, pen:0, msg:'', msgT:0 };
 const LIMITS_PEN=5.0;
 function limitsReset(){
   LIMITS.count=0; LIMITS.flag=false; LIMITS.pen=0; LIMITS.msg=''; LIMITS.msgT=0;
-  _tlOff=0; _tlCounted=false;
+  _tlOff=0; _tlCounted=false; _tlLock=0;
   limitsPaint();
 }
 function limitsHit(){
-  if(LIMITS.flag){ limitsSay('TRACK LIMITS','black and white flag already shown'); return; }
+  if(LIMITS.flag) return;          // the flag is the state; nothing further to say
   LIMITS.count++;
   if(LIMITS.count>=3){
     LIMITS.flag=true;
-    limitsSay('BLACK AND WHITE FLAG','track limits \u2014 five seconds at the flag');
+    limitsSay('BLACK AND WHITE FLAG','all four wheels off, three times \u2014 five seconds at the flag');
   } else {
-    limitsSay('TRACK LIMITS', 'warning '+LIMITS.count+' of 3');
+    limitsSay('TRACK LIMITS', 'all four wheels off \u2014 warning '+LIMITS.count+' of 3');
   }
   limitsPaint();
 }
@@ -7073,6 +7082,7 @@ function limitsSay(head,sub){
   }
 }
 function limitsStep(dt){
+  if(_tlLock>0) _tlLock=Math.max(0,_tlLock-dt);
   if(LIMITS.msgT>0){
     LIMITS.msgT-=dt;
     if(LIMITS.msgT<=0){ const el=document.getElementById('limwarn'); if(el) el.classList.remove('show'); }
@@ -9059,19 +9069,35 @@ function aiPedals(d, C){
      below it, do not touch them. */
   const BRAKE=46;
   if(!AI_LATE_BRAKE) return {thr:0, brk:clamp(-a/BRAKE,0,1)};
-  let need=0;
+  let need=0, capMin=Infinity;
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
     const there=V[q]*K;
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
+    if(cap<capMin) capMin=cap;
     if(v>cap){
       const req=(v*v-there*there)/(2*dist);     // what this point demands now
       if(req>need) need=req;
     }
   }
-  if(need<=0) return {thr:0, brk:0};            // coasting is enough: not yet
-  return {thr:0, brk:clamp(need/BRAKE,0,1)};
+  /* Held on, once it is on.
+
+     Braking exactly when the limit is exceeded and releasing the instant it is
+     not means sitting on the limit and pumping: the first version of this made
+     forty-seven separate applications in a lap, thirty of them one or two
+     frames long, every one of them a full pedal. That is not a driver, it is a
+     relay. So the pedal stays down until the car is properly under the limit
+     rather than exactly on it, and the pressure itself is eased over about
+     seventy milliseconds -- roughly the time it takes a foot to move. */
+  const BAND=0.7;                               // m/s of margin before it lets go
+  if(v>capMin) d._onBrakes=true;
+  else if(v<capMin-BAND) d._onBrakes=false;
+  if(!d._onBrakes){ d._brkS=0; return {thr:0, brk:0}; }
+  if(need<=0) need=(v-(capMin-BAND))*4;         // holding it on the limit
+  const want=clamp(need/BRAKE,0,1);
+  d._brkS=(d._brkS||0)+(want-(d._brkS||0))*(1-Math.exp(-0.0167/0.07));
+  return {thr:0, brk:clamp(d._brkS,0,1)};
 }
 /* ---------------------------------------------------------------------------
    Cars touching cars.
@@ -9159,9 +9185,64 @@ function carContact(dt){
     for(let b=a+1;b<live.length;b++) carsTouch(live[a].car, live[b].car, dt);
 }
 
-/* The grid.
+/* The grid, and what is on it.
 
-   Every driver inherits from AI, which holds the things that are the same for
+   A car per driver, and the same car every time: the livery is looked up by
+   grid number, not drawn at random, so the driver in the dark green is the
+   driver in the dark green next race and the one after that. That is what makes
+   a season out of a race.
+
+   Sharp rather than loud: one strong colour on the bodywork, carbon for the
+   halo and the wing core, and the wheels used to separate cars that would
+   otherwise read the same at a distance. You are not in here -- your car is
+   whatever you set it to in the customiser. */
+const LIVERIES=[
+  { name:'Verstappen', body:'#12305e', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
+  { name:'Norris',     body:'#ff6b1a', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' },
+  { name:'Leclerc',    body:'#9c1122', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
+  { name:'Piastri',    body:'#0f6f5c', ring:'#15171b', wing:'#15171b', rims:'#c8a24a' },
+  { name:'Russell',    body:'#cfd6dc', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' },
+  { name:'Hamilton',   body:'#2b2f36', ring:'#15171b', wing:'#15171b', rims:'#c8a24a' },
+  { name:'Sainz',      body:'#1f6fb2', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
+  { name:'Alonso',     body:'#0b4f2c', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
+  { name:'Gasly',      body:'#6b4bb0', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' }
+];
+/* A clone shares its materials with the car it came from, so painting one car
+   paints the lot -- including yours. Each car is given its own copies first. */
+function aiPaint(root, liv){
+  const seen=new Map();
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    const out=ms.map(m=>{
+      if(!m) return m;
+      let c=seen.get(m);
+      if(!c){ c=m.clone(); seen.set(m,c); }
+      return c;
+    });
+    o.material=Array.isArray(o.material)?out:out[0];
+  });
+  const hit=(m,hex,metal,rough)=>{
+    if(m.map){ if(!m.userData) m.userData={}; m.userData.styleOriginalMap=m.map; m.map=null; }
+    if(m.color) m.color.copy(sRGB(hex));
+    m.metalness=metal; m.roughness=rough; m.needsUpdate=true;
+  };
+  root.traverse(o=>{
+    if(!o.isMesh||!o.material) return;
+    let bodyish=false, a=o.parent;
+    while(a){ if(/body/i.test(a.name||'')){ bodyish=true; break; } a=a.parent; }
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+      const n=(m&&m.name||'').toLowerCase();
+      if(!m) return;
+      if(/paint/.test(n))                       hit(m, liv.body, .12, .42);
+      else if(/halo|ring/.test(n))              hit(m, liv.ring, .18, .31);
+      else if(/mcl39_wheels|discs|chrome/.test(n)) hit(m, liv.rims, .72, .24);
+      else if(bodyish&&/mcl39_carbon1|mcl39_carbon2/.test(n)) hit(m, liv.wing, .28, .36);
+    });
+  });
+}
+
+/* Every driver inherits from AI, which holds the things that are the same for
    all of them -- the line, the curvature, the speed profile, the corner table --
    while anything a driver does for itself lands on the driver: where it is on
    the lap, which line it has taken, what its pedals are doing, who it is racing.
@@ -9180,7 +9261,7 @@ function aiField(n){
                       _pi:0, _prev:0, _next:0, _thr:0, _brk:0, _dv:0, _dvRace:0,
                       _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
                       _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
-                      _prevLap:0, outside:0, room:99 });
+                      _prevLap:0, outside:0, room:99, _onBrakes:false, _brkS:0 });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -9192,6 +9273,9 @@ function aiSpawnOne(d){
   const g=new THREE.Group(); scene.add(g);
   const m=carObj.clone(true);
   g.add(m); d.obj=g;
+  d.liv=LIVERIES[(AIS.indexOf(d)+LIVERIES.length)%LIVERIES.length] || LIVERIES[0];
+  d.name=d.liv.name;
+  aiPaint(m, d.liv);
   d.car=makeCar(g,false);                       // no aids: it steers with a number
   d.car.gripMul=1;                              // the player's grip, exactly
   return true;
@@ -9454,8 +9538,8 @@ function raceEnd(){
    drift away from the cars it is holding. */
 /* The grid, written out. Ten cars is a list rather than two lines of markup,
    and it names who is where before the lights come on. */
-const GRID_NAMES=['Verstappen','Norris','Leclerc','Piastri','Russell','Hamilton',
-                  'Sainz','Alonso','Gasly','Ocon','Albon','Hulkenberg'];
+/* One source for who is who, so the name on the grid is the car you see. */
+const GRID_NAMES=LIVERIES.map(l=>l.name);
 function raceGridList(){
   const box=raceEl('racegrid');
   if(!box) return;
@@ -9735,6 +9819,16 @@ window.SIM={
                     flagShown:document.getElementById('bwflag').classList.contains('show'),
                     text:document.getElementById('limwarn').textContent}; },
   limitsHit(){ limitsHit(); },
+  tlLock(){ return +_tlLock.toFixed(2); },
+  myStyle(){ const out={...carStyle}; const m=styleTargets.body[0];
+             out.actual=m&&m.color?('#'+m.color.getHexString()):null; return out; },
+  liveries(){ return AIS.filter(d=>d.obj).map(d=>{
+      const seen=new Set();
+      d.obj.traverse(o=>{ if(o.isMesh&&o.material)
+        (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+          if(m&&/paint/.test((m.name||'').toLowerCase())&&m.color)
+            seen.add('#'+m.color.getHexString()); }); });
+      return { name:d.name, want:d.liv&&d.liv.body, got:[...seen] }; }); },
   atLine(){ return limitsAtLine(); },
   wheelsOn(){ let n=0; for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) n++; return n; },
   paintTool(){ return m2Tool; },
