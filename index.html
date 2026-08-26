@@ -8717,8 +8717,25 @@ function aiLocate(d, x, z){
 /* blue: quicker than this and it is not a fight, it stands aside. race: it
    counts you as gaining if you are within this of its own speed, so it defends
    against someone reeling it in rather than only against someone already past. */
-const AI_TRAF={ look:75, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, hold:1.25,
-                overlap:18, giveK:0.94, pinK:0.82 };
+/* look   -- how far away a car is worth noticing at all
+   line   -- how close it has to be before this one changes its line for it
+   overlap-- how close before it is treated as being alongside
+
+   look was doing all three jobs. With one rival that was fine: the player was
+   within 75 m of the AI rarely and on purpose. With nine cars somebody is
+   always within 75 m, so every driver defended or passed permanently, sat on
+   the inside or outside line -- which has its own, slower speed profile -- and
+   ran a mean pace of 0.95 with a fifth of the lap pinned. Measured over a lap:
+   the leader in clear air was on the racing line 81% of the time and did 87.75
+   with no grass at all; the pack managed 33 to 62%, ran wide, and lapped in 92
+   to 97. That is not nine racing drivers, it is nine drivers getting out of
+   each other's way.
+
+   Noticing stays long, because standing aside for a genuinely faster car should
+   begin early. Changing line is now a thing you do about a car you can nearly
+   touch. */
+const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, threat:2,
+                hold:1.25, overlap:12, giveK:0.94, pinK:0.82 };
 /* Where another car is, relative to this one: how far up or down the road, and
    which side of the line. It used to ask only about the player, because there
    was only ever the player and one AI. With a full grid every driver has to see
@@ -8823,31 +8840,45 @@ function aiTraffic(d, dt){
   d.mode='clear'; d.line='race'; d.speedK=1;
   if(rel && Math.abs(rel.gap)<T.look && d.field){
     const mine=C.st.speed*3.6, theirs=rel.kph;
-    /* How much quicker you are, averaged over about half a second rather than
-       read off this frame. Instantaneously, a car that has not braked yet is
-       forty kph quicker at every braking point, and deciding on that had the AI
-       standing aside in the middle of a corner it was in the process of
-       defending -- then going back to defending when the brakes came off. */
-    d._dv = (d._dv||0) + ((theirs-mine)-(d._dv||0))*(1-Math.exp(-dt/0.55));
+    /* Who is actually quicker, which is not the same as who is going faster.
+
+       Both cars are measured against the racing line's pace where each of them
+       is standing, and the difference between those two is what counts. Raw
+       speed cannot answer the question over any distance: a car seventy metres
+       back is still on the straight while this one is already in the corner, so
+       it reads as a hundred and eighty kph quicker and gets waved past. That is
+       what the whole field was doing to itself -- standing aside, all race,
+       for cars that were merely further back on a faster piece of road.
+
+       This one comparison was also being made against the line speed at THIS
+       car's index rather than the rival's, which is the same mistake in the
+       other direction and is what made it so violent.
+
+       Averaged over about half a second, because instantaneously a car that has
+       not braked yet is quicker at every braking point. */
+    const paceMe   = mine   - d.v[d.i]*3.6;
+    const paceThem = theirs - d.v[rel.i]*3.6;
+    const ease=1-Math.exp(-dt/0.55);
+    d._dv     = (d._dv||0)     + ((paceThem-paceMe)-(d._dv||0))*ease;
+    d._dvRace = (d._dvRace||0) + (paceThem-(d._dvRace||0))*ease;
     const dv=d._dv;
-    /* Standing aside is for someone quicker than this car really is, which is
-       not the same as quicker than it is going while it defends. Measured
-       against its own speed, defending cancelled itself: the moment it took the
-       slower line to cover the inside, the car behind was suddenly twenty-five
-       kph quicker, that read as a blue flag, and it pulled over and let them
-       past. The reference is the racing line's pace at this point of the
-       circuit -- what it would be doing if you were not there. */
-    d._dvRace = (d._dvRace||0)
-      + ((theirs-d.v[d.i]*3.6)-(d._dvRace||0))*(1-Math.exp(-dt/0.55));
     const behind=rel.gap<0;
     // which way the inside is here, including on the approach to the corner
     const inDir=Math.sign(d.field.in[d.i])||1;
     const youInside=Math.abs(rel.lat)>0.8 && Math.sign(rel.lat)===inDir;
+    const near=Math.abs(rel.gap);
     if(behind && d._dvRace>T.blue){             // far quicker: let it go
       d.mode='yield'; d.line=youInside?'in':'out'; d.speedK=T.yieldK;
-    } else if(behind && dv>-T.race){             // gaining, or matching: defend
+    } else if(near<T.line && behind && dv>T.threat){  // genuinely quicker: defend
+      /* A threat is a car that is actually quicker, not one that is merely
+         there. This asked for dv > -8, meaning "not much slower than me", which
+         once the comparison was made properly is true of every car in a queue
+         of equals -- so all nine defended against each other for the whole lap,
+         sat on the inside line with its slower profile, and the field bunched
+         up until nobody finished. Two kph of real pace advantage is a threat.
+         Nought is a queue. */
       d.mode='defend'; d.line='in';
-    } else if(!behind && dv<-2){                 // you are in the way: go by
+    } else if(near<T.line && !behind && dv<-2){       // right there, in the way: go by
       d.mode='pass'; d.line=youInside?'out':'in';
       const clear=Math.abs(d.lat-rel.lat)>T.clear;
       if(rel.gap<14 && !clear) d.speedK=Math.min(1, theirs/Math.max(1,mine));
@@ -8882,7 +8913,12 @@ function aiTraffic(d, dt){
      If holding that would put it off the road -- you have it pinned against the
      edge -- it stays on the road and comes off the throttle instead. That is
      the one case where it gives up the corner rather than the space. */
-  if(rel && Math.abs(rel.gap)<AI_TRAF.overlap){
+  /* Only where the two of them actually want the same road. This used to fire
+     on any car within eighteen metres along the lap regardless of which side of
+     the circuit it was on, which is how a fifth of the lap ended up pinned at
+     0.82 pace with nobody anywhere near. */
+  if(rel && Math.abs(rel.gap)<AI_TRAF.overlap
+         && Math.abs(rel.lat-want)<AI_TRAF.clear+1.5){
     const side=Math.sign(d.lat-rel.lat) || -Math.sign(rel.lat) || 1;
     const bound=rel.lat+side*AI_TRAF.clear;
     let w = side>0 ? Math.max(want,bound) : Math.min(want,bound);
@@ -8985,6 +9021,7 @@ function aiSteer(d, C, dt){
    what the engine or the brakes can give. Feed-forward, not a chase -- the
    profile already knows where the braking points are, so the car brakes on
    arrival at one rather than on noticing it is too fast. */
+let AI_LATE_BRAKE=true;      // measured both ways
 function aiPedals(d, C){
   const v=C.st.speed;
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
@@ -9001,10 +9038,40 @@ function aiPedals(d, C){
      else's gearbox. The profile is already the speed limit at every point and
      the forward pass built it at full power, so asking for the profile ahead is
      asking for full throttle exactly where full throttle is what fits. */
-  const tgt=V[j]*(d.speedK||1);
+  const K=(d.speedK||1);
+  const tgt=V[j]*K;
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
-  return {thr:0, brk:clamp(-a/46,0,1)};
+
+  /* Braking at the last possible moment, rather than a fixed distance early.
+
+     Aiming at the profile a lookahead in front is right for the throttle and
+     wrong for the brakes. The lookahead is 0.35 of the speed -- twenty-nine
+     metres at three hundred kph -- so the car was asking for the corner's speed
+     while still twenty-nine metres short of where the profile says to have it,
+     and every braking zone began that much too soon.
+
+     The question a driver actually answers is: can I still make the corner if I
+     wait? So every point over the next two hundred metres is asked how fast
+     this car is allowed to be HERE to still arrive there at the profile speed,
+     which is sqrt(v_there^2 + 2*brake*distance). The lowest of those is the
+     limit now. Above it, brake by exactly the amount the binding point needs;
+     below it, do not touch them. */
+  const BRAKE=46;
+  if(!AI_LATE_BRAKE) return {thr:0, brk:clamp(-a/BRAKE,0,1)};
+  let need=0;
+  const N=Math.min(d.n-1, Math.round(200/d.ds));
+  for(let m=1;m<=N;m++){
+    const q=(d.i+m)%d.n, dist=m*d.ds;
+    const there=V[q]*K;
+    const cap=Math.sqrt(there*there + 2*BRAKE*dist);
+    if(v>cap){
+      const req=(v*v-there*there)/(2*dist);     // what this point demands now
+      if(req>need) need=req;
+    }
+  }
+  if(need<=0) return {thr:0, brk:0};            // coasting is enough: not yet
+  return {thr:0, brk:clamp(need/BRAKE,0,1)};
 }
 /* ---------------------------------------------------------------------------
    Cars touching cars.
@@ -9111,7 +9178,9 @@ function aiField(n){
                       laps:[], worst:0, lat:0, want:0, speedK:1, mode:'clear',
                       line:'race', off:0, room:99, outside:0, err:0, trace:null,
                       _pi:0, _prev:0, _next:0, _thr:0, _brk:0, _dv:0, _dvRace:0,
-                      _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0 });
+                      _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
+                      _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
+                      _prevLap:0, outside:0, room:99 });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -9492,6 +9561,14 @@ function aiStep(d, dt, t){
     d.room = stn ? (d.off>0 ? stn.dR : stn.dL) : 99;
     d.outside = Math.abs(d.off) - d.room; }
   if(loc.d>d.worst) d.worst=loc.d;
+  /* Measuring what the field actually spends its time doing. */
+  { const st2=d._stat||(d._stat={n:0,race:0,clear:0,slow:0,pin:0,sk:0,thr:0});
+    st2.n++;
+    if(d.line==='race') st2.race++;
+    if(d.mode==='clear') st2.clear++;
+    if((d.speedK||1)<0.999) st2.slow++;
+    if(d.pinned) st2.pin++;
+    st2.sk+=(d.speedK||1); }
   if(C.surf && C.surf.ok && (C.surf.grass||C.surf.loose)) d._offN=(d._offN||0)+1;
   aiTraffic(d, dt);
   const ped=aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
@@ -9506,7 +9583,8 @@ function aiStep(d, dt, t){
     d.trace.push([+d.t.toFixed(2), +(d.i*d.ds).toFixed(1), +(st.speed*3.6).toFixed(1),
                    +(d.v[d.i]*3.6).toFixed(1), +d.err.toFixed(2), +d.off.toFixed(2),
                    +d.outside.toFixed(2), +C.steerAng.toFixed(3),
-                   C.surf.ok?(C.surf.grass?2:C.surf.loose?3:1):0]);
+                   C.surf.ok?(C.surf.grass?2:C.surf.loose?3:1):0,
+                   +(d._brk||0).toFixed(2), +(d._thr||0).toFixed(2)]);
     if(d.trace.length>40000) d.trace.shift();
   }
   // a lap is complete when the station index wraps past where it started
@@ -9611,7 +9689,12 @@ window.SIM={
     return {handle:bi, brush:m2Brush};
   },
   driver(i){ return AIS[i]; },
+  lateBrake(on){ AI_LATE_BRAKE=!!on; return AI_LATE_BRAKE; },
   allLaps(){ return AIS.map(d=>d.laps||[]); },
+  allStats(){ return AIS.map(d=>{ const t=d._stat; if(!t||!t.n) return null;
+      return { onRaceLine:+(100*t.race/t.n).toFixed(0), clearAir:+(100*t.clear/t.n).toFixed(0),
+               heldBack:+(100*t.slow/t.n).toFixed(0), pinned:+(100*t.pin/t.n).toFixed(0),
+               avgSpeedK:+(t.sk/t.n).toFixed(3) }; }); },
   allWorst(){ return AIS.map(d=>d.worst||0); },
   allOffTrack(){ return AIS.map(d=>d._offN||0); },
   driverS(){ return AIS.map(d=>+((d.i||0)*d.ds).toFixed(0)); },
