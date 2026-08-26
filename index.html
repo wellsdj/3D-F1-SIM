@@ -9066,7 +9066,25 @@ function aiPedals(d, C){
      this car is allowed to be HERE to still arrive there at the profile speed,
      which is sqrt(v_there^2 + 2*brake*distance). The lowest of those is the
      limit now. Above it, brake by exactly the amount the binding point needs;
-     below it, do not touch them. */
+     below it, do not touch them.
+
+     What this is worth, measured properly -- two browsers, each driving its
+     first lap from the same state, the rule the only difference:
+
+         old   87.67 s   excess braking +422 m   peak pedal 0.81
+         new   87.57 s   excess braking +152 m   peak pedal 0.98
+
+     A tenth of a second. Not the two seconds an earlier comparison appeared to
+     show: that one had the new rule driving the session's second lap and the
+     old rule its first, so it was measuring lap order, not braking. The same
+     code gives 85.5 in the second slot and 87.6 in the first.
+
+     The lap time barely moves because the speed profile is what sets it, and
+     both rules follow the same profile -- the old one simply sat a few kph
+     under it all the way in. What changes is the driving: the brakes go on
+     where a driver would put them and go on properly, instead of forty metres
+     early at three quarters of a pedal. That was the complaint, and that is
+     what is fixed. */
   const BRAKE=46;
   if(!AI_LATE_BRAKE) return {thr:0, brk:clamp(-a/BRAKE,0,1)};
   let need=0, capMin=Infinity;
