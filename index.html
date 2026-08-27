@@ -7504,11 +7504,14 @@ function resetToTrack(){
    The state object is whatever is being driven -- carState for the player, pv
    for the ghost. Pedals are 0..1 so a key ("down" = 1) and a marker (a
    percentage) can both drive it. */
-function applyPedals(st, thr, brk, surf, dt){
+function applyPedals(st, thr, brk, surf, dt, C){
   if(thr>0){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
-    const v=st.speed/MAXSPEED;
+    /* Broken bodywork is drag, and drag is the whole of what damage costs: the
+       top end comes down by up to ten kph and the car is otherwise unchanged. */
+    const top=MAXSPEED-(C?dmgSpeedLoss(C):0);
+    const v=st.speed/top;
     /* Gravel robs the engine as well as dragging on the car. Without this the
        throttle simply balances the drag and you sit there driving at a steady
        20 kph through a trap, which is what was happening: the car should bog
@@ -7717,7 +7720,7 @@ function turnWheels(list, wl, wr, spinAng, steerAng){
    preview's markers and pure pursuit produce the same three numbers. */
 function stepCar(C, inp, dt){
   const st=C.st;
-  applyPedals(st, inp.thr, inp.brk, C.surf, dt);
+  applyPedals(st, inp.thr, inp.brk, C.surf, dt, C);
   steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
@@ -7766,14 +7769,21 @@ function placeCar(C, dt, t){
      any speed, no overshoot, no float -- the smoothing that makes this look
      right is entirely spatial, since each wheel already reads the mean of a
      half-metre patch. */
-  /* Airborne, if something put it there. The car is normally glued to the
-     surface it is standing on; once a hit has given it upward speed it flies
-     under gravity until the ground catches it again. */
+  /* Airborne only if a hit put it there.
+
+     The first version of this also treated "the ground is lower than I am" as
+     flight, which at Spa means every crest: the road falls away over Raidillon,
+     over the top at Les Combes, all the way down through Pouhon, and the car
+     took off each time and bounced on landing. Elevation is not a collision.
+
+     A car is now flying only while C.flying is set, and only a collision sets
+     it. Everything else is glued to the road, exactly as it was before any of
+     this. */
   if(tgt!==null){
-    if((C.carVY||0)>0 || C.groundY>tgt+0.03){
+    if(C.flying){
       C.carVY=(C.carVY||0)-9.81*dt;
       C.groundY+=C.carVY*dt;
-      if(C.groundY<=tgt){ C.groundY=tgt; C.carVY=0; }
+      if(C.groundY<=tgt){ C.groundY=tgt; C.carVY=0; C.flying=false; }
     } else { C.groundY=tgt; C.carVY=0; }
   }
   // the tail steps out on gravel and grass: attitude only, the path is unchanged
@@ -7867,7 +7877,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt);
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, PLAYER);
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
@@ -9381,10 +9391,20 @@ const DMG={ fwStart:2.4,       // m/s of closing speed before the wing minds
             gravelRate:0.085,  // per second above it
             noseEnd:0.55 };    // how far up the car counts as "the nose"
 function dmgNew(){ return {fw:0, rw:0, floor:0}; }
-function dmgGrip(C, v){
-  const d=C.dmg; if(!d) return 1;
-  const fast=clamp(v/80,0,1);
-  return Math.max(0.35, 1 - DMG.fwTurn*d.fw - DMG.floorTurn*d.floor - DMG.rwHigh*d.rw*fast);
+/* Damage does not take the car away from you.
+
+   It used to cost up to half the grip, which turned a first-lap tap into a
+   ruined race -- you could not turn, and there was nothing to be done about it.
+   Bodywork still comes off and you can still see what is missing, but all it
+   costs now is a little top speed: ten kph with the whole car destroyed, less
+   for anything short of that. Enough to notice on the Kemmel, not enough to
+   end your afternoon. */
+const DMG_KPH=10;                       // the very worst it can cost, in kph
+function dmgGrip(C, v){ return 1; }     // handling is untouched
+function dmgSpeedLoss(C){
+  const d=C.dmg; if(!d) return 0;
+  const hurt=Math.min(1, d.fw*0.45 + d.rw*0.35 + d.floor*0.30);
+  return (DMG_KPH/3.6)*hurt;            // metres per second off the top end
 }
 /* Which bits of the model are which -- found by where they are, not by what
    they are called.
@@ -9545,8 +9565,9 @@ function carsTouch(A, B, dt){
        happens above a proper closing speed, and what goes up comes down under
        gravity in placeCar. */
     if(close>HIT_BIG){
-      const lift=Math.min(7.0,(close-HIT_BIG)*0.42);
-      A.carVY=(A.carVY||0)+lift*0.5; B.carVY=(B.carVY||0)+lift*0.5;
+      const lift=Math.min(5.0,(close-HIT_BIG)*0.34);
+      A.carVY=(A.carVY||0)+lift*0.5; A.flying=true;
+      B.carVY=(B.carVY||0)+lift*0.5; B.flying=true;
     }
 
     /* Where each of them was hit decides what breaks. Along its own length:
@@ -9672,38 +9693,41 @@ function dmgDraw(){
    A grey outline of the lap, an arrow for you, arrows for everyone else, and
    the ones close behind picked out so you know they are there without having
    to look. */
-let _miniPath=null;
-function miniBuild(){
-  if(!AI.n) return null;
-  let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
-  for(let i=0;i<AI.n;i+=4){
-    if(AI.x[i]<minx)minx=AI.x[i]; if(AI.x[i]>maxx)maxx=AI.x[i];
-    if(AI.z[i]<minz)minz=AI.z[i]; if(AI.z[i]>maxz)maxz=AI.z[i];
-  }
-  const w=maxx-minx, h=maxz-minz, pad=16, S=230-pad*2;
-  const k=Math.min(S/w, S/h);
-  return { minx, minz, k, ox:pad+(S-w*k)/2, oz:pad+(S-h*k)/2 };
-}
+const MINI_RANGE=170;      // metres of road either side of you that it shows
 function miniDraw(){
   const cv=document.getElementById('minimap'); if(!cv) return;
   const on=(RACE.on&&RACE.phase==='racing')||TT.live;
   cv.classList.toggle('show', !!on);
   if(!on||!AI.n) return;
-  if(!_miniPath) _miniPath=miniBuild();
-  const M=_miniPath; if(!M) return;
   const g=cv.getContext('2d'), W=cv.width;
-  const X=x=>M.ox+(x-M.minx)*M.k, Z=z=>M.oz+(z-M.minz)*M.k;
+  /* Centred on you and turned so the way you are pointing is up the screen,
+     which is the only orientation that answers "is he on my left or my right"
+     without having to think about it. The whole lap in one little box told you
+     where you were on the circuit and nothing at all about the car beside you. */
+  const cx0=carState.wx, cz0=carState.wz, hdg=carState.hdg;
+  const k=(W/2-12)/MINI_RANGE;
+  const ch=Math.cos(-hdg), sh=Math.sin(-hdg);
+  const X=(x,z)=>W/2 + ((x-cx0)*ch - (z-cz0)*sh)*k;
+  const Z=(x,z)=>W/2 + ((x-cx0)*sh + (z-cz0)*ch)*k*-1;
   g.clearRect(0,0,W,W);
   g.fillStyle='rgba(10,13,19,.62)'; g.strokeStyle='rgba(255,255,255,.12)'; g.lineWidth=2;
   g.beginPath(); g.roundRect(1,1,W-2,W-2,10); g.fill(); g.stroke();
   // the lap
-  g.strokeStyle='rgba(190,200,212,.55)'; g.lineWidth=3; g.lineJoin='round';
+  g.save(); g.beginPath(); g.roundRect(3,3,W-6,W-6,9); g.clip();
+  g.strokeStyle='rgba(190,200,212,.6)'; g.lineWidth=7; g.lineJoin='round'; g.lineCap='round';
+  /* Only the stretch of road around you, walked out from where you are in both
+     directions, so the line is drawn thick and readable instead of the whole
+     circuit squeezed into a stamp. */
+  const here=_plIdx||0, span=Math.round(MINI_RANGE/AI.ds);
   g.beginPath();
-  for(let i=0;i<AI.n;i+=6){ const px=X(AI.x[i]), pz=Z(AI.z[i]);
-    if(i===0) g.moveTo(px,pz); else g.lineTo(px,pz); }
-  g.closePath(); g.stroke();
-  const arrow=(x,z,hdg,fill,size)=>{
-    g.save(); g.translate(X(x),Z(z)); g.rotate(-hdg+Math.PI);
+  for(let m=-span;m<=span;m+=2){
+    const i=((here+m)%AI.n+AI.n)%AI.n;
+    const px=X(AI.x[i],AI.z[i]), pz=Z(AI.x[i],AI.z[i]);
+    if(m===-span) g.moveTo(px,pz); else g.lineTo(px,pz);
+  }
+  g.stroke();
+  const arrow=(x,z,h2,fill,size)=>{
+    g.save(); g.translate(X(x,z),Z(x,z)); g.rotate(-(h2-hdg)+Math.PI);
     g.beginPath(); g.moveTo(0,-size); g.lineTo(size*0.66,size*0.72);
     g.lineTo(0,size*0.34); g.lineTo(-size*0.66,size*0.72); g.closePath();
     g.fillStyle=fill; g.fill();
@@ -9717,7 +9741,8 @@ function miniDraw(){
     arrow(d.car.st.wx, d.car.st.wz, d.car.st.hdg,
           chasing?'#ff5a3c':(d.liv?d.liv.body:'#9fb0c4'), 5.5);
   }
-  arrow(carState.wx, carState.wz, carState.hdg, '#ffb020', 7);
+  arrow(carState.wx, carState.wz, carState.hdg, '#ffb020', 8);
+  g.restore();
 }
 function aiLod(){
   if(!AIS.length) return;
@@ -10431,6 +10456,9 @@ window.SIM={
   hurt(fw,rw,fl){ PLAYER.dmg={fw:fw||0,rw:rw||0,floor:fl||0}; dmgShow(PLAYER); },
   lookBack(){ return LOOKBACK; },
   clipAt(){ return PLAYER.clipAt===undefined?null:PLAYER.clipAt; },
+  rideHeight(){ const g=groundAt(carState.wx,carState.wz,PLAYER.groundY-RIDE);
+                return g.hit ? +(PLAYER.groundY-RIDE-g.y).toFixed(3) : 0; },
+  flying(){ return !!PLAYER.flying; },
   meshBoxes(){
     carGroup.updateMatrixWorld(true);
     const inv=new THREE.Matrix4().copy(carGroup.matrixWorld).invert();
