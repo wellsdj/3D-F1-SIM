@@ -150,18 +150,15 @@
   #netmsg{margin-top:8px;font-size:9px;letter-spacing:.08em;opacity:0;color:#ffd21e;
           text-transform:none;transition:opacity .2s ease;min-height:12px}
   /* Which camera you are looking through, the way a broadcast marks it. */
-  /* Small, readable, and out of the way: the damage over on the right under
-     the readout, the map low on the left where nothing else lives. */
-  #dmgmap{position:fixed;right:18px;bottom:104px;z-index:12;display:none;
-          width:66px;height:104px;opacity:.9;
-          filter:drop-shadow(0 3px 10px rgba(0,0,0,.55))}
-  #dmgmap.show{display:block}
-  /* Clear of the speed readout, which lives in the bottom-left corner and was
-     showing straight through the map. */
-  #minimap{position:fixed;left:18px;bottom:132px;z-index:12;display:none;
-           width:150px;height:150px;opacity:.92;
-           filter:drop-shadow(0 3px 12px rgba(0,0,0,.5))}
-  #minimap.show{display:block}
+  /* A round window on the circuit, low on the left and clear of the speed
+     readout. Round because the shape says "map" before you have read anything
+     on it, and because a circle has no corners for the track to hide in. */
+  #trackmap{position:fixed;left:20px;bottom:128px;z-index:12;display:none;
+            width:158px;height:158px;border-radius:50%;
+            background:rgba(6,9,14,.72);
+            border:1px solid rgba(255,255,255,.16);
+            box-shadow:0 6px 22px rgba(0,0,0,.5)}
+  #trackmap.show{display:block}
   #racepos{position:fixed;right:18px;bottom:26px;z-index:12;display:none;align-items:baseline;gap:7px;
            font-family:var(--mono);color:#fff;background:rgba(10,13,19,.72);
            border:1px solid rgba(255,255,255,.14);border-left:3px solid var(--amber);
@@ -820,8 +817,7 @@ if('serviceWorker' in navigator){
   <div class="row"><button id="netgo">Watch</button><button id="netcancel">Cancel</button></div>
   <div id="netmsg"></div>
 </div>
-<canvas id="dmgmap" width="120" height="190"></canvas>
-<canvas id="minimap" width="230" height="230"></canvas>
+<canvas id="trackmap" width="320" height="320"></canvas>
 <div id="racepos"></div>
 <div id="result"></div>
 <div id="limwarn"></div>
@@ -2455,9 +2451,6 @@ function boardTexture(num){
 /* --------------------------------------------------------------- renderer */
 const canvas   = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
-/* Needed for taking the front off a damaged car: the clipping planes are set
-   per material rather than globally, which is what localClipping means. */
-renderer.localClippingEnabled = true;
 renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
 renderer.setSize(innerWidth,innerHeight,false);
 renderer.outputEncoding   = THREE.sRGBEncoding;
@@ -3553,7 +3546,6 @@ const WHEELBASE=3.60;
     paintLoad();
     stylePrepare(car);
     styleLoad();
-    if(PLAYER) dmgMark(carGroup, PLAYER);
     carPaint=carStyle.body;
     styleApply('body',carStyle.body,false);
     styleApply('ring',carStyle.ring,false);
@@ -4310,6 +4302,74 @@ function makeTrees(){
   }
 }
 
+/* ------------------------------------------------------------- track map
+   The whole circuit in a circle, so you can see where everyone is at a glance
+   rather than only what is beside you.
+
+   The lap itself is a thin white line, you are the blue arrow, and every other
+   car is a white dot. It is drawn from the same points the AI drives, so the
+   shape on the map is the shape of the road, and it needs nothing built or
+   loaded: if the line exists, the map exists. */
+let _tmFit=null;
+function tmFit(){
+  if(!AI.n) return null;
+  let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
+  for(let i=0;i<AI.n;i+=4){
+    const x=AI.x[i], z=AI.z[i];
+    if(x<minx)minx=x; if(x>maxx)maxx=x;
+    if(z<minz)minz=z; if(z>maxz)maxz=z;
+  }
+  const W=320, pad=30, S=W-pad*2;
+  const k=Math.min(S/(maxx-minx||1), S/(maxz-minz||1));
+  return { k, ox:pad+(S-(maxx-minx)*k)/2-minx*k,
+              oz:pad+(S-(maxz-minz)*k)/2-minz*k };
+}
+function tmDraw(){
+  const cv=document.getElementById('trackmap');
+  if(!cv) return;
+  const on=(RACE.on&&RACE.phase==='racing')||TT.live;
+  cv.classList.toggle('show', !!on);
+  if(!on||!AI.n) return;
+  if(!_tmFit) _tmFit=tmFit();
+  const M=_tmFit; if(!M) return;
+  const g=cv.getContext('2d'), W=cv.width;
+  const X=x=>x*M.k+M.ox, Z=z=>z*M.k+M.oz;
+  g.clearRect(0,0,W,W);
+
+  // the lap
+  g.lineJoin=g.lineCap='round';
+  g.beginPath();
+  for(let i=0;i<=AI.n;i+=5){
+    const k=i%AI.n, px=X(AI.x[k]), pz=Z(AI.z[k]);
+    i?g.lineTo(px,pz):g.moveTo(px,pz);
+  }
+  g.closePath();
+  g.strokeStyle='rgba(0,0,0,.55)'; g.lineWidth=7; g.stroke();
+  g.strokeStyle='rgba(255,255,255,.88)'; g.lineWidth=3.5; g.stroke();
+
+  // the line, so you know where the lap begins
+  g.fillStyle='#ffb020';
+  g.beginPath(); g.arc(X(AI.x[0]), Z(AI.z[0]), 3.2, 0, 7); g.fill();
+
+  // everyone else
+  for(const d of AIS){
+    if(!d.car||!d.on) continue;
+    const px=X(d.car.st.wx), pz=Z(d.car.st.wz);
+    g.beginPath(); g.arc(px,pz,4.6,0,7);
+    g.fillStyle='#fff'; g.fill();
+    g.lineWidth=1.4; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke();
+  }
+
+  // and you, pointing where you are pointing
+  const px=X(carState.wx), pz=Z(carState.wz);
+  g.save(); g.translate(px,pz); g.rotate(-carState.hdg+Math.PI);
+  g.beginPath(); g.moveTo(0,-9.5); g.lineTo(6.4,7.2); g.lineTo(0,3.4); g.lineTo(-6.4,7.2);
+  g.closePath();
+  g.fillStyle='#2f9bff'; g.fill();
+  g.lineWidth=1.6; g.strokeStyle='rgba(255,255,255,.85)'; g.stroke();
+  g.restore();
+}
+
 /* ---------------------------------------------------------------- minimap */
 const mapCan=document.getElementById('map'), mapCtx=mapCan.getContext('2d');
 let mapBg=null, mapK=1, mapPX=0, mapPZ=0;
@@ -4556,7 +4616,6 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
-  if(k===' '||e.code==='Space'){ LOOKBACK=true; e.preventDefault(); }
   if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus();
     const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on'); }
   if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
@@ -4595,9 +4654,7 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>{
   const tn=(e.target&&e.target.tagName)||'';
   if(tn==='INPUT'||tn==='SELECT'||tn==='TEXTAREA') return;
-  keys[e.key.toLowerCase()]=false;
-  if(e.key===' '||e.code==='Space') LOOKBACK=false;});
-addEventListener('blur',()=>{ LOOKBACK=false; });   // alt-tabbing should not leave you facing backwards
+  keys[e.key.toLowerCase()]=false;});
 
 /* ---------------------------------------------------------- Arduino joystick
    An analog 2-axis stick + button (the Elegoo starter kit's module) over USB
@@ -4719,7 +4776,7 @@ const CAMS=[
      entry did not have -- and threw on every frame until they appeared. */
   {name:'TV',      tv:true, chase:true, back:9.5, up:3.15, p:[0,0.94,0.49], fov:40, zoom:8, shake:0}
 ];
-let orbit=false, camMode=0, shadowsOn=true, LOOKBACK=false;
+let orbit=false, camMode=0, shadowsOn=true;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
@@ -7340,7 +7397,7 @@ function makeCar(group, aids){
            surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
            aids: !!aids,
            // 1 is the player's grip; the AI's cars get more -- see yawFor
-           gripMul: 1, dmg: dmgNew(), parts: null };
+           gripMul: 1 };
 }
 let onLoose=false, looseFrac=0, looseSpray=0;
 let onGrass=false, grassFrac=0;
@@ -7504,14 +7561,11 @@ function resetToTrack(){
    The state object is whatever is being driven -- carState for the player, pv
    for the ghost. Pedals are 0..1 so a key ("down" = 1) and a marker (a
    percentage) can both drive it. */
-function applyPedals(st, thr, brk, surf, dt, C){
+function applyPedals(st, thr, brk, surf, dt){
   if(thr>0){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
-    /* Broken bodywork is drag, and drag is the whole of what damage costs: the
-       top end comes down by up to ten kph and the car is otherwise unchanged. */
-    const top=MAXSPEED-(C?dmgSpeedLoss(C):0);
-    const v=st.speed/top;
+    const v=st.speed/MAXSPEED;
     /* Gravel robs the engine as well as dragging on the car. Without this the
        throttle simply balances the drag and you sit there driving at a steady
        20 kph through a trap, which is what was happening: the car should bog
@@ -7720,12 +7774,12 @@ function turnWheels(list, wl, wr, spinAng, steerAng){
    preview's markers and pure pursuit produce the same three numbers. */
 function stepCar(C, inp, dt){
   const st=C.st;
-  applyPedals(st, inp.thr, inp.brk, C.surf, dt, C);
+  applyPedals(st, inp.thr, inp.brk, C.surf, dt);
   steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
   const v=st.speed;
-  const yawRate=yawFor(v, C.steerAng, C.surf, (C.gripMul||1)*dmgGrip(C, v*3.6));
+  const yawRate=yawFor(v, C.steerAng, C.surf, C.gripMul);
   surfaceDrag(st, C.surf, dt);
   st.hdg += yawRate*dt;
   st.wx  += Math.sin(st.hdg)*v*dt;
@@ -7747,13 +7801,7 @@ function stepCar(C, inp, dt){
    that was placed differently would ride differently, and looking right is
    part of being the same car. */
 function placeCar(C, dt, t){
-  /* A car may say it does not need the ground read this step. Only the AI cars
-     ever do, and only on alternate steps: the previous answer is a few
-     centimetres old on a body you are looking at from outside, and the four
-     raycasts per car per step were the largest single item in the physics
-     budget with a full grid. */
-  const S=C.skipProbe && C.surf && C.surf.ok ? C.surf
-        : probeCar(C.st.wx, C.st.wz, C.st.hdg, C.groundY-RIDE, C.surf);
+  const S=probeCar(C.st.wx, C.st.wz, C.st.hdg, C.groundY-RIDE, C.surf);
   let tp=C.carPitch, tr=C.carRoll, tgt=null;
   if(S.ok){
     const y0=S.y[0], y1=S.y[1], y2=S.y[2], y3=S.y[3];
@@ -7769,23 +7817,7 @@ function placeCar(C, dt, t){
      any speed, no overshoot, no float -- the smoothing that makes this look
      right is entirely spatial, since each wheel already reads the mean of a
      half-metre patch. */
-  /* Airborne only if a hit put it there.
-
-     The first version of this also treated "the ground is lower than I am" as
-     flight, which at Spa means every crest: the road falls away over Raidillon,
-     over the top at Les Combes, all the way down through Pouhon, and the car
-     took off each time and bounced on landing. Elevation is not a collision.
-
-     A car is now flying only while C.flying is set, and only a collision sets
-     it. Everything else is glued to the road, exactly as it was before any of
-     this. */
-  if(tgt!==null){
-    if(C.flying){
-      C.carVY=(C.carVY||0)-9.81*dt;
-      C.groundY+=C.carVY*dt;
-      if(C.groundY<=tgt){ C.groundY=tgt; C.carVY=0; C.flying=false; }
-    } else { C.groundY=tgt; C.carVY=0; }
-  }
+  if(tgt!==null){ C.groundY=tgt; C.carVY=0; }
   // the tail steps out on gravel and grass: attitude only, the path is unchanged
   const slipSrc = C.surf.loose ? C.surf.looseFrac*1.0
                 : C.surf.grass ? C.surf.grassFrac*1.01 : 0;
@@ -7793,15 +7825,6 @@ function placeCar(C, dt, t){
     ? clamp((-C.steerAng*0.42 - Math.sin(t*2.7)*0.10 - Math.sin(t*1.3+1.1)*0.06)
             * clamp(C.st.speed/14,0,1) * slipSrc, -0.61, 0.61)
     : 0;
-  dmgClipMove(C);
-  dmgGravel(C, dt);
-  /* Wheels: roll at v/r, steer with the rack. Your car is done in drive(); this
-     is every other car on the circuit. */
-  if(C.wheels && C.wheels.length){
-    C.spin=(C.spin||0)+(C.st.speed/wheelR)*dt;
-    turnWheels(C.wheels, C.wingL, C.wingR, C.spin, C.steerAng);
-  }
-  dmgDirt(C, dt);
   C.slipAng += (slipT-C.slipAng)*(1-Math.pow(0.05,dt));
   C.group.position.set(C.st.wx, C.groundY, C.st.wz);
   C.group.rotation.order='YXZ';
@@ -7877,7 +7900,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, PLAYER);
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt);
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
@@ -8821,17 +8844,15 @@ function aiLocate(d, x, z){
    begin early. Changing line is now a thing you do about a car you can nearly
    touch. */
 const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, threat:2,
-                hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:7.0, follow:60, abreast:2.6, followK:0.85,
-                tightLook:150, tight:34, alongside:14, concede:0.90 };
+                hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:7.0, follow:60, abreast:2.6, followK:0.85 };
 /* Where another car is, relative to this one: how far up or down the road, and
    which side of the line. It used to ask only about the player, because there
    was only ever the player and one AI. With a full grid every driver has to see
    every other one, or nine cars drive through each other on the way to Eau
    Rouge. */
-function aiRelTo(d, px, pz, kph, who, knownI){
+function aiRelTo(d, px, pz, kph, who){
   if(!d.n || !booted) return null;
   const n=d.n;
-  if(knownI!==undefined && knownI!==null) return aiRelAt(d, px, pz, kph, who, knownI|0);
   /* Search out from where this driver is, not from a cached index. The cache
      belonged to the days of one rival; with nine of them every call would move
      it somewhere else and the next call would start from the wrong place and
@@ -8856,61 +8877,21 @@ function aiRelTo(d, px, pz, kph, who, knownI){
   return {i:bi, gap:g, lat, kph, who,
           apart:Math.hypot(px-d.car.st.wx, pz-d.car.st.wz)};
 }
-/* The same answer, when the rival's place on the lap is already known.
-
-   Every other car knows its own station index -- it maintains one every step --
-   so hunting for it with a four-hundred-point search was work done for nothing.
-   Nine drivers each searching for nine rivals, up to fifteen physics steps in a
-   frame, is over half a million distance calculations a frame for a number that
-   was already sitting on the object. */
-function aiRelAt(d, px, pz, kph, who, bi){
-  const n=d.n;
-  let g=(bi-d.i)*d.ds;
-  if(g>d.len/2) g-=d.len;
-  if(g<-d.len/2) g+=d.len;
-  const j=(bi+1)%n;
-  const tx=d.x[j]-d.x[bi], tz=d.z[j]-d.z[bi], tl=Math.hypot(tx,tz)||1;
-  const lat=((px-d.x[bi])*(tz/tl) - (pz-d.z[bi])*(tx/tl));
-  return {i:bi, gap:g, lat, kph, who,
-          apart:Math.hypot(px-d.car.st.wx, pz-d.car.st.wz)};
-}
-/* Your car does not keep one, so it is found once a step and shared by all of
-   them rather than nine times over. */
-let _plIdx=0;
-function aiPlayerIdx(){
-  const n=AI.n; if(!n) return 0;
-  let bi=_plIdx, bd=Infinity;
-  const px=carState.wx, pz=carState.wz;
-  for(let o=-90;o<=90;o++){
-    const i=((bi+o)%n+n)%n;
-    const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2;
-    if(q<bd){ bd=q; bi=i; }
-  }
-  if(bd>120*120){
-    for(let i=0;i<n;i++){ const q=(AI.x[i]-px)**2+(AI.z[i]-pz)**2; if(q<bd){bd=q;bi=i;} }
-  }
-  return (_plIdx=bi);
-}
-/* Everyone else on the circuit, worked out once per car per step. */
-function aiRivals(d){
-  const out=[];
-  const r0=aiRelTo(d, carState.wx, carState.wz, carState.speed*3.6, 'player', _plIdx);
-  if(r0) out.push({r:r0, v:carState.speed});
-  for(const o of AIS){
-    if(o===d||!o.car||!o.on) continue;
-    const r=aiRelTo(d, o.car.st.wx, o.car.st.wz, o.car.st.speed*3.6, o, o.i);
-    if(r) out.push({r, v:o.car.st.speed});
-  }
-  return out;
-}
 /* The one that matters. Everyone within reach is considered and the closest
    along the road wins, because that is the car you are about to be involved
    with -- not the one that happens to be nearest as the crow flies. */
-function aiRivalRel(d, list){
+function aiRivalRel(d){
   let best=null, bestD=Infinity;
-  for(const {r} of (list||aiRivals(d))){
+  const look=(x,z,kph,who)=>{
+    const r=aiRelTo(d,x,z,kph,who);
+    if(!r) return;
     const near=Math.abs(r.gap);
     if(near<bestD && near<AI_TRAF.look*1.6){ bestD=near; best=r; }
+  };
+  look(carState.wx, carState.wz, carState.speed*3.6, 'player');
+  for(const o of AIS){
+    if(o===d || !o.car || !o.on) continue;
+    look(o.car.st.wx, o.car.st.wz, o.car.st.speed*3.6, o);
   }
   return best;
 }
@@ -8964,8 +8945,7 @@ function aiRoomAhead(d, side, metres){
    there. */
 function aiTraffic(d, dt){
   const T=AI_TRAF, C=d.car;
-  const RIV=aiRivals(d);
-  const rel=aiRivalRel(d, RIV);
+  const rel=aiRivalRel(d);
   d.mode='clear'; d.line='race'; d.speedK=1;
   if(rel && Math.abs(rel.gap)<T.look && d.field){
     const mine=C.st.speed*3.6, theirs=rel.kph;
@@ -9083,62 +9063,30 @@ function aiTraffic(d, dt){
      back, and only where the corner is actually slow: this costs nothing at
      Blanchimont and everything at La Source, which is where they were ending up
      in the gravel. */
-  let cap=Infinity, abreast=0;
-  for(const {r,v:vth} of RIV){
-    /* Ahead, and in the same piece of road: gap along the lap, not as the crow
-       flies, and only counted when the two of them overlap sideways. */
-    if(r.gap>0 && r.gap<AI_TRAF.follow && Math.abs(r.lat-(d.lat||0))<AI_TRAF.abreast){
-      const room=Math.max(0, r.gap-CAR_LEN*1.5);
-      const allow=Math.sqrt(vth*vth + 2*46*AI_TRAF.followK*room);
-      if(allow<cap) cap=allow;
+  let cap=Infinity;
+  const look=(x,z,vth,lat)=>{
+    const n=d.n, i=d.i;
+    let gap=Infinity;
+    for(let m=1;m<=Math.round(AI_TRAF.follow/d.ds);m++){
+      const q=(i+m)%n;
+      if((d.x[q]-x)**2+(d.z[q]-z)**2 < AI_TRAF.abreast*AI_TRAF.abreast){ gap=m*d.ds; break; }
     }
-    if(Math.abs(r.gap)<26) abreast++;         // somebody to worry about, either side
-  }
-  d.capV=cap;
-  /* How much of the corner ahead this car can actually have.
-
-     Not the corner it is standing in -- by the time a hairpin is under the
-     wheels there is nothing to be done about the speed. This scales the corner
-     speeds the braking looks ahead at, so a car that is wide of the line, or in
-     the middle of a crowd, brakes EARLIER for the corner it is about to take
-     badly. That is the difference between backing out and arriving at a
-     hairpin four abreast, which is where five of them were going off.
-
-     Wide of the line: a tighter corner, less road, less speed.
-     In a crowd: no margin for anyone else's mistake, so take a little less. */
-  /* Concede the corner.
-
-     Two cars cannot both have a hairpin. The one on the outside is the one
-     with nowhere to go: it has the longer way round, the less grip and the
-     gravel on its shoulder, and a real driver in that seat lifts and tucks in
-     behind rather than insisting. Slowing them both down did not fix it --
-     with five cars fanned across the road somebody is always on the outside of
-     somebody -- so the outside car now gives the corner up and takes the exit
-     instead.
-
-     Only into genuinely slow corners, and only when they are properly
-     alongside. Everywhere else they race. */
-  {
-    let slowAhead=Infinity;
-    const A=Math.round(AI_TRAF.tightLook/d.ds);
-    for(let m=1;m<=A;m++){ const q=(d.i+m)%d.n; if(d.v[q]<slowAhead) slowAhead=d.v[q]; }
-    if(slowAhead<AI_TRAF.tight && d.field){
-      const inDir=Math.sign(d.field.in[d.i])||1;
-      const mineIn=(d.lat||0)*inDir;
-      for(const {r,v:vth} of RIV){
-        if(Math.abs(r.gap)>AI_TRAF.alongside) continue;
-        if(r.lat*inDir > mineIn+0.5){          // they are the one on the inside
-          cap=Math.min(cap, vth*AI_TRAF.concede);
-          d.mode='concede';
-        }
-      }
-    }
+    if(gap===Infinity) return;
+    const room=Math.max(0, gap-CAR_LEN*1.5);
+    const allow=Math.sqrt(vth*vth + 2*46*AI_TRAF.followK*room);
+    if(allow<cap) cap=allow;
+  };
+  look(carState.wx, carState.wz, carState.speed, 0);
+  for(const o of AIS){
+    if(o===d||!o.car||!o.on) continue;
+    look(o.car.st.wx, o.car.st.wz, o.car.st.speed, o.lat||0);
   }
   const wide=Math.abs(d.lat||0);
-  let k=1;
-  if(wide>1.0) k-=Math.min(0.20,(wide-1.0)*0.045);
-  if(abreast>0) k-=Math.min(0.10, abreast*0.025);
-  d.wideK=Math.max(0.72,k);
+  if(wide>1.2){
+    const slow=d.v[d.i]<45;                       // a corner worth respecting
+    if(slow) cap=Math.min(cap, d.v[d.i]*(1-Math.min(0.16,(wide-1.2)*0.05)));
+  }
+  d.capV=cap;
   /* Twice the rate when it is getting out of your way. The normal ease is set
      for changing line, which is something a car does over a couple of seconds;
      leaving room for a car that is already beside it is not that, and at the
@@ -9248,8 +9196,7 @@ function aiPedals(d, C){
      asking for full throttle exactly where full throttle is what fits. */
   const K=(d.speedK||1);
   /* The corner's speed, or what the traffic allows, whichever is less. */
-  const W=(d.wideK===undefined?1:d.wideK);
-  const tgt=Math.min(V[j]*K*W, d.capV===undefined?Infinity:d.capV);
+  const tgt=Math.min(V[j]*K, d.capV===undefined?Infinity:d.capV);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
 
@@ -9291,7 +9238,7 @@ function aiPedals(d, C){
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
-    const there=Math.min(V[q]*K*W, d.capV===undefined?Infinity:d.capV);
+    const there=Math.min(V[q]*K, d.capV===undefined?Infinity:d.capV);
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
     if(cap<capMin) capMin=cap;
     if(v>cap){
@@ -9343,7 +9290,6 @@ const HIT_HL=1.85;           // half its length, a little short of the real nose
 const HIT_E=0.32;            // restitution: it bumps off, it does not bounce
 const HIT_SCRUB=0.12;        // of the closing speed, lost as scrub
 const HIT_DECAY=0.30;        // seconds for a shove to bleed away
-const HIT_BIG=15.0;          // m/s of closing speed at which cars start flying
 function carEnds(st){
   const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
   return {ax:st.wx-fx*HIT_HL, az:st.wz-fz*HIT_HL, bx:st.wx+fx*HIT_HL, bz:st.wz+fz*HIT_HL, fx, fz};
@@ -9362,171 +9308,6 @@ function segClosest(a,b){
 }
 /* One pair. Written for any two cars so the same call serves the AI now and a
    car on the other end of a connection later. */
-/* Damage.
-
-   Three things break, and each of them costs you something you can feel rather
-   than a number on a screen:
-
-   The front wing goes first and goes gradually. Run into the back of somebody
-   and the endplates go, then the whole thing, and every piece of it is front
-   grip you no longer have -- the car understeers a little more each time, which
-   is exactly what a damaged wing does to a real one.
-
-   The rear wing does not go gradually. It takes a proper hit -- seventy kph of
-   closing speed, someone arriving in your gearbox -- and then it is gone, and
-   with it the downforce that made the car stable anywhere quick.
-
-   The floor is worn away by gravel. Every second spent in it above thirty kph
-   costs a little, so a long slide through a trap is expensive and a brief
-   visit is not.
-
-   Nothing here repairs itself. */
-const DMG={ fwStart:2.4,       // m/s of closing speed before the wing minds
-            fwRate:0.055,      // how fast it goes after that
-            rwHit:19.4,        // 70 kph: what it takes to lose a rear wing
-            fwTurn:0.40,       // a wing entirely gone costs this much turn-in
-            rwHigh:0.22,       // and a rear wing this much, at speed
-            floorTurn:0.16,
-            gravelV:8.33,      // 30 kph
-            gravelRate:0.085,  // per second above it
-            noseEnd:0.55 };    // how far up the car counts as "the nose"
-function dmgNew(){ return {fw:0, rw:0, floor:0}; }
-/* Damage does not take the car away from you.
-
-   It used to cost up to half the grip, which turned a first-lap tap into a
-   ruined race -- you could not turn, and there was nothing to be done about it.
-   Bodywork still comes off and you can still see what is missing, but all it
-   costs now is a little top speed: ten kph with the whole car destroyed, less
-   for anything short of that. Enough to notice on the Kemmel, not enough to
-   end your afternoon. */
-const DMG_KPH=10;                       // the very worst it can cost, in kph
-function dmgGrip(C, v){ return 1; }     // handling is untouched
-function dmgSpeedLoss(C){
-  const d=C.dmg; if(!d) return 0;
-  const hurt=Math.min(1, d.fw*0.45 + d.rw*0.35 + d.floor*0.30);
-  return (DMG_KPH/3.6)*hurt;            // metres per second off the top end
-}
-/* Which bits of the model are which -- found by where they are, not by what
-   they are called.
-
-   The car's meshes have no names to match: gltfpack leaves them as mesh_0_1,
-   mesh_5_2 and so on, so every name pattern I tried matched exactly nothing
-   and no bodywork ever came off. The wheels only work because their pivot
-   NODES kept their names.
-
-   Geometry does not lie, though. The front wheels tell you which way the car
-   faces; anything ahead of the front axle and close to the ground is front
-   wing, and anything behind the rear axle and up in the air is rear wing.
-   That holds for any car model, named or not. */
-function dmgMark(root, C){
-  C.parts={front:[], rear:[]};
-  if(!C) return;
-  root.updateMatrixWorld(true);
-  const wf=root.getObjectByName('Wheel_FL')||root.getObjectByName('Wheel_FR');
-  const wr=root.getObjectByName('Wheel_RL')||root.getObjectByName('Wheel_RR');
-  if(!wf||!wr) return;
-  const pf=new THREE.Vector3(), pr=new THREE.Vector3();
-  wf.getWorldPosition(pf); wr.getWorldPosition(pr);
-  const rootInv=new THREE.Matrix4().copy(root.matrixWorld).invert();
-  pf.applyMatrix4(rootInv); pr.applyMatrix4(rootInv);
-  const fwd=Math.sign(pf.z-pr.z)||1;           // which way is the nose, locally
-  const axleF=pf.z, axleR=pr.z, wheelY=pf.y;
-  const box=new THREE.Box3(), c=new THREE.Vector3();
-  root.traverse(o=>{
-    if(!o.isMesh||!o.geometry) return;
-    box.setFromObject(o);
-    if(box.isEmpty()) return;
-    box.getCenter(c); c.applyMatrix4(rootInv);
-    const ahead=(c.z-axleF)*fwd, behind=(axleR-c.z)*fwd;
-    if(ahead>0.25 && c.y<wheelY*1.25) C.parts.front.push(o);
-    else if(behind>0.05 && c.y>wheelY*1.45) C.parts.rear.push(o);
-  });
-}
-/* Taking the front off.
-
-   There is no front wing to hide. The car's bodywork is five or six meshes and
-   every one of them runs the whole length of it -- measured, they span z -2.91
-   to +2.96 with the front axle at 1.2 -- so the wing shares a mesh with the
-   sidepods and the engine cover. Hiding it would delete half the car.
-
-   A clipping plane can take the front off without touching the mesh: it stands
-   across the car ahead of the front wheels and everything in front of it stops
-   being drawn. It has to be moved with the car every frame, because clipping
-   planes live in the world and the car does not stay still.
-
-   The rear wing is its own mesh and simply goes. */
-const CLIP_HALF=2.62, CLIP_ALL=2.30;      // metres from the car's middle
-function dmgShow(C){
-  if(!C.parts) return;
-  const d=C.dmg||dmgNew();
-  C.parts.rear.forEach(o=>{ o.visible = d.rw<0.95; });
-  const cut = d.fw>=0.95 ? CLIP_ALL : (d.fw>=0.5 ? CLIP_HALF : null);
-  if(cut===null){
-    if(C.clip){ dmgClipApply(C, null); C.clipAt=null; }
-    return;
-  }
-  if(!C.clip) C.clip=new THREE.Plane(new THREE.Vector3(0,0,-1), 0);
-  C.clipAt=cut;
-  dmgClipApply(C, C.clip);
-  dmgClipMove(C);
-}
-function dmgClipApply(C, plane){
-  const root=C.group||carGroup;
-  root.traverse(o=>{
-    if(!o.isMesh||!o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-      if(!m) return;
-      /* An empty array, not null: the renderer reads .length on this every
-         frame and null threw once the damage was cleared. */
-      m.clippingPlanes = plane?[plane]:[];
-      m.clipShadows=true; m.needsUpdate=true;
-    });
-  });
-}
-function dmgClipMove(C){
-  if(!C.clip||C.clipAt===null||C.clipAt===undefined) return;
-  const h=C.st.hdg, fx=Math.sin(h), fz=Math.cos(h);
-  C.clip.normal.set(-fx, 0, -fz);
-  const px=C.st.wx+fx*C.clipAt, pz=C.st.wz+fz*C.clipAt;
-  C.clip.constant = -(C.clip.normal.x*px + C.clip.normal.z*pz);
-}
-/* Dust.
-
-   A car that has been through a gravel trap does not come out looking as it
-   went in. The bodywork darkens and dulls while it is in there and stays that
-   way -- there is no wash on the way past -- so you can see who has been off
-   without being told. Applied to whatever the car's own paint is, so it works
-   for every livery and for yours. */
-function dmgDirt(C, dt){
-  if(!C.surf||!C.surf.ok) return;
-  const inIt=(C.surf.loose||C.surf.grass) && C.st.speed>2;
-  if(!inIt) return;
-  C.grime=Math.min(1,(C.grime||0)+dt*0.55);
-  if(C.grime-(C.grimeShown||0)<0.05) return;
-  C.grimeShown=C.grime;
-  const k=1-0.42*C.grime;
-  (C.group||carGroup).traverse(o=>{
-    if(!o.isMesh||!o.material) return;
-    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
-      if(!m||!m.color) return;
-      if(!m.userData) m.userData={};
-      if(!m.userData.clean) m.userData.clean=m.color.clone();
-      m.color.copy(m.userData.clean).multiplyScalar(k);
-      m.roughness=Math.min(1,(m.userData.cleanRough===undefined
-        ? (m.userData.cleanRough=m.roughness) : m.userData.cleanRough)+0.35*C.grime);
-      m.needsUpdate=true;
-    });
-  });
-}
-/* Gravel eats the floor. */
-function dmgGravel(C, dt){
-  if(!C.dmg||!C.surf||!C.surf.ok) return;
-  if(!(C.surf.loose||C.surf.grass)) return;
-  if(C.st.speed<DMG.gravelV) return;
-  const bite=(C.surf.loose?1:0.6)*Math.min(1,(C.st.speed-DMG.gravelV)/18);
-  C.dmg.floor=Math.min(1, C.dmg.floor + dt*DMG.gravelRate*bite);
-  dmgShow(C);
-}
 function carsTouch(A, B, dt){
   if(!A||!B) return false;
   const sa=A.st, sb=B.st;
@@ -9548,41 +9329,12 @@ function carsTouch(A, B, dt){
   const vbx=Math.sin(sb.hdg)*sb.speed+(B.bumpX||0), vbz=Math.cos(sb.hdg)*sb.speed+(B.bumpZ||0);
   const vn=(vbx-vax)*nx+(vbz-vaz)*nz;
   if(vn<0){                                   // only if they are coming together
-    const close=Math.abs(vn);
-    /* A nudge at walking pace and a shunt at a hundred are not the same event.
-       Restitution climbs with the closing speed, so a light touch still just
-       bumps you off line and a real hit throws the car. */
-    const e=Math.min(0.92, HIT_E + close/34);
-    const j=-(1+e)*vn*0.5;                    // equal cars, half each
+    const j=-(1+HIT_E)*vn*0.5;                // equal cars, half each
     A.bumpX=(A.bumpX||0)-nx*j; A.bumpZ=(A.bumpZ||0)-nz*j;
     B.bumpX=(B.bumpX||0)+nx*j; B.bumpZ=(B.bumpZ||0)+nz*j;
-    const scrub=close*HIT_SCRUB*(1+close/30);
+    const scrub=Math.abs(vn)*HIT_SCRUB;
     sa.speed=Math.max(0, sa.speed-scrub);
     sb.speed=Math.max(0, sb.speed-scrub);
-
-    /* Launched. Hit a wheel hard enough and the car goes up -- rear wheel to
-       front wheel is a ramp, and everyone has seen where that ends. It only
-       happens above a proper closing speed, and what goes up comes down under
-       gravity in placeCar. */
-    if(close>HIT_BIG){
-      const lift=Math.min(5.0,(close-HIT_BIG)*0.34);
-      A.carVY=(A.carVY||0)+lift*0.5; A.flying=true;
-      B.carVY=(B.carVY||0)+lift*0.5; B.flying=true;
-    }
-
-    /* Where each of them was hit decides what breaks. Along its own length:
-       +1 is the nose, -1 is the gearbox. */
-    const ta=((c.px-sa.wx)*Math.sin(sa.hdg)+(c.pz-sa.wz)*Math.cos(sa.hdg))/HIT_HL;
-    const tb=((c.qx-sb.wx)*Math.sin(sb.hdg)+(c.qz-sb.wz)*Math.cos(sb.hdg))/HIT_HL;
-    const wing=(C,amount)=>{ if(!C.dmg) C.dmg=dmgNew();
-      C.dmg.fw=Math.min(1, C.dmg.fw+amount); dmgShow(C); };
-    const gone=(C)=>{ if(!C.dmg) C.dmg=dmgNew();
-      if(C.dmg.rw<1){ C.dmg.rw=1; dmgShow(C); } };
-    const hurt=Math.max(0, close-DMG.fwStart)*DMG.fwRate;
-    if(ta> DMG.noseEnd) wing(A,hurt);
-    if(tb> DMG.noseEnd) wing(B,hurt);
-    if(ta<-DMG.noseEnd && close>DMG.rwHit) gone(A);
-    if(tb<-DMG.noseEnd && close>DMG.rwHit) gone(B);
   }
   A.touchT=B.touchT=0.25;                     // for anything that wants to know
   return true;
@@ -9620,152 +9372,6 @@ const LIVERIES=[
   { name:'Alonso',     body:'#0b4f2c', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
   { name:'Gasly',      body:'#6b4bb0', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' }
 ];
-/* Detail you cannot see from here.
-
-   One car is forty-eight separate meshes and ninety-seven thousand triangles.
-   Nine of them is eight hundred and seventy-six thousand triangles and over
-   four hundred draw calls before the circuit has drawn anything, which is most
-   of the frame gone on cars that are frequently a speck at the far end of the
-   Kemmel.
-
-   So each mesh is measured once, when the car is built, and the small ones --
-   mirrors, suspension links, cockpit fittings, brake ducts -- are switched off
-   beyond the distance at which they are worth a pixel. The body, the wheels
-   and the wings stay. Nothing is thrown away: come back within range and it is
-   all there again. */
-const LOD_NEAR=45, LOD_FAR=140, LOD_BIG=0.42;
-function aiLodMark(root){
-  const box=new THREE.Box3(), size=new THREE.Vector3();
-  root.traverse(o=>{
-    if(!o.isMesh||!o.geometry) return;
-    o.geometry.computeBoundingSphere();
-    const r=(o.geometry.boundingSphere&&o.geometry.boundingSphere.radius)||0;
-    o.userData.lodBig = r>=LOD_BIG;
-  });
-}
-/* The car, drawn from above, coloured by what is left of it.
-
-   Green where nothing is wrong, red where it is gone, and every shade between,
-   so a glance tells you the front wing is half missing without reading a
-   number. Three parts, because three things break: the front wing, the floor,
-   the rear wing. Small enough to ignore and clear enough not to have to. */
-function dmgColour(v){
-  /* green -> orange -> red, through the middle rather than round the back */
-  const h=(1-clamp(v,0,1))*120/360;
-  const f=(n)=>{ const k=(n+h*12)%12; return 255*(0.5-0.42*Math.max(-1,Math.min(Math.min(k-3,9-k),1))); };
-  return 'rgb('+Math.round(f(0))+','+Math.round(f(8))+','+Math.round(f(4))+')';
-}
-let _dmgWas='';
-function dmgDraw(){
-  const cv=document.getElementById('dmgmap'); if(!cv) return;
-  const on=RACE.on||TT.live;
-  cv.classList.toggle('show', !!on);
-  if(!on) return;
-  const d=PLAYER.dmg||dmgNew();
-  const key=d.fw.toFixed(2)+':'+d.rw.toFixed(2)+':'+d.floor.toFixed(2);
-  if(key===_dmgWas) return;                 // it only changes when you break something
-  _dmgWas=key;
-  const g=cv.getContext('2d'), W=cv.width, H=cv.height;
-  g.clearRect(0,0,W,H);
-  g.fillStyle='rgba(10,13,19,.72)'; g.strokeStyle='rgba(255,255,255,.16)'; g.lineWidth=2;
-  g.beginPath(); g.roundRect(1,1,W-2,H-2,8); g.fill(); g.stroke();
-  const cx=W/2;
-  const part=(v,path)=>{ g.fillStyle=dmgColour(v); g.strokeStyle='rgba(0,0,0,.45)';
-                         g.lineWidth=1.5; path(); g.fill(); g.stroke(); };
-  // front wing
-  part(d.fw,()=>{ g.beginPath(); g.roundRect(cx-38,18,76,15,3); });
-  // nose and tub, coloured by the floor
-  part(d.floor,()=>{ g.beginPath(); g.moveTo(cx-9,36); g.lineTo(cx+9,36);
-    g.lineTo(cx+16,96); g.lineTo(cx+16,150); g.lineTo(cx-16,150);
-    g.lineTo(cx-16,96); g.closePath(); });
-  // rear wing
-  part(d.rw,()=>{ g.beginPath(); g.roundRect(cx-30,154,60,14,3); });
-  // wheels, as reference rather than damage
-  g.fillStyle='rgba(255,255,255,.22)';
-  [[cx-30,44],[cx+22,44],[cx-32,124],[cx+24,124]].forEach(([x,y])=>{
-    g.beginPath(); g.roundRect(x,y,8,20,3); g.fill(); });
-  g.fillStyle='rgba(223,231,241,.62)'; g.font='9px ui-monospace,monospace';
-  g.textAlign='center'; g.fillText('DAMAGE',cx,H-8);
-}
-
-/* The circuit from above, at a glance.
-
-   A grey outline of the lap, an arrow for you, arrows for everyone else, and
-   the ones close behind picked out so you know they are there without having
-   to look. */
-const MINI_RANGE=170;      // metres of road either side of you that it shows
-function miniDraw(){
-  const cv=document.getElementById('minimap'); if(!cv) return;
-  const on=(RACE.on&&RACE.phase==='racing')||TT.live;
-  cv.classList.toggle('show', !!on);
-  if(!on||!AI.n) return;
-  const g=cv.getContext('2d'), W=cv.width;
-  /* Centred on you and turned so the way you are pointing is up the screen,
-     which is the only orientation that answers "is he on my left or my right"
-     without having to think about it. The whole lap in one little box told you
-     where you were on the circuit and nothing at all about the car beside you. */
-  const cx0=carState.wx, cz0=carState.wz, hdg=carState.hdg;
-  const k=(W/2-12)/MINI_RANGE;
-  const ch=Math.cos(-hdg), sh=Math.sin(-hdg);
-  const X=(x,z)=>W/2 + ((x-cx0)*ch - (z-cz0)*sh)*k;
-  const Z=(x,z)=>W/2 + ((x-cx0)*sh + (z-cz0)*ch)*k*-1;
-  g.clearRect(0,0,W,W);
-  g.fillStyle='rgba(10,13,19,.62)'; g.strokeStyle='rgba(255,255,255,.12)'; g.lineWidth=2;
-  g.beginPath(); g.roundRect(1,1,W-2,W-2,10); g.fill(); g.stroke();
-  // the lap
-  g.save(); g.beginPath(); g.roundRect(3,3,W-6,W-6,9); g.clip();
-  g.strokeStyle='rgba(190,200,212,.6)'; g.lineWidth=7; g.lineJoin='round'; g.lineCap='round';
-  /* Only the stretch of road around you, walked out from where you are in both
-     directions, so the line is drawn thick and readable instead of the whole
-     circuit squeezed into a stamp. */
-  const here=_plIdx||0, span=Math.round(MINI_RANGE/AI.ds);
-  g.beginPath();
-  for(let m=-span;m<=span;m+=2){
-    const i=((here+m)%AI.n+AI.n)%AI.n;
-    const px=X(AI.x[i],AI.z[i]), pz=Z(AI.x[i],AI.z[i]);
-    if(m===-span) g.moveTo(px,pz); else g.lineTo(px,pz);
-  }
-  g.stroke();
-  const arrow=(x,z,h2,fill,size)=>{
-    g.save(); g.translate(X(x,z),Z(x,z)); g.rotate(-(h2-hdg)+Math.PI);
-    g.beginPath(); g.moveTo(0,-size); g.lineTo(size*0.66,size*0.72);
-    g.lineTo(0,size*0.34); g.lineTo(-size*0.66,size*0.72); g.closePath();
-    g.fillStyle=fill; g.fill();
-    g.strokeStyle='rgba(0,0,0,.5)'; g.lineWidth=1; g.stroke(); g.restore();
-  };
-  // everyone else, and whoever is on your gearbox in a brighter colour
-  for(const d of AIS){
-    if(!d.car||!d.on) continue;
-    const rel=aiRelAt(d, carState.wx, carState.wz, 0, 'player', _plIdx);
-    const chasing = rel && rel.gap>0 && rel.gap<45;   // they are just behind you
-    arrow(d.car.st.wx, d.car.st.wz, d.car.st.hdg,
-          chasing?'#ff5a3c':(d.liv?d.liv.body:'#9fb0c4'), 5.5);
-  }
-  arrow(carState.wx, carState.wz, carState.hdg, '#ffb020', 8);
-  g.restore();
-}
-function aiLod(){
-  if(!AIS.length) return;
-  const cx=camera.position.x, cy=camera.position.y, cz=camera.position.z;
-  for(const d of AIS){
-    if(!d.obj||!d.obj.visible) continue;
-    const p=d.obj.position;
-    const dist=Math.hypot(p.x-cx, p.y-cy, p.z-cz);
-    const level = dist<LOD_NEAR ? 2 : dist<LOD_FAR ? 1 : 0;
-    if(d._lod===level) continue;
-    d._lod=level;
-    d.obj.traverse(o=>{
-      if(!o.isMesh) return;
-      o.visible = level===2 ? true : !!o.userData.lodBig;
-      /* And a shadow only while it is close enough for the shadow to be worth
-         drawing. Every car is forty-eight shadow-casting meshes, so nine of
-         them put four hundred and thirty-two extra meshes through the shadow
-         pass every frame -- the whole field rendered a second time, for shapes
-         on the ground you cannot pick out beyond a few car lengths. */
-      o.castShadow = level===2;
-    });
-  }
-}
 /* A clone shares its materials with the car it came from, so painting one car
    paints the lot -- including yours. Each car is given its own copies first. */
 function aiPaint(root, liv){
@@ -9821,7 +9427,7 @@ function aiField(n){
                       _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
                       _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
                       _prevLap:0, outside:0, room:99, _onBrakes:false, _brkS:0,
-                      _gridT:undefined, lapN:0, capV:Infinity, wideK:1, _lod:-1 });
+                      _gridT:undefined, lapN:0, capV:Infinity });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -9833,28 +9439,10 @@ function aiSpawnOne(d){
   const g=new THREE.Group(); scene.add(g);
   const m=carObj.clone(true);
   g.add(m); d.obj=g;
-  aiLodMark(m);
   d.liv=LIVERIES[(AIS.indexOf(d)+LIVERIES.length)%LIVERIES.length] || LIVERIES[0];
   d.name=d.liv.name;
   aiPaint(m, d.liv);
   d.car=makeCar(g,false);                       // no aids: it steers with a number
-  dmgMark(m, d.car);                            // which meshes come off when hit
-  /* Their wheels turn too.
-
-     Rolling and steering were only ever done for your car -- the routine took
-     the one global list of wheels found on the loaded model -- so nine cars
-     drove round Spa on skates: tyres frozen solid, front wheels pointing
-     straight ahead through every corner. Each car gets its own four, found the
-     same way by name, and its own spin angle to accumulate. */
-  d.car.wheels=[]; d.car.spin=0;
-  for(const n of ['Wheel_FL','Wheel_FR','Wheel_RL','Wheel_RR']){
-    const w=m.getObjectByName(n);
-    if(!w) continue;
-    w.userData.steers=(n==='Wheel_FL'||n==='Wheel_FR');
-    d.car.wheels.push(w);
-  }
-  d.car.wingL=m.getObjectByName('Wing_FL')||null;
-  d.car.wingR=m.getObjectByName('Wing_FR')||null;
   d.car.gripMul=1;                              // the player's grip, exactly
   return true;
 }
@@ -10240,7 +9828,7 @@ function aiToggle(){
   AI.on=true;
   return true;
 }
-function aiStepAll(dt, t){ aiPlayerIdx(); for(const d of AIS) aiStep(d, dt, t); }
+function aiStepAll(dt, t){ for(const d of AIS) aiStep(d, dt, t); }
 function aiStep(d, dt, t){
   if(!d.on||!d.car) return;
   const C=d.car, st=C.st;
@@ -10280,12 +9868,6 @@ function aiStep(d, dt, t){
     if(d.pinned) st2.pin++;
     st2.sk+=(d.speedK||1); }
   if(C.surf && C.surf.ok && (C.surf.grass||C.surf.loose)) d._offN=(d._offN||0)+1;
-  /* Their wheels are probed every other step. Yours is probed every step
-     because you feel it; theirs is a contact patch for a car you are looking
-     at from outside, and forty raycasts a step for nine cars is the single
-     biggest lump of the physics budget. */
-  d._probeOdd=!d._probeOdd;
-  C.skipProbe=d._probeOdd;
   aiTraffic(d, dt);
   const ped=aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
   stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(d, C, dt)}, dt);
@@ -10452,64 +10034,6 @@ window.SIM={
                     text:document.getElementById('limwarn').textContent}; },
   limitsHit(){ limitsHit(); },
   tlLock(){ return +_tlLock.toFixed(2); },
-  fps(){ return +_simFps.toFixed(1); },
-  damage(){ return {...(PLAYER.dmg||{}), parts:PLAYER.parts?
-              {front:PLAYER.parts.front.length, rear:PLAYER.parts.rear.length,
-               frontShown:PLAYER.parts.front.filter(o=>o.visible).length,
-               rearShown:PLAYER.parts.rear.filter(o=>o.visible).length}:null,
-              grip:+dmgGrip(PLAYER, carState.speed*3.6).toFixed(3),
-              airborne:+(PLAYER.carVY||0).toFixed(2)}; },
-  hurt(fw,rw,fl){ PLAYER.dmg={fw:fw||0,rw:rw||0,floor:fl||0}; dmgShow(PLAYER); },
-  lookBack(){ return LOOKBACK; },
-  clipAt(){ return PLAYER.clipAt===undefined?null:PLAYER.clipAt; },
-  rideHeight(){ const g=groundAt(carState.wx,carState.wz,PLAYER.groundY-RIDE);
-                return g.hit ? +(PLAYER.groundY-RIDE-g.y).toFixed(3) : 0; },
-  flying(){ return !!PLAYER.flying; },
-  meshBoxes(){
-    carGroup.updateMatrixWorld(true);
-    const inv=new THREE.Matrix4().copy(carGroup.matrixWorld).invert();
-    const wf=carGroup.getObjectByName('Wheel_FL'), wr=carGroup.getObjectByName('Wheel_RL');
-    const pf=new THREE.Vector3(), pr=new THREE.Vector3();
-    wf.getWorldPosition(pf); wr.getWorldPosition(pr);
-    pf.applyMatrix4(inv); pr.applyMatrix4(inv);
-    const out=[]; const box=new THREE.Box3(), c=new THREE.Vector3();
-    carGroup.traverse(o=>{
-      if(!o.isMesh||!o.geometry) return;
-      box.setFromObject(o); if(box.isEmpty()) return;
-      box.getCenter(c); c.applyMatrix4(inv);
-      const mn=box.min.clone().applyMatrix4(inv), mx=box.max.clone().applyMatrix4(inv);
-      const g=o.geometry; const t=g.index?g.index.count/3:(g.attributes.position?g.attributes.position.count/3:0);
-      out.push({n:o.name, tris:Math.round(t),
-        cz:+c.z.toFixed(2), cy:+c.y.toFixed(2),
-        zmin:+Math.min(mn.z,mx.z).toFixed(2), zmax:+Math.max(mn.z,mx.z).toFixed(2),
-        ymax:+Math.max(mn.y,mx.y).toFixed(2)});
-    });
-    return {axleF:+pf.z.toFixed(2), axleR:+pr.z.toFixed(2), wheelY:+pf.y.toFixed(2), meshes:out};
-  },
-  meshNames(){ const out=[]; carGroup.traverse(o=>{ if(o.isMesh){
-      const g=o.geometry; const n=g&&g.index?g.index.count/3:(g&&g.attributes.position?g.attributes.position.count/3:0);
-      out.push({name:o.name||'(none)', parent:(o.parent&&o.parent.name)||'', tris:Math.round(n)}); } });
-    return out; },
-  hud(){ const g=id=>{ const e=document.getElementById(id);
-           const r=e.getBoundingClientRect();
-           return {shown:e.classList.contains('show'), w:Math.round(r.width),
-                   h:Math.round(r.height), right:Math.round(innerWidth-r.right),
-                   bottom:Math.round(innerHeight-r.bottom), left:Math.round(r.left)}; };
-         return {dmg:g('dmgmap'), mini:g('minimap'), pos:g('racepos')}; },
-  carCost(){
-    const one=AIS.find(d=>d.obj);
-    let meshes=0, tris=0;
-    if(one) one.obj.traverse(o=>{ if(o.isMesh){ meshes++;
-      const g=o.geometry; if(g&&g.index) tris+=g.index.count/3;
-      else if(g&&g.attributes.position) tris+=g.attributes.position.count/3; } });
-    return { meshesPerCar:meshes, trisPerCar:Math.round(tris), cars:AIS.filter(d=>d.obj).length };
-  },
-  prof(){ const r={ fps:+_simFps.toFixed(1), frames:PROF.frames,
-                    physMsPerFrame:PROF.frames?+(PROF.phys/PROF.frames).toFixed(2):0,
-                    stepsPerFrame:PROF.frames?+(PROF.steps/PROF.frames).toFixed(2):0,
-                    draws:renderer.info.render.calls, tris:renderer.info.render.triangles,
-                    programs:renderer.info.programs?renderer.info.programs.length:0 };
-             PROF.phys=0; PROF.steps=0; PROF.frames=0; return r; },
   standings(){ return { pos:RACE.pos, field:RACE.field, lap:RACE.lapN,
                         laps:RACE_LAPS, order:raceProgress().map(r=>r.name),
                         hud:document.getElementById('racepos').textContent }; },
@@ -10937,16 +10461,7 @@ function stepWorld(dt){
    frame than the frame took -- and a quarter of a second is the most that can
    arrive at once, so a tab left in the background does not come back and
    fast-forward the lap. */
-/* Six, not fifteen.
-
-   Fifteen sixtieths meant that when a frame ran long the next one did fifteen
-   full physics steps to catch up -- ten cars, forty wheel probes each step --
-   which made that frame longer still, which asked for more steps again. A
-   frame rate that falls does not recover from that, it spirals: measured at
-   eleven steps a frame and sixteen fps with a full grid. Capping the catch-up
-   and letting the long step take the remainder means a slow frame costs one
-   coarse integration instead of dragging the next five frames down with it. */
-const STEP=1/60, MAX_STEPS=6, LONG_STEP=0.1;
+const STEP=1/60, MAX_STEPS=15, LONG_STEP=0.1;
 /* Where a frame goes. Cheap enough to leave in: four counters and a
    performance.now() either side of each phase. */
 const PROF={phys:0, place:0, cull:0, draw:0, steps:0, frames:0, probes:0};
@@ -10969,9 +10484,7 @@ function frame(now){
      sliding into slow motion, which is the thing you actually notice. */
   if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; steps++; }
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
-  aiLod();
-  dmgDraw();
-  miniDraw();
+  tmDraw();
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
   windU.value=t;
 
@@ -11190,18 +10703,7 @@ function frame(now){
     const LA=14+vSpeed*0.8;
     const h=vGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
 
-    /* Hold the space bar and the view turns round. It is a mirror, not a camera
-       mode: nothing is switched, nothing has to be switched back, and letting
-       go puts you exactly where you were. */
-    if(LOOKBACK){
-      const P=C.chase ? new THREE.Vector3(vGroup.position.x+hx*3.2, camBase+C.up*0.92,
-                                          vGroup.position.z+hz*3.2)
-                      : vPoint(C.p[0], C.p[1]+0.10, C.p[2]-0.55);
-      camera.position.copy(P);
-      camera.up.set(0,1,0);
-      camera.lookAt(P.x-hx*40, P.y+1.0, P.z-hz*40);
-      camera.fov=64;
-    }else if(C.chase){
+    if(C.chase){
       /* Sits behind at the car's own height, lifted clear if the ground
          behind happens to be higher, and aims down the slope the car is on so
          a descent shows the road rather than the sky. */
