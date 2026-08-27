@@ -9756,7 +9756,13 @@ function aiLod(){
     d._lod=level;
     d.obj.traverse(o=>{
       if(!o.isMesh) return;
-      o.visible = level===2 ? true : (level===1 ? !!o.userData.lodBig : !!o.userData.lodBig);
+      o.visible = level===2 ? true : !!o.userData.lodBig;
+      /* And a shadow only while it is close enough for the shadow to be worth
+         drawing. Every car is forty-eight shadow-casting meshes, so nine of
+         them put four hundred and thirty-two extra meshes through the shadow
+         pass every frame -- the whole field rendered a second time, for shapes
+         on the ground you cannot pick out beyond a few car lengths. */
+      o.castShadow = level===2;
     });
   }
 }
