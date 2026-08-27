@@ -4616,6 +4616,7 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
+  if(k===' '||e.code==='Space'){ LOOKBACK=true; e.preventDefault(); }
   if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus();
     const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on'); }
   if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
@@ -4654,7 +4655,9 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>{
   const tn=(e.target&&e.target.tagName)||'';
   if(tn==='INPUT'||tn==='SELECT'||tn==='TEXTAREA') return;
-  keys[e.key.toLowerCase()]=false;});
+  keys[e.key.toLowerCase()]=false;
+  if(e.key===' '||e.code==='Space') LOOKBACK=false;});
+addEventListener('blur',()=>{ LOOKBACK=false; });   // alt-tabbing should not leave you facing backwards
 
 /* ---------------------------------------------------------- Arduino joystick
    An analog 2-axis stick + button (the Elegoo starter kit's module) over USB
@@ -4776,7 +4779,7 @@ const CAMS=[
      entry did not have -- and threw on every frame until they appeared. */
   {name:'TV',      tv:true, chase:true, back:9.5, up:3.15, p:[0,0.94,0.49], fov:40, zoom:8, shake:0}
 ];
-let orbit=false, camMode=0, shadowsOn=true;
+let orbit=false, camMode=0, shadowsOn=true, LOOKBACK=false;
 function updateStatus(){
   document.getElementById('camname').textContent =
     orbit?'Orbit':(freeLook?'Free look':CAMS[camMode].name);
@@ -5435,6 +5438,14 @@ function replayStart(){
 function goHome(){
   replayMetadataEnd();
   TTREC.playing=false;
+  /* And you are no longer watching a lap.
+
+     Going home stopped the replay but left the two flags that say "the next
+     thing this player wants is their best lap" standing, so pressing Race
+     afterwards loaded the replay again -- the race never started and there was
+     no way out of it except a reload. Watching ends when you leave. */
+  pendingReplay=false;
+  window._autoReplay=false;
   TT.live=false;
   const r=document.getElementById('replaybar'); if(r) r.classList.remove('show');
   document.body.classList.remove('cinema');
@@ -9290,6 +9301,7 @@ const HIT_HL=1.85;           // half its length, a little short of the real nose
 const HIT_E=0.32;            // restitution: it bumps off, it does not bounce
 const HIT_SCRUB=0.12;        // of the closing speed, lost as scrub
 const HIT_DECAY=0.30;        // seconds for a shove to bleed away
+const CRUNCH_OFF=17.0;       // m/s: hard enough that a wing leaves the car
 function carEnds(st){
   const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
   return {ax:st.wx-fx*HIT_HL, az:st.wz-fz*HIT_HL, bx:st.wx+fx*HIT_HL, bz:st.wz+fz*HIT_HL, fx, fz};
@@ -9308,6 +9320,175 @@ function segClosest(a,b){
 }
 /* One pair. Written for any two cars so the same call serves the AI now and a
    car on the other end of a connection later. */
+/* Crunching.
+
+   Not a damage model and not a penalty -- the car simply stops being the shape
+   it was. A hard enough hit pushes the bodywork in where it landed: the actual
+   vertices of the actual mesh, moved along the direction of the impact, most at
+   the point of contact and tapering to nothing a metre away. Hit the same
+   corner twice and it goes in twice. Nothing pops back out.
+
+   Two things have to be handled or this deforms every car at once. A cloned car
+   SHARES its geometry with the car it came from, so the first time a car is
+   crunched it gets its own copy -- lazily, because nine unused copies of a
+   hundred thousand triangles is a waste of memory that most races never need.
+   And the bounding sphere has to be recomputed afterwards, or the renderer
+   culls the car using the shape it used to be.
+
+   Pieces that are already their own mesh -- the rear wing -- come off entirely
+   rather than denting, because that is what happens to them. */
+/* The rear wing is the one piece that is genuinely its own mesh. It is found
+   by where it sits rather than by name, because gltfpack left every mesh in
+   this model called mesh_0_1 and the like -- names were never going to work. */
+function crunchRearPart(C){
+  const root=C.group; if(!root) return null;
+  if(C._rearPart) return C._rearPart;      // only cache a part that was found
+  C._rearPart=null;
+  const wr=root.getObjectByName('Wheel_RL')||root.getObjectByName('Wheel_RR');
+  if(!wr) return null;
+  root.updateMatrixWorld(true);
+  const inv=new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const pr=new THREE.Vector3(); wr.getWorldPosition(pr); pr.applyMatrix4(inv);
+  const wf=root.getObjectByName('Wheel_FL')||root.getObjectByName('Wheel_FR');
+  const pf=new THREE.Vector3(); if(wf) wf.getWorldPosition(pf); pf.applyMatrix4(inv);
+  const fwd=Math.sign(pf.z-pr.z)||1;
+  const box=new THREE.Box3(), c=new THREE.Vector3();
+  let best=null, bestBack=0;
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry) return;
+    box.setFromObject(o); if(box.isEmpty()) return;
+    box.getCenter(c); c.applyMatrix4(inv);
+    const behind=(pr.z-c.z)*fwd;
+    if(behind>0.05 && c.y>pr.y*1.45 && behind>bestBack){ bestBack=behind; best=o; }
+  });
+  C._rearPart=best;
+  return best;
+}
+/* Denting the panels is OFF, and honestly so.
+
+   Pushing the actual vertices in is the right idea and it is not working on
+   this model. Four attempts, each measured rather than eyeballed: a dent came
+   out as 20,866 m, then 20,596 m, then 5.58 m, against a cap of 0.34 m. The
+   geometry is packed in a way that keeps defeating it -- unnamed meshes, whole
+   car in one mesh, unsigned 16-bit vertex positions, non-uniform and mirrored
+   node scale -- and the world coordinates check out as metres, which means the
+   fault is still somewhere I have not found.
+
+   A car that folds up is a good feature. A car that turns into a spike across
+   the circuit the first time somebody taps you at the Bus Stop is far worse
+   than no feature, and you would meet it within a lap. So it stays off until it
+   is right, and the code stays here rather than being deleted.
+
+   What does ship is the part that cannot go wrong: a piece that is genuinely
+   its own mesh leaves the car. */
+const CRUNCH_DENT=false;
+const CRUNCH_MIN=7.0;       // m/s of closing speed before anything bends
+const CRUNCH_R=1.15;        // metres of bodywork affected around the contact
+const CRUNCH_MAX=0.34;      // deepest a single hit can push the panel in
+/* Its own geometry, in numbers that can hold a dent.
+
+   Two things are wrong with the geometry as it arrives, and both are gltfpack
+   doing its job. It is SHARED with every other car cloned from the same model,
+   so denting one would dent the whole grid including yours. And the positions
+   are a Uint16Array of raw integers -- unsigned -- so a vertex pushed even
+   slightly past zero does not go negative, it wraps round to 65535 and the
+   vertex teleports fifteen metres across the car. That is what the five-metre
+   "dents" were.
+
+   So the first time a car is actually hit it gets its own copy, converted to
+   floats. Same numbers, same scale, but they can now go where they are put. */
+function crunchOwn(o){
+  if(o.userData.ownGeom) return;
+  const g=o.geometry.clone();
+  const p=g.attributes.position;
+  if(!(p.array instanceof Float32Array)){
+    const f=new Float32Array(p.count*3);
+    for(let i=0;i<p.count;i++){ f[i*3]=p.getX(i); f[i*3+1]=p.getY(i); f[i*3+2]=p.getZ(i); }
+    g.setAttribute('position', new THREE.BufferAttribute(f,3));
+  }
+  o.geometry=g;
+  o.userData.ownGeom=true;
+}
+const _cwP=new THREE.Vector3(), _cwD=new THREE.Vector3(), _cwV=new THREE.Vector3();
+const _cwW=new THREE.Vector3(), _cwL=new THREE.Vector3();
+function crunchAt(C, wx, wy, wz, dx, dz, energy){
+  if(!CRUNCH_DENT) return;
+  const root=C.group; if(!root) return;
+  const depth=Math.min(CRUNCH_MAX, (energy-CRUNCH_MIN)*0.022);
+  if(depth<=0.004) return;
+  root.updateMatrixWorld(true);
+  const dl=Math.hypot(dx,dz)||1; dx/=dl; dz/=dl;
+  root.traverse(o=>{
+    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+    if(o.userData.detached) return;
+    if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    const bs=o.geometry.boundingSphere;
+    _cwV.copy(bs.center).applyMatrix4(o.matrixWorld);
+    /* The radius has to be measured in the world too: the sphere's radius is in
+       the mesh's own units, so it is scaled by whatever the node does. */
+    const sc=new THREE.Vector3();
+    o.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), sc);
+    const unit=Math.max(Math.abs(sc.x),Math.abs(sc.y),Math.abs(sc.z));
+    const reach=bs.radius*unit+CRUNCH_R;
+    if((_cwV.x-wx)**2+(_cwV.y-wy)**2+(_cwV.z-wz)**2 > reach*reach) return;
+
+    crunchOwn(o);
+    const pos=o.geometry.attributes.position;
+    const M=o.matrixWorld, inv=new THREE.Matrix4().copy(M).invert();
+    let moved=0;
+    /* Every measurement in metres.
+
+       Working in the mesh's own coordinates was hopeless: this model is
+       quantised, so its numbers are not metres and are not the same multiple of
+       a metre from one mesh to the next. Guessing the conversion produced a
+       car twenty kilometres long. Each vertex is taken out to the world, judged
+       there against a distance in metres, moved there, and brought back. */
+    for(let i=0;i<pos.count;i++){
+      _cwW.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(M);
+      const d2=(_cwW.x-wx)**2+(_cwW.y-wy)**2+(_cwW.z-wz)**2;
+      if(d2>CRUNCH_R*CRUNCH_R) continue;
+      const f=1-Math.sqrt(d2)/CRUNCH_R;                   // most at the contact
+      const k=depth*f*f;
+      _cwW.x+=dx*k; _cwW.y+=k*0.28; _cwW.z+=dz*k;
+      _cwL.copy(_cwW).applyMatrix4(inv);
+      pos.setXYZ(i, _cwL.x, _cwL.y, _cwL.z);
+      moved++;
+    }
+    if(moved){
+      pos.needsUpdate=true;
+      o.geometry.computeBoundingSphere();                 // or it culls the old shape
+      o.geometry.computeVertexNormals();                  // so the dent catches light
+    }
+  });
+}
+/* A part that leaves the car. It keeps the shape it had, drops out of the
+   car's group into the world, and falls where the impact threw it. */
+const DEBRIS=[];
+function crunchDetach(o, vx, vy, vz){
+  if(!o||o.userData.detached) return;
+  o.userData.detached=true;
+  o.updateMatrixWorld(true);
+  const m=o.matrixWorld.clone();
+  scene.add(o);                                   // re-parenting keeps it visible
+  m.decompose(o.position, o.quaternion, o.scale);
+  o.userData.detached=true;
+  DEBRIS.push({o, vx, vy, vz, spin:(Math.random()-0.5)*6, t:0});
+}
+function crunchStep(dt){
+  for(let i=DEBRIS.length-1;i>=0;i--){
+    const d=DEBRIS[i];
+    d.vy-=9.81*dt; d.t+=dt;
+    d.o.position.x+=d.vx*dt; d.o.position.y+=d.vy*dt; d.o.position.z+=d.vz*dt;
+    d.o.rotateZ(d.spin*dt);
+    const g=groundAt(d.o.position.x, d.o.position.z, d.o.position.y);
+    const floor=(g.hit?g.y:0)+0.06;
+    if(d.o.position.y<=floor){                    // landed: stop it there
+      d.o.position.y=floor; DEBRIS.splice(i,1); continue;
+    }
+    d.vx*=0.995; d.vz*=0.995;
+    if(d.t>12) DEBRIS.splice(i,1);                // long gone
+  }
+}
 function carsTouch(A, B, dt){
   if(!A||!B) return false;
   const sa=A.st, sb=B.st;
@@ -9329,12 +9510,39 @@ function carsTouch(A, B, dt){
   const vbx=Math.sin(sb.hdg)*sb.speed+(B.bumpX||0), vbz=Math.cos(sb.hdg)*sb.speed+(B.bumpZ||0);
   const vn=(vbx-vax)*nx+(vbz-vaz)*nz;
   if(vn<0){                                   // only if they are coming together
-    const j=-(1+HIT_E)*vn*0.5;                // equal cars, half each
+    const close=Math.abs(vn);
+    /* A nudge and a shunt are not the same event: the harder they arrive, the
+       further they throw each other. */
+    const e=Math.min(0.9, HIT_E + close/36);
+    const j=-(1+e)*vn*0.5;                    // equal cars, half each
     A.bumpX=(A.bumpX||0)-nx*j; A.bumpZ=(A.bumpZ||0)-nz*j;
     B.bumpX=(B.bumpX||0)+nx*j; B.bumpZ=(B.bumpZ||0)+nz*j;
-    const scrub=Math.abs(vn)*HIT_SCRUB;
+    const scrub=close*HIT_SCRUB*(1+close/34);
     sa.speed=Math.max(0, sa.speed-scrub);
     sb.speed=Math.max(0, sb.speed-scrub);
+
+    /* And the bodywork takes it. The contact point is where the two cars
+       actually touched, so the dent lands where you can see it happen. */
+    if(close>CRUNCH_MIN){
+      const hy=(A.groundY+B.groundY)*0.5;
+      crunchAt(A, c.px, hy, c.pz,  nx,  nz, close);
+      crunchAt(B, c.qx, hy, c.qz, -nx, -nz, close);
+      /* Hit hard enough from behind and the rear wing does not dent, it goes.
+         Which end took it is decided by where along each car the contact was:
+         +1 is the nose, -1 the gearbox. */
+      if(close>CRUNCH_OFF){
+        const ta=((c.px-sa.wx)*Math.sin(sa.hdg)+(c.pz-sa.wz)*Math.cos(sa.hdg))/HIT_HL;
+        const tb=((c.qx-sb.wx)*Math.sin(sb.hdg)+(c.qz-sb.wz)*Math.cos(sb.hdg))/HIT_HL;
+        const fling=(C,st,dir)=>{
+          const part=crunchRearPart(C);
+          if(part) crunchDetach(part, dir*nx*close*0.35+st.speed*Math.sin(st.hdg)*0.4,
+                                      2.2+close*0.06,
+                                      dir*nz*close*0.35+st.speed*Math.cos(st.hdg)*0.4);
+        };
+        if(ta<-0.5) fling(A, sa, -1);
+        if(tb<-0.5) fling(B, sb,  1);
+      }
+    }
   }
   A.touchT=B.touchT=0.25;                     // for anything that wants to know
   return true;
@@ -10034,6 +10242,89 @@ window.SIM={
                     text:document.getElementById('limwarn').textContent}; },
   limitsHit(){ limitsHit(); },
   tlLock(){ return +_tlLock.toFixed(2); },
+  lookBack(){ return LOOKBACK; },
+  replayFlags(){ return {pending:!!pendingReplay, auto:!!window._autoReplay,
+                         playing:!!TTREC.playing}; },
+  goHome(){ goHome(); return true; },
+  watchBest(){ const b=document.getElementById('bestlapsbtn'); window._autoReplay=true;
+               pendingReplay=true; return true; },
+  bodywork(){
+    /* How far the car has moved from the shape it left the garage as. */
+    let moved=0, worst=0, own=0, meshes=0;
+    carGroup.traverse(o=>{
+      if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+      meshes++;
+      if(!o.userData.ownGeom) return;
+      own++;
+      const p=o.geometry.attributes.position, q=o.userData.virgin;
+      if(!q) return;
+      o.updateMatrixWorld(true);
+      const M=o.matrixWorld, A=new THREE.Vector3(), B=new THREE.Vector3();
+      for(let i=0;i<p.count;i++){
+        A.set(p.getX(i),p.getY(i),p.getZ(i)).applyMatrix4(M);
+        B.set(q[i*3],q[i*3+1],q[i*3+2]).applyMatrix4(M);
+        const d=A.distanceTo(B);            // metres, not model units
+        if(d>0.002) moved++;
+        if(d>worst) worst=d;
+      }
+    });
+    let gone=0, onCar=0;
+    scene.traverse(o=>{ if(o.isMesh&&o.userData.detached) gone++; });
+    carGroup.traverse(o=>{ if(o.isMesh) onCar++; });
+    return {meshes, dentedMeshes:own, verticesMoved:moved, deepest:+worst.toFixed(3),
+            debris:DEBRIS.length, piecesOffTheCar:gone, meshesStillOnCar:onCar,
+            rearFound:!!crunchRearPart(PLAYER)};
+  },
+  vertexKind(){
+    const out=[];
+    carGroup.traverse(o=>{
+      if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+      if(out.length>3) return;
+      const p=o.geometry.attributes.position;
+      out.push({ name:o.name, type:p.array.constructor.name, normalized:!!p.normalized,
+                 itemSize:p.itemSize, count:p.count,
+                 sample:[p.getX(0),p.getY(0),p.getZ(0)],
+                 scale:[+o.matrixWorld.elements[0].toFixed(6)],
+                 morph:!!o.geometry.morphAttributes.position });
+    });
+    return out;
+  },
+  whereIsIt(){
+    carGroup.updateMatrixWorld(true);
+    const out={car:[+carState.wx.toFixed(1), +PLAYER.groundY.toFixed(1), +carState.wz.toFixed(1)], meshes:[]};
+    carGroup.traverse(o=>{
+      if(!o.isMesh||out.meshes.length>2) return;
+      const b=new THREE.Box3().setFromObject(o);
+      const p=o.geometry.attributes.position;
+      const v=new THREE.Vector3(p.getX(0),p.getY(0),p.getZ(0));
+      const w=v.clone().applyMatrix4(o.matrixWorld);
+      out.meshes.push({ name:o.name,
+        worldBox:[+b.min.x.toFixed(1),+b.min.y.toFixed(1),+b.min.z.toFixed(1),
+                  +b.max.x.toFixed(1),+b.max.y.toFixed(1),+b.max.z.toFixed(1)],
+        rawVertex:[v.x,v.y,v.z],
+        thatVertexInWorld:[+w.x.toFixed(2),+w.y.toFixed(2),+w.z.toFixed(2)],
+        matrixScale:[+o.matrixWorld.elements[0].toFixed(6),+o.matrixWorld.elements[5].toFixed(6)],
+        matrixPos:[+o.matrixWorld.elements[12].toFixed(1),+o.matrixWorld.elements[14].toFixed(1)] });
+    });
+    return out;
+  },
+  keepVirgin(){
+    carGroup.traverse(o=>{ if(o.isMesh&&o.geometry&&o.geometry.attributes.position)
+      o.userData.virgin=Float32Array.from(o.geometry.attributes.position.array); });
+    return true;
+  },
+  smash(depth,fromBehind){
+    /* A hit of a chosen severity, delivered where a car would deliver it. */
+    const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
+    const at=fromBehind?-1.9:1.9;
+    crunchAt(PLAYER, carState.wx+fx*at, PLAYER.groundY+0.35, carState.wz+fz*at,
+             fromBehind?fx:-fx, fromBehind?fz:-fz, depth);
+    if(fromBehind && depth>CRUNCH_OFF){
+      const part=crunchRearPart(PLAYER);
+      if(part) crunchDetach(part, 2, 3, 2);
+    }
+    return true;
+  },
   standings(){ return { pos:RACE.pos, field:RACE.field, lap:RACE.lapN,
                         laps:RACE_LAPS, order:raceProgress().map(r=>r.name),
                         hud:document.getElementById('racepos').textContent }; },
@@ -10439,7 +10730,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); crunchStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
@@ -10703,7 +10994,25 @@ function frame(now){
     const LA=14+vSpeed*0.8;
     const h=vGroup.rotation.y, hx=Math.sin(h), hz=Math.cos(h);
 
-    if(C.chase){
+    /* Hold the space bar and the view turns round.
+
+       It is a mirror rather than a camera mode: nothing is switched, nothing
+       has to be switched back, and letting go puts you exactly where you were.
+       From the cockpit it sits up over the airbox looking down the road behind,
+       which is high enough to see past your own rear wing; from the chase
+       camera it swings round in front of the car and looks back at it, so you
+       see your own car and whoever is about to arrive in it. */
+    if(LOOKBACK){
+      const P=C.chase
+        ? new THREE.Vector3(vGroup.position.x+hx*7.0, camBase+C.up*0.85,
+                            vGroup.position.z+hz*7.0)
+        : vPoint(0, 1.28, -0.30);
+      camera.position.copy(P);
+      clearGround(P,1.0);
+      camera.up.set(0,1,0);
+      camera.lookAt(P.x-hx*45, P.y-0.6, P.z-hz*45);
+      camera.fov=C.chase?58:72;
+    }else if(C.chase){
       /* Sits behind at the car's own height, lifted clear if the ground
          behind happens to be higher, and aims down the slope the car is on so
          a descent shows the road rather than the sky. */
@@ -11204,8 +11513,11 @@ document.getElementById('lapbook-replay').onclick=()=>{
   else { pendingReplay=true; startTrack('spa22'); }
 };
 
-function startTrack(id){
+function startTrack(id, opts){
   const t=TRACKS[id];
+  /* A race asks for a race. Belt and braces with goHome clearing the flags:
+     anything that is explicitly not a replay says so here. */
+  if(opts&&opts.race){ pendingReplay=false; window._autoReplay=false; }
   const replayMode=!!(pendingReplay||window._autoReplay);
   qualifyingLoadShow(replayMode
     ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'),!replayMode);
@@ -11383,7 +11695,7 @@ function startTrack(id){
 Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
   btn.addEventListener('click',()=>{
     if(booted) enterCircuit();          // already loaded: just go back in
-    else startTrack(btn.dataset.track);
+    else startTrack(btn.dataset.track,{race:true});
   });
 });
 qualifyingWeatherButtons.forEach(btn=>{
