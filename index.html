@@ -798,6 +798,8 @@ if('serviceWorker' in navigator){
     <button id="m2find">Find walls</button>
     <button id="m2wallclear">Clear walls</button>
     <span id="m2info"></span>
+    <button id="m2wallcopy">Copy walls</button>
+    <button id="m2wallsave">Save walls</button>
     <button id="m2undo2">Undo</button>
     <button id="m2close">Done</button>
     <!-- The track-limit line editor. Still wired up and still works, but it is
@@ -5999,18 +6001,60 @@ function wallsBake(){
   barrSave();
   return BARR.count;
 }
-function wallsSave(){ try{ localStorage.setItem(WALL_KEY,
-  JSON.stringify(WALLS.map(l=>l.map(p=>[+p.x.toFixed(2), +p.z.toFixed(2)])))); }catch(e){} }
+/* One line is one flat run of numbers -- x,z,x,z -- rather than an array of
+   pairs. Same coordinates to the centimetre, about half the characters, and
+   the difference matters because this text is meant to be handed over: pasted
+   into a message, or baked into the file below so it ships with the game the
+   way the painted surface does. */
+function wallsPack(){
+  return JSON.stringify(WALLS.map(l=>{
+    const flat=[];
+    for(const p of l) flat.push(+p.x.toFixed(2), +p.z.toFixed(2));
+    return flat;
+  }));
+}
+function wallsUnpack(txt){
+  const d=JSON.parse(txt);
+  if(!Array.isArray(d)) return false;
+  const out=[];
+  for(const l of d){
+    if(!Array.isArray(l)) continue;
+    const pts=[];
+    /* Both spellings read: flat runs, and the [x,z] pairs an earlier save
+       used. A file somebody kept should not stop loading because the writer
+       got more compact afterwards. */
+    if(Array.isArray(l[0])){ for(const p of l) pts.push({x:+p[0], z:+p[1]}); }
+    else { for(let i=0;i+1<l.length;i+=2) pts.push({x:+l[i], z:+l[i+1]}); }
+    if(pts.length>1) out.push(pts);
+  }
+  if(!out.length) return false;
+  WALLS.length=0;
+  for(const l of out) WALLS.push(l);
+  return true;
+}
+function wallsSave(){ try{ localStorage.setItem(WALL_KEY, wallsPack()); }catch(e){} }
+/* Where the walls come from on a browser that has never seen them.
+
+   Same shape as the painted surface above: a set worth keeping is baked into
+   this file, and the version is stamped in localStorage the first time it is
+   adopted, so a new baked set replaces an older browser's copy exactly once
+   and never touches walls drawn since. Empty until a set is baked in, at which
+   point the only thing to change is the constant and the version. */
+const WALLS_BAKED="[]";
+const WALL_BAKE_KEY='f1sim.walls.baked.spa22', WALL_BAKE_VER=0;
 function wallsLoad(){
   try{
+    if(WALL_BAKE_VER>0){
+      const adopted=+(localStorage.getItem(WALL_BAKE_KEY)||0);
+      if(adopted!==WALL_BAKE_VER && wallsUnpack(WALLS_BAKED)){
+        localStorage.setItem(WALL_BAKE_KEY, String(WALL_BAKE_VER));
+        wallsSave();
+        return true;
+      }
+    }
     const t=localStorage.getItem(WALL_KEY);
-    if(!t) return false;
-    const d=JSON.parse(t);
-    if(!Array.isArray(d)) return false;
-    WALLS.length=0;
-    for(const l of d) if(Array.isArray(l)&&l.length>1)
-      WALLS.push(l.map(p=>({x:+p[0], z:+p[1]})));
-    return true;
+    if(t && wallsUnpack(t)) return true;
+    return WALL_BAKE_VER>0 ? wallsUnpack(WALLS_BAKED) : false;
   }catch(e){ return false; }
 }
 /* Undo, whole-state. The lines are a few thousand numbers, so keeping twenty
@@ -7656,6 +7700,37 @@ document.getElementById('m2find').onclick=()=>{
       : r.lines+' walls found \u2014 '+r.metres.toLocaleString()+' m of them, off '
         +r.walls.toLocaleString()+' upright faces, in '+(r.ms/1000).toFixed(1)+'s');
   },60);
+};
+/* Getting the walls out of this browser and into the repo.
+
+   Two ways out because there is one of them per circuit and it is not small.
+   Copy is the quick one when the set is a few tens of KB and the target is a
+   message. Save writes a file, which is the one that works whatever the size:
+   a clipboard full of half a megabyte is a paste nobody wants to make, and a
+   file can simply be handed over. Both write exactly what wallsPack produces,
+   so either can be dropped into WALLS_BAKED unchanged. */
+const wallsSize=txt=>txt.length<1024 ? txt.length+' B'
+  : txt.length<1024*1024 ? Math.round(txt.length/1024)+' KB'
+  : (txt.length/1048576).toFixed(1)+' MB';
+document.getElementById('m2wallcopy').onclick=()=>{
+  if(!WALLS.length){ m2Note('nothing to copy — press Find walls first'); return; }
+  const txt=wallsPack();
+  console.log('barrier lines for WALLS_BAKED (model coordinates):\n'+txt);
+  const done=()=>m2Note(WALLS.length+' walls copied · '+wallsSize(txt)+' · also in the console');
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(done,
+      ()=>m2Note('copy blocked by the browser — it is in the console, and Save walls writes a file'));
+  else done();
+};
+document.getElementById('m2wallsave').onclick=()=>{
+  if(!WALLS.length){ m2Note('nothing to save — press Find walls first'); return; }
+  const txt=wallsPack();
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));
+  a.download='spa22-walls.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1000);
+  m2Note(WALLS.length+' walls saved to spa22-walls.json · '+wallsSize(txt));
 };
 document.getElementById('m2wallclear').onclick=()=>{
   wallsSnapshot(); WALLS.length=0; wallEnd(); wallsSave(); wallsBake();
