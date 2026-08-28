@@ -568,12 +568,12 @@
   #qualifying-load .weather-choice:hover{transform:translateY(-3px);background:rgba(255,176,32,.13);border-color:#ffb020}
   #qualifying-load .weather-choice.on{background:rgba(255,176,32,.16);border-color:#ffb020;box-shadow:0 0 0 1px rgba(255,176,32,.24),0 0 24px rgba(255,176,32,.12)}
   #qualifying-load .weather-choice:disabled{cursor:default;opacity:.68}
-  /* Pressed: it says so at once, then the whole row bows out over half a second
-     while the circuit keeps loading behind it. */
+  /* Pressed: it says so at once, and stays saying it. The row used to bow out
+     over half a second the moment you answered, which made a choice you were
+     allowed to change exactly once and only if you were quick. It stays put
+     now, lit, until the loading screen itself goes. */
   #qualifying-load .weather-choice.picked{background:rgba(215,38,56,.22);border-color:#d72638;
      box-shadow:0 0 0 1px rgba(215,38,56,.4),0 0 26px rgba(215,38,56,.22);transform:translateY(-2px)}
-  #qualifying-weather.answered{opacity:0;pointer-events:none;transform:translateY(-4px);
-     transition:opacity .5s ease,transform .5s ease}
   @media(max-width:600px){#qualifying-load .weather-options{grid-template-columns:1fr;max-width:280px;margin:auto;width:100%}
     #qualifying-load .weather-choice{min-height:0}}
   @keyframes qualifying-spin{to{transform:rotate(360deg)}}
@@ -789,27 +789,27 @@ if('serviceWorker' in navigator){
 <button id="joybtn">Connect Joystick</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
-  <div id="m2hint">Paint over the track &mdash; everything you paint counts as track
-    &middot; Erase to take it back &middot; drag the background to pan &middot; scroll to zoom &middot; hold &#8984; or click Pencil and draw a corner
-    &middot; drag the background to pan &middot; scroll to zoom</div>
+  <div id="m2hint">Click to drop a point, click again for the next &mdash; the line joins them up
+    &middot; drag a point to move it &middot; Shift-click a point to delete it
+    &middot; Enter or right-click ends the line &middot; Find walls reads them off the circuit
+    &middot; arrow keys to move about (Shift for further) &middot; scroll to zoom</div>
   <div id="m2bar">
-    <button id="m2paint" class="on">Paint track</button>
-    <button id="m2erase">Erase</button>
-    <button id="m2barr">Barriers</button>
-    <button id="m2reseed">Re-guess barriers</button>
-    <label id="m2radwrap">Size <b id="m2radval">6 m</b>
-      <input id="m2rad" type="range" min="1" max="30" step="1" value="6"></label>
-    <button id="m2clear">Clear paint</button>
-    <button id="m2lines">Lines</button>
+    <button id="m2wall" class="on">Draw walls</button>
+    <button id="m2find">Find walls</button>
+    <button id="m2wallclear">Clear walls</button>
+    <span id="m2info"></span>
+    <button id="m2undo2">Undo</button>
+    <button id="m2close">Done</button>
+    <!-- The track-limit line editor. Still wired up and still works, but it is
+         a second thing called "lines" in a panel that is now about walls, so it
+         is off the bar rather than out of the code: SIM.tlEdit() brings it
+         back if a lap ever gets called wrong and the edges need moving. -->
     <button id="m2in" style="display:none">Inside</button>
     <button id="m2out" style="display:none">Outside</button>
-    <span id="m2info"></span>
-    <label id="m2brushwrap">Brush <b id="m2brushval">25 m</b>
+    <label id="m2brushwrap" style="display:none">Brush <b id="m2brushval">25 m</b>
       <input id="m2brush" type="range" min="0" max="120" step="5" value="25"></label>
-    <button id="m2pen">Pencil</button>
-    <button id="m2undo2">Undo</button>
-    <button id="m2copy">Copy both</button>
-    <button id="m2close">Done</button>
+    <button id="m2pen" style="display:none">Pencil</button>
+    <button id="m2copy" style="display:none">Copy both</button>
   </div>
 </div>
 <div id="netwrap"><span class="ttlbl">Your code</span><b id="netcode">……</b></div>
@@ -4625,6 +4625,25 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   unlockAudio();                    // browsers only allow audio after a gesture
   keys[k]=true;
+  /* With the circuit open from above, the arrows walk the map about.
+
+     Panning was a drag on the background and nothing else, and the background
+     is only background where nothing has been painted -- over the circuit
+     itself every drag is a brush stroke, so getting from La Source to Blanchimont
+     meant zooming out until the whole lap fitted, dragging, and zooming back in.
+     Shift moves three times as far. The keys are swallowed here so they do not
+     also saw at the steering of the car parked behind the map. */
+  if(m2On && (k==='arrowup'||k==='arrowdown'||k==='arrowleft'||k==='arrowright')){
+    keys[k]=false;
+    const step=e.shiftKey?240:80;                 // canvas pixels, not metres
+    if(k==='arrowleft')       m2X+=step;
+    else if(k==='arrowright') m2X-=step;
+    else if(k==='arrowup')    m2Y+=step;
+    else                      m2Y-=step;
+    m2Draw();
+    e.preventDefault();
+    return;
+  }
   if(k===' '||e.code==='Space'){ LOOKBACK=true; e.preventDefault(); }
   if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus();
     const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on'); }
@@ -4638,7 +4657,9 @@ addEventListener('keydown',e=>{
     updateStatus(); }
   if(k==='n'){ markExport(); }
   if(k==='q'){ detailLevel=(detailLevel+1)%DETAILS.length; applyDetail(); }
-  if(TTREC.playing && (k==='w'||k==='s'||k==='escape')){ replayStop(); return; }
+  // touching a drive control stops a replay -- now that the arrows are drive
+  // controls again, they have to count as one too
+  if(TTREC.playing && (k==='w'||k==='s'||k==='arrowup'||k==='arrowdown'||k==='escape')){ replayStop(); return; }
   /* R does nothing. It used to put the car back on the line and start the lap
      again, which is a keystroke away from throwing away a lap you were in the
      middle of -- and it sits next to the keys you actually drive with. */
@@ -4647,8 +4668,13 @@ addEventListener('keydown',e=>{
      rather than a control -- so until now there was no way to reach the paint at
      all, which is why it could not be found. */
   if(k==='g' && FREEROAM && !TTREC.playing && !NET.watching){
-    if(!m2On) m2Tool=m2Tool||'paint';
+    if(!m2On){ m2Tool='wall'; wallEnd(); }   // G is the wall editor, nothing else
     m2Show(!m2On);
+  }
+  /* Enter finishes the line in hand without ending the session's editing, so
+     one wall follows another without touching the mouse. */
+  if(k==='enter' && m2On && m2Tool==='wall' && wallDraw){
+    wallEnd(); m2Draw(); m2Info(); m2Note('line ended'); e.preventDefault(); return;
   }
   /* Drawing the AI's lines: K puts the circuit on screen from above and takes
      it away again, and Esc is the same as K once you are in there. */
@@ -4781,6 +4807,12 @@ const CAMS=[
      the trim that used to be on the arrow keys and shift. Those controls are
      gone: this was the only place anybody left them, so it is the seat now. */
   {name:'Nose cam', p:[0,0.94,0.49], fov:70, zoom:10, shake:1.30},
+  /* Two chase cameras, not one. The old one sits nine and a half metres back
+     and over three metres up -- a long lens on a helicopter, good for seeing
+     the corner arrive and poor for feeling the car. Close chase drops in behind
+     the gearbox: near enough that the rear wing fills the bottom of the frame
+     and the car moves under you rather than in front of you. */
+  {name:'Close chase', chase:true, back:5.2, up:1.72, fov:72, zoom:9, shake:0.62},
   {name:'Chase',   chase:true, back:9.5, up:3.15, fov:64, zoom:8, shake:0.35},
   /* p and chase are the fallback: the trackside cameras are built a few
      seconds after the circuit loads, and pressing C into TV before then used
@@ -5550,7 +5582,7 @@ function clearGround(v,pad){
    what the car is judged against, and Copy hands you the numbers to keep. */
 let m2Vis=[];
 let m2Brush=25;
-let m2Tool='paint', m2Layer='track', m2Rad=6, m2PtrX=null, m2PtrY=null, m2Painting=false;                  // metres of line either side that come with a drag
+let m2Tool='wall', m2Rad=6, m2PtrX=null, m2PtrY=null, m2Painting=false;                  // metres of line either side that come with a drag
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
 const m2El=()=>document.getElementById('m2canvas');
 
@@ -5614,7 +5646,11 @@ function barrInit(){
   BARR.w=SURF.w; BARR.h=SURF.h; BARR.minx=SURF.minx; BARR.minz=SURF.minz;
   BARR.data=new Uint8Array(BARR.w*BARR.h);
   BARR.count=0;
-  if(!barrLoad()) barrSeed();
+  /* No seeding, and no loading. The grid used to be the thing you edited, so
+     it was filled with a guess at the barriers and saved between sessions.
+     It is now purely a rendering of the lines -- wallsBake writes it and
+     nothing else does -- so anything put here at startup would be wiped by the
+     first bake anyway, and would be a second set of walls in the meantime. */
   return true;
 }
 const barrIdx=(x,z)=>{
@@ -5702,8 +5738,333 @@ function barrUnpack(txt){
 }
 function barrSave(){ try{ localStorage.setItem(BARR_KEY, barrPack()); }catch(e){} }
 function barrLoad(){ try{ const t=localStorage.getItem(BARR_KEY); return t?barrUnpack(t):false; }catch(e){ return false; } }
-function barrClear(){ if(!BARR.data) return; BARR.data.fill(0); BARR.count=0; barrSave(); }
-function barrReseed(){ if(!BARR.data) return 0; BARR.data.fill(0); BARR.count=0; return barrSeed(); }
+/* Barriers get their own undo stack, the same shape as the track layer's.
+
+   They were sharing the track's: a barrier stroke recorded its changed cells
+   into SURF.rec and pointerup pushed them onto SURF_UNDO, so Undo after
+   painting a wall wrote barrier indices back into the *track* mask -- punching
+   holes in the circuit somewhere else entirely. The same stroke then called
+   surfSave and never barrSave, so the wall itself was gone on the next reload.
+   Painting barriers only looked like it worked while you stayed on the page. */
+const BARR_UNDO=[];
+function barrPush(whole){ BARR_UNDO.push(whole?{whole}:{cells:BARR.rec});
+                          if(BARR_UNDO.length>20) BARR_UNDO.shift(); }
+function barrUndo(){
+  const u=BARR_UNDO.pop();
+  if(!u) return false;
+  if(u.whole){
+    BARR.data.set(u.whole);
+    BARR.count=0;
+    for(let k=0;k<BARR.data.length;k++) if(BARR.data[k]) BARR.count++;
+  } else {
+    for(let i=u.cells.length-2;i>=0;i-=2){
+      const k=u.cells[i], was=u.cells[i+1];
+      if(BARR.data[k]&&!was) BARR.count--;
+      else if(!BARR.data[k]&&was) BARR.count++;
+      BARR.data[k]=was;
+    }
+  }
+  barrSave();
+  return true;
+}
+function barrClear(){ if(!BARR.data) return;
+  barrPush(BARR.data.slice());       // undoable, like clearing the track layer
+  BARR.data.fill(0); BARR.count=0; barrSave(); }
+function barrReseed(){ if(!BARR.data) return 0;
+  barrPush(BARR.data.slice());
+  BARR.data.fill(0); BARR.count=0; return barrSeed(); }
+
+/* ------------------------------------------------------------ barrier lines
+
+   Walls as lines with points you can drag, rather than cells you paint over.
+
+   Where the lines come from: the model already knows. buildHeightField walks
+   every triangle in the circuit and throws the vertical ones away on one line
+   -- "a wall, not a floor" -- because it is building a map of what the car
+   drives on. Those discarded triangles ARE the armco, the pit wall, the rock
+   face at Eau Rouge and the tyre stacks. Nothing has to be inferred from
+   elevation changes: the geometry is authored, and it was being deleted.
+
+   So the detector keeps what that one deletes -- near-vertical faces standing
+   at least half a metre tall -- flattens each to the line of its footprint,
+   and joins those thousands of little segments into a few hundred polylines.
+
+   Lines are the truth; the cell grid is downstream of them. Everything that
+   asks whether the car has hit something still asks barrOn(), and wallsBake()
+   paints the lines into that grid whenever they change. So the physics, the
+   damage model and the AI never learn that any of this happened. */
+const WALL_KEY='f1sim.walls.spa22';
+const WALLS=[];                    // polylines, each [{x,z},…], in model coords
+let wallDraw=null;                 // the line being drawn, or null
+let wallDrawIdx=-1;                // where that line lives in WALLS once it is real
+let wallSel=-1, wallSelPt=-1;      // the point being dragged
+/* Half a metre is the number: a kerb is under it, an armco is over it. A face
+   shorter than this is a rumble strip, a drain lip or the edge of a paint
+   line, and turning those into walls would fence the car onto the racing
+   line. */
+const WALL_MIN_H=0.5;
+const WALL_SNAP=1.5;               // endpoints inside this become one node
+const WALL_SIMPLIFY=1.0;           // a point that sits this close to the line it
+                                   // spans is not carrying any shape
+const WALL_MIN_LEN=8;              // shorter than a car and a half: signage, bins
+const WALL_NEAR=90;                // metres from the racing line; the paddock is
+                                   // full of walls nobody can reach
+const WALL_W=0.8;                  // half-width when the lines are baked to cells
+
+function wallsLen(line){ let d=0;
+  for(let i=0;i+1<line.length;i++) d+=Math.hypot(line[i+1].x-line[i].x, line[i+1].z-line[i].z);
+  return d; }
+function wallsTotal(){ let d=0; for(const l of WALLS) d+=wallsLen(l); return d; }
+
+/* Ramer-Douglas-Peucker. A wall traced off triangles has a point every metre
+   and a half; three of them in a straight line are two points too many, and
+   the whole promise here is that the result can be edited by hand. */
+function wallsSimplify(pts, tol){
+  if(pts.length<3) return pts.slice();
+  const keep=new Uint8Array(pts.length); keep[0]=keep[pts.length-1]=1;
+  const stack=[[0,pts.length-1]];
+  while(stack.length){
+    const [a,b]=stack.pop();
+    if(b<=a+1) continue;
+    const ax=pts[a].x, az=pts[a].z, bx=pts[b].x, bz=pts[b].z;
+    const dx=bx-ax, dz=bz-az, L=Math.hypot(dx,dz)||1;
+    let worst=-1, wi=-1;
+    for(let i=a+1;i<b;i++){
+      const d=Math.abs((pts[i].x-ax)*dz - (pts[i].z-az)*dx)/L;
+      if(d>worst){ worst=d; wi=i; }
+    }
+    if(worst>tol){ keep[wi]=1; stack.push([a,wi],[wi,b]); }
+  }
+  return pts.filter((_,i)=>keep[i]);
+}
+
+/* Every wall in the model, as lines. Slow enough to say so on screen -- it is
+   one pass over a circuit's worth of triangles -- and only ever run when asked. */
+function wallsDetect(){
+  if(!trackRoot) return {lines:0, tris:0, why:'the circuit is not loaded yet'};
+  const t0=performance.now();
+  /* Everything not near the circuit is thrown away: Spa's model comes with a
+     paddock, a campsite and half a village, none of which anybody can reach.
+
+     Stamped into a coarse grid rather than tested sample by sample: this runs
+     once per triangle over the whole circuit, and six hundred distance checks
+     a triangle is a hundred million of them for one press of a button. The
+     stamp is done once, and the test is then a single array read. */
+  const NC=30;                                  // metres a cell
+  const nearSet=new Set();
+  if(TT.curve){
+    const P=new THREE.Vector3(), r=Math.ceil(WALL_NEAR/NC);
+    for(let u=0;u<1;u+=1/600){
+      TT.curve.getPointAt(u,P);
+      const gx=Math.round(P.x/NC), gz=Math.round(P.z/NC);
+      for(let i=-r;i<=r;i++) for(let j=-r;j<=r;j++)
+        if(i*i+j*j<=r*r) nearSet.add((gx+i)+','+(gz+j));
+    }
+  }
+  const nearOK=(x,z)=>!nearSet.size ||
+    nearSet.has(Math.round(x/NC)+','+Math.round(z/NC));
+
+  /* Snapped node ids, so the thousands of triangles making up one run of armco
+     collapse onto a shared spine before anything tries to chain them. */
+  const nodes=new Map();                    // key -> {x,z,n}
+  const edges=new Map();                    // key -> Set(key)
+  const nodeAt=(x,z)=>{
+    const gx=Math.round(x/WALL_SNAP), gz=Math.round(z/WALL_SNAP);
+    const key=gx+','+gz;
+    let n=nodes.get(key);
+    if(!n){ n={x:0,z:0,n:0,key}; nodes.set(key,n); }
+    n.x+=x; n.z+=z; n.n++;                  // the average of what landed here
+    return key;
+  };
+  const link=(a,b)=>{
+    if(a===b) return;
+    if(!edges.has(a)) edges.set(a,new Set());
+    if(!edges.has(b)) edges.set(b,new Set());
+    edges.get(a).add(b); edges.get(b).add(a);
+  };
+
+  let seen=0, kept=0;
+  const v=new THREE.Vector3();
+  trackRoot.updateWorldMatrix(true,true);
+  trackRoot.traverse(o=>{
+    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
+    const g=o.geometry, pos=g.attributes.position, idx=g.index, m=o.matrixWorld;
+    const n=idx?idx.count:pos.count;
+    const P=new Float32Array(pos.count*3);
+    for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i).applyMatrix4(m);
+      P[i*3]=v.x; P[i*3+1]=v.y; P[i*3+2]=v.z; }
+    for(let t=0;t+2<n;t+=3){
+      seen++;
+      const a=idx?idx.getX(t):t, b=idx?idx.getX(t+1):t+1, c=idx?idx.getX(t+2):t+2;
+      const ax=P[a*3],ay=P[a*3+1],az=P[a*3+2],bx=P[b*3],by=P[b*3+1],bz=P[b*3+2],
+            cx=P[c*3],cy=P[c*3+1],cz=P[c*3+2];
+      const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const L=Math.hypot(nx,ny,nz); if(L<1e-9) continue;
+      /* The same test buildHeightField uses to discard, read the other way
+         round: this is a wall precisely when that one would have skipped it. */
+      if(!(ny/L<0.3 && -ny/L<0.3)) continue;
+      const hi=Math.max(ay,by,cy), lo=Math.min(ay,by,cy);
+      if(hi-lo < WALL_MIN_H) continue;                 // a lip, not a wall
+      /* Flattened: the two corners furthest apart on the ground are the line
+         this face stands on. */
+      const p=[[ax,az],[bx,bz],[cx,cz]];
+      let best=-1, bi=0, bj=1;
+      for(let i=0;i<3;i++) for(let j=i+1;j<3;j++){
+        const d=(p[i][0]-p[j][0])**2 + (p[i][1]-p[j][1])**2;
+        if(d>best){ best=d; bi=i; bj=j; }
+      }
+      if(best < 0.04) continue;                        // stood on a point
+      const x0=p[bi][0], z0=p[bi][1], x1=p[bj][0], z1=p[bj][1];
+      if(!nearOK(x0,z0) && !nearOK(x1,z1)) continue;
+      link(nodeAt(x0,z0), nodeAt(x1,z1));
+      kept++;
+    }
+  });
+
+  for(const n of nodes.values()){ n.x/=n.n; n.z/=n.n; }
+
+  /* Chains. Walk out of every node that is an end or a junction and follow the
+     degree-two run to wherever it stops; anything left over after that is a
+     closed loop, so start it anywhere. */
+  const used=new Set();
+  const edgeKey=(a,b)=>a<b?a+'|'+b:b+'|'+a;
+  const out=[];
+  const walk=(start,first)=>{
+    const line=[nodes.get(start)];
+    let prev=start, cur=first;
+    for(;;){
+      const k=edgeKey(prev,cur);
+      if(used.has(k)) break;
+      used.add(k);
+      line.push(nodes.get(cur));
+      const nb=edges.get(cur);
+      if(!nb || nb.size!==2) break;              // an end, or a junction
+      let nxt=null;
+      for(const q of nb) if(q!==prev) nxt=q;
+      if(!nxt || used.has(edgeKey(cur,nxt))) break;
+      prev=cur; cur=nxt;
+    }
+    return line;
+  };
+  for(const [key,nb] of edges){
+    if(nb.size===2) continue;                     // handled in the loop pass
+    for(const q of nb){
+      if(used.has(edgeKey(key,q))) continue;
+      out.push(walk(key,q));
+    }
+  }
+  for(const [key,nb] of edges){                   // whatever is left is a ring
+    for(const q of nb){
+      if(used.has(edgeKey(key,q))) continue;
+      out.push(walk(key,q));
+    }
+  }
+
+  WALLS.length=0;
+  for(const line of out){
+    const pts=line.filter(Boolean).map(n=>({x:n.x,z:n.z}));
+    if(pts.length<2) continue;
+    const s=wallsSimplify(pts, WALL_SIMPLIFY);
+    if(wallsLen(s) < WALL_MIN_LEN) continue;      // signage, bins, a wheelie bin
+    WALLS.push(s);
+  }
+  wallsSave(); wallsBake();
+  return {lines:WALLS.length, tris:seen, walls:kept,
+          metres:Math.round(wallsTotal()), ms:Math.round(performance.now()-t0)};
+}
+
+/* Load once, and bake once, whether or not the editor is ever opened -- the
+   walls have to stop the car on a lap driven straight from the loading screen.
+   Baking is what puts the lines into the grid barrCheck reads, so a session
+   that never opens the map still runs into them. */
+let wallsReady=false;
+function wallsInit(){
+  if(wallsReady) return WALLS.length;
+  if(!SURF.data && !surfInit()) return 0;    // the grid is not sized yet
+  wallsReady=true;
+  wallsLoad();
+  wallsBake();
+  return WALLS.length;
+}
+
+/* The lines, drawn into the cell grid the physics reads. Called on every edit,
+   so what stops the car is always exactly what is on screen. */
+function wallsBake(){
+  if(!barrInit()) return 0;
+  BARR.data.fill(0); BARR.count=0;
+  for(const line of WALLS)
+    for(let i=0;i+1<line.length;i++)
+      barrStroke(line[i].x, line[i].z, line[i+1].x, line[i+1].z, WALL_W, true);
+  barrSave();
+  return BARR.count;
+}
+function wallsSave(){ try{ localStorage.setItem(WALL_KEY,
+  JSON.stringify(WALLS.map(l=>l.map(p=>[+p.x.toFixed(2), +p.z.toFixed(2)])))); }catch(e){} }
+function wallsLoad(){
+  try{
+    const t=localStorage.getItem(WALL_KEY);
+    if(!t) return false;
+    const d=JSON.parse(t);
+    if(!Array.isArray(d)) return false;
+    WALLS.length=0;
+    for(const l of d) if(Array.isArray(l)&&l.length>1)
+      WALLS.push(l.map(p=>({x:+p[0], z:+p[1]})));
+    return true;
+  }catch(e){ return false; }
+}
+/* Undo, whole-state. The lines are a few thousand numbers, so keeping twenty
+   complete copies is cheaper than reasoning about what each edit touched --
+   and an edit here can be a drag, a delete or a detection pass that replaces
+   everything. */
+const WALL_UNDO=[];
+function wallsSnapshot(){
+  WALL_UNDO.push(JSON.stringify(WALLS));
+  if(WALL_UNDO.length>20) WALL_UNDO.shift();
+}
+function wallsUndo(){
+  const t=WALL_UNDO.pop();
+  if(t===undefined) return false;
+  const d=JSON.parse(t);
+  WALLS.length=0;
+  for(const l of d) WALLS.push(l.map(p=>({x:p.x, z:p.z})));
+  wallDraw=null; wallDrawIdx=-1; wallSel=-1; wallSelPt=-1;
+  wallsSave(); wallsBake();
+  return true;
+}
+
+/* ---- the line being drawn, and picking points up off the screen ---- */
+
+/* The line in progress lives in wallDraw until it has two points, at which
+   point it is a real entry in WALLS and every further click extends it in
+   place. Nothing is ever only in the drawing buffer, so closing the map or
+   pressing G by accident cannot lose a wall halfway through. */
+function wallCommit(){
+  if(!wallDraw || wallDraw.length<2) return;
+  if(wallDrawIdx<0){ WALLS.push(wallDraw); wallDrawIdx=WALLS.length-1; }
+  else WALLS[wallDrawIdx]=wallDraw;
+  wallsSave(); wallsBake();
+}
+function wallEnd(){
+  if(wallDraw && wallDraw.length<2 && wallDrawIdx<0){ /* a lone point: nothing */ }
+  wallDraw=null; wallDrawIdx=-1;
+}
+/* The point under the pointer, if there is one within grabbing distance.
+   Measured in screen pixels rather than metres so it stays grabbable at every
+   zoom -- at full-lap zoom a metre is a fraction of a pixel. */
+const WALL_GRAB=9;
+function wallHit(sx,sy){
+  let best=WALL_GRAB*WALL_GRAB, hit=null;
+  for(let li=0;li<WALLS.length;li++){
+    const line=WALLS[li];
+    for(let i=0;i<line.length;i++){
+      const dx=m2sx(line[i].x)-sx, dy=m2sy(line[i].z)-sy;
+      const d=dx*dx+dy*dy;
+      if(d<best){ best=d; hit={line:li, i}; }
+    }
+  }
+  return hit;
+}
 
 const surfIdx=(x,z)=>{
   const i=(x-SURF.minx)|0, j=(z-SURF.minz)|0;
@@ -5851,6 +6212,7 @@ function m2Show(on){
   if(w) w.classList.toggle('on',on);
   if(on){
     surfInit();
+    wallsInit();
     // the overlay matches the window, so the mapping is one canvas pixel to one
     const c=m2El();
     if(c){ c.width=Math.round(innerWidth); c.height=Math.round(innerHeight);
@@ -5893,41 +6255,13 @@ function m2Draw(){
      is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
 
-  /* What has been painted as track, under everything else. Only the cells in
-     view are walked, and only every nth one when zoomed out, so this costs the
-     same whether the mask is empty or the whole circuit is covered. */
-  if(SURF.data && SURF.count){
-    const step=Math.max(1, Math.round(1/Math.max(0.05,m2Sc)));
-    const wx0=m2wx(0), wx1=m2wx(c.width), wz0=m2wz(0), wz1=m2wz(c.height);
-    const i0=Math.max(0,Math.floor(wx0-SURF.minx)), i1=Math.min(SURF.w-1,Math.ceil(wx1-SURF.minx));
-    const j0=Math.max(0,Math.floor(wz0-SURF.minz)), j1=Math.min(SURF.h-1,Math.ceil(wz1-SURF.minz));
-    g.fillStyle='rgba(55,224,106,.30)';
-    const px=Math.max(1, m2Sc*step);
-    for(let j=j0;j<=j1;j+=step){
-      const y=m2sy(j+SURF.minz);
-      for(let i=i0;i<=i1;i+=step){
-        if(!SURF.data[j*SURF.w+i]) continue;
-        g.fillRect(m2sx(i+SURF.minx), y, px, px);
-      }
-    }
-  }
-  /* And the barriers over the top of it, in red, because that is the layer you
-     are correcting and it needs to be the one you can see. */
-  if(BARR.data && BARR.count){
-    const step=Math.max(1, Math.round(1/Math.max(0.05,m2Sc)));
-    const wx0=m2wx(0), wx1=m2wx(c.width), wz0=m2wz(0), wz1=m2wz(c.height);
-    const i0=Math.max(0,Math.floor(wx0-BARR.minx)), i1=Math.min(BARR.w-1,Math.ceil(wx1-BARR.minx));
-    const j0=Math.max(0,Math.floor(wz0-BARR.minz)), j1=Math.min(BARR.h-1,Math.ceil(wz1-BARR.minz));
-    g.fillStyle = m2Layer==='barrier' ? 'rgba(255,70,60,.85)' : 'rgba(255,70,60,.45)';
-    const px=Math.max(1, m2Sc*step);
-    for(let j=j0;j<=j1;j+=step){
-      const y=m2sy(j+BARR.minz);
-      for(let i=i0;i<=i1;i+=step){
-        if(!BARR.data[j*BARR.w+i]) continue;
-        g.fillRect(m2sx(i+BARR.minx), y, px, px);
-      }
-    }
-  }
+  /* No painted cells at all. The track mask and the barrier mask are both
+     still on disk and the track one still decides lap legality, but neither is
+     drawn and neither can be edited here any more: this panel is walls, and a
+     green wash over the whole circuit was the thing making it impossible to
+     line a wall up against the kerb underneath it. The cell grid is now purely
+     downstream of the lines -- see wallsBake. */
+
   /* The limit as the game enforces it, thin and pale under everything else. The
      line you drag is not quite the limit -- the floor under the width and the
      kerb walk on surveyed stretches both have a say -- and dragging a line
@@ -5956,6 +6290,47 @@ function m2Draw(){
       u===0?g.moveTo(x,y):g.lineTo(x,y);
     }
     g.stroke();
+  }
+
+  /* The walls. Drawn over everything because they are the only thing being
+     edited in here. Handles appear once you are close enough in to actually
+     hit one -- at full-lap zoom there are thousands of points and drawing a
+     square on each turns the circuit into a solid block. */
+  if(WALLS.length){
+    g.strokeStyle='rgba(255,70,60,.92)';
+    g.lineWidth=2; g.lineJoin='round'; g.lineCap='round';
+    g.beginPath();
+    for(const line of WALLS){
+      for(let i=0;i<line.length;i++){
+        const x=m2sx(line[i].x), y=m2sy(line[i].z);
+        i?g.lineTo(x,y):g.moveTo(x,y);
+      }
+    }
+    g.stroke();
+    if(m2Sc>0.55){
+      g.fillStyle='rgba(255,215,210,.95)';
+      const r=3;
+      for(const line of WALLS)
+        for(const p of line){
+          const x=m2sx(p.x), y=m2sy(p.z);
+          if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
+          g.fillRect(x-r, y-r, r*2, r*2);
+        }
+    }
+  }
+  /* The line in hand, in amber, with a band from the last point to the pointer
+     so it is obvious where the next click lands. */
+  if(m2Tool==='wall' && wallDraw && wallDraw.length){
+    g.strokeStyle='rgba(255,176,32,.95)'; g.lineWidth=2;
+    g.beginPath();
+    for(let i=0;i<wallDraw.length;i++){
+      const x=m2sx(wallDraw[i].x), y=m2sy(wallDraw[i].z);
+      i?g.lineTo(x,y):g.moveTo(x,y);
+    }
+    if(m2PtrX!=null) g.lineTo(m2PtrX, m2PtrY);
+    g.stroke();
+    g.fillStyle='rgba(255,176,32,.95)';
+    for(const p of wallDraw) g.fillRect(m2sx(p.x)-3, m2sy(p.z)-3, 6, 6);
   }
   // the other limit line, dim -- but with its own dots, because it is grabbable
   const other=m2Tool?[]:tleLines[1-m2Edge];
@@ -6031,14 +6406,15 @@ function m2Draw(){
 function m2Info(){
   const info=document.getElementById('m2info');
   if(!info) return;
-  if(m2Tool){
-    const km2=(SURF.count/1e6).toFixed(3);
-    info.textContent = SURF.count
-      ? (SURF.count.toLocaleString()+' m² painted · '+(SURF.count/7000).toFixed(1)+' m wide on average')
-      : 'Nothing painted yet — the old edge lines are still deciding laps';
+  if(m2Tool==='wall'){
+    let pts=0; for(const l of WALLS) pts+=l.length;
+    info.textContent = WALLS.length
+      ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
+         +pts.toLocaleString()+' points')
+      : 'No walls yet \u2014 Find walls reads them off the circuit, or click to draw one';
   } else {
     const pts=tleLines[m2Edge];
-    info.textContent=(m2Edge?'Outside':'Inside')+' · '+pts.length+' points · '+m2Vis.length+' handles';
+    info.textContent=(m2Edge?'Outside':'Inside')+' \u00b7 '+pts.length+' points \u00b7 '+m2Vis.length+' handles';
   }
 }
 function m2Hit(sx,sy){
@@ -6188,16 +6564,19 @@ function m2PenEnd(){
    edge at a time was the old behaviour and it meant remembering which one you
    had changed and doing it twice. */
 function m2Copy(quiet){
-  if(m2Tool){
-    const txt=surfPack();
+  /* The walls, as the model coordinates they are stored in -- so a set worth
+     keeping can be pasted somewhere permanent instead of living only in this
+     browser's localStorage. */
+  if(m2Tool==='wall'){
+    const txt=JSON.stringify(WALLS.map(l=>l.map(p=>[+p.x.toFixed(2), +p.z.toFixed(2)])));
     const msg=t=>{ const info=document.getElementById('m2info');
       if(info){ info.textContent=t; setTimeout(()=>m2Draw(),2600); } };
     if(navigator.clipboard&&navigator.clipboard.writeText)
       navigator.clipboard.writeText(txt).then(
-        ()=>msg('copied the painted track · '+SURF.count.toLocaleString()+' m² · '
-                +Math.round(txt.length/1024)+' KB'),
+        ()=>msg('copied '+WALLS.length+' walls · '+Math.round(wallsTotal()).toLocaleString()
+                +' m · '+Math.round(txt.length/1024)+' KB'),
         ()=>msg('copy blocked — it is in the console'));
-    console.log('painted track surface:\n'+txt);
+    console.log('barrier lines (model coordinates):\n'+txt);
     return txt;
   }
   /* gridToModel already hands back [x,z] rounded to the centimetre -- the same
@@ -6225,13 +6604,40 @@ function m2Init(){
   c.addEventListener('pointerdown',e=>{
     window._m2downs=(window._m2downs||0)+1;
     const [x,y]=pos(e);
-    if(m2Tool){
-      m2Painting=true; m2PtrX=x; m2PtrY=y;
-      SURF.rec=[];                       // everything this stroke changes
-
-      if(m2Layer==='barrier') barrDisc(m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
-      else                     surfDisc(m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
-      c.setPointerCapture(e.pointerId); m2Draw(); return;
+    if(m2Tool==='wall'){
+      /* Right-click, or a click with a line in progress and nowhere to go,
+         finishes the line rather than starting a stray one. */
+      if(e.button===2){ wallEnd(); m2Draw(); m2Info(); return; }
+      const hit=wallHit(x,y);
+      /* Shift on a point deletes it. A line down to one point is not a line,
+         so that removes the line. */
+      if(hit && e.shiftKey){
+        wallsSnapshot();
+        const line=WALLS[hit.line];
+        line.splice(hit.i,1);
+        if(line.length<2) WALLS.splice(hit.line,1);
+        wallsSave(); wallsBake(); m2Draw(); m2Info();
+        m2Note(line.length<2?'line removed':'point removed');
+        return;
+      }
+      /* An existing point under the pointer is grabbed, not added to. */
+      if(hit && !wallDraw){
+        wallsSnapshot();
+        wallSel=hit.line; wallSelPt=hit.i;
+        c.setPointerCapture(e.pointerId); m2Draw(); return;
+      }
+      /* Otherwise: a new point. The first one starts a line, and every one
+         after it extends the same line until it is ended. */
+      const wx=m2wx(x), wz=m2wz(y);
+      if(!wallDraw){ wallsSnapshot(); wallDraw=[{x:wx,z:wz}]; }
+      else {
+        wallDraw.push({x:wx,z:wz});
+        /* Two points is already a wall, so it is committed as soon as it is
+           one and kept up to date after that -- close the map mid-line and
+           what you drew is still there. */
+        wallCommit();
+      }
+      m2Draw(); m2Info(); return;
     }
     if(e.metaKey||e.ctrlKey||m2PenMode){ m2PenStart(x,y); c.setPointerCapture(e.pointerId); return; }
     m2Drag=m2Hit(x,y);
@@ -6241,12 +6647,14 @@ function m2Init(){
   });
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
-    if(m2Tool){
-      const lx=m2PtrX, ly=m2PtrY;
-      m2PtrX=x; m2PtrY=y;
-      if(m2Painting){
-        if(m2Layer==='barrier') barrStroke(m2wx(lx), m2wz(ly), m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
-        else                    surfStroke(m2wx(lx), m2wz(ly), m2wx(x), m2wz(y), m2Rad, m2Tool==='paint');
+    if(m2Tool==='wall'){
+      m2PtrX=x; m2PtrY=y;                 // the rubber band to the next point
+      if(wallSel>=0 && WALLS[wallSel] && WALLS[wallSel][wallSelPt]){
+        const p=WALLS[wallSel][wallSelPt];
+        p.x=m2wx(x); p.z=m2wz(y);
+      } else {
+        const h=wallHit(x,y);
+        c.style.cursor = h ? 'grab' : 'crosshair';
       }
       m2Draw(); return;
     }
@@ -6294,11 +6702,12 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
-    if(m2Painting){
-      m2Painting=false;
-      if(SURF.rec&&SURF.rec.length) surfPush();
-      SURF.rec=null;
-      surfSave(); m2Draw(); m2Info(); return;
+    if(m2Tool==='wall'){
+      if(wallSel>=0){                  // a point was being dragged
+        wallSel=-1; wallSelPt=-1;
+        wallsSave(); wallsBake(); m2Draw(); m2Info();
+      }
+      return;
     }
     if(m2Pen){ m2PenEnd(); return; }
     if(m2Drag>=0){
@@ -6309,6 +6718,8 @@ function m2Init(){
     }
     m2Drag=-1; m2Pan=false; m2Draw();
   });
+  // right-click ends a line, so it must not also open the browser's menu
+  c.addEventListener('contextmenu',e=>e.preventDefault());
   c.addEventListener('wheel',e=>{
     e.preventDefault();
     const [x,y]=pos(e);
@@ -7224,35 +7635,41 @@ document.getElementById('m2out').onclick=()=>{ m2Edge=1; m2EdgeButtons(); m2Draw
 function m2SetTool(t){
   m2Tool=t;
   const on=(id,v)=>{ const el=document.getElementById(id); if(el) el.classList.toggle('on',v); };
-  on('m2paint', t==='paint'); on('m2erase', t==='erase'); on('m2lines', !t);
-  ['m2in','m2out','m2pen','m2brushwrap'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.style.display=t?'none':''; });
-  const rw=document.getElementById('m2radwrap'); if(rw) rw.style.display=t?'':'none';
-  const cp=document.getElementById('m2copy'); if(cp) cp.textContent=t?'Copy paint':'Copy both';
-  const c=m2El(); if(c) c.style.cursor=t?'crosshair':'default';
+  on('m2wall', t==='wall');
+  const c=m2El(); if(c) c.style.cursor=t==='wall'?'crosshair':'default';
   m2Draw(); m2Info();
 }
-document.getElementById('m2paint').onclick=()=>{ m2Layer='track'; m2SetTool('paint'); };
-document.getElementById('m2barr').onclick=()=>{
-  barrInit(); m2Layer='barrier'; m2SetTool('paint');
-  m2Note(BARR.count+' m\u00b2 of barrier \u2014 erase what is wrong, paint what is missing');
+/* The wall bar. Draw is the default and the only paint-like thing left in
+   here: the track-surface brush and the barrier brush are both gone, replaced
+   by lines you can grab a point of and move. */
+document.getElementById('m2wall').onclick=()=>{ wallEnd(); m2SetTool('wall'); };
+/* Reading the walls off the circuit. It is one pass over every triangle in an
+   eighty-megabyte model, so the note goes up first and the work starts on the
+   next tick -- otherwise the browser paints neither and it looks hung. */
+document.getElementById('m2find').onclick=()=>{
+  m2Note('reading the walls off the circuit\u2026');
+  setTimeout(()=>{
+    wallsSnapshot();
+    const r=wallsDetect();
+    m2SetTool('wall'); m2Draw(); m2Info();
+    m2Note(r.why ? r.why
+      : r.lines+' walls found \u2014 '+r.metres.toLocaleString()+' m of them, off '
+        +r.walls.toLocaleString()+' upright faces, in '+(r.ms/1000).toFixed(1)+'s');
+  },60);
 };
-document.getElementById('m2reseed').onclick=()=>{
-  barrInit();
-  const n=barrReseed();
-  m2Layer='barrier'; m2SetTool('paint'); m2Draw(); m2Info();
-  m2Note('barriers guessed again from the track edges');
+document.getElementById('m2wallclear').onclick=()=>{
+  wallsSnapshot(); WALLS.length=0; wallEnd(); wallsSave(); wallsBake();
+  m2Draw(); m2Info(); m2Note('walls cleared');
 };
-document.getElementById('m2erase').onclick=()=>m2SetTool('erase');
-document.getElementById('m2lines').onclick=()=>m2SetTool(null);
-document.getElementById('m2clear').onclick=()=>{ surfClear(); m2Draw(); m2Info(); m2Note('paint cleared'); };
-document.getElementById('m2rad').addEventListener('input',e=>{
-  m2Rad=+e.target.value;
-  document.getElementById('m2radval').textContent=m2Rad+' m';
-  m2Draw();
-});
 document.getElementById('m2undo2').onclick=()=>{
-  if(m2Tool){ if(surfUndo()){ m2Draw(); m2Info(); m2Note('undone'); } else m2Note('nothing to undo'); return; }
+  if(m2Tool==='wall'){
+    /* A line being drawn undoes a point at a time; once it is finished, undo
+       goes back through whole edits. */
+    if(wallDraw&&wallDraw.length>1){ wallDraw.pop(); m2Draw(); m2Info(); m2Note('point taken back'); return; }
+    if(wallDraw){ wallEnd(); m2Draw(); m2Info(); m2Note('line abandoned'); return; }
+    if(wallsUndo()){ m2Draw(); m2Info(); m2Note('undone'); } else m2Note('nothing to undo');
+    return;
+  }
   m2Undo();
 };
 document.getElementById('m2copy').onclick=()=>m2Copy();
@@ -7300,6 +7717,10 @@ let _tlOff=0, _tlCounted=false, _tlLock=0;
    to use the wall as a braking aid. */
 let BARR_HIT=0;
 function barrCheck(dt){
+  /* Cheap after the first success, and it retries until the circuit is far
+     enough loaded to size the grid -- so the walls are live on a lap driven
+     straight out of the loading screen, without the map ever being opened. */
+  if(!wallsReady) wallsInit();
   if(!BARR.data||!BARR.count||CARPTS.length!==4) return false;
   if(BARR_HIT>0){ BARR_HIT=Math.max(0,BARR_HIT-dt); return true; }
   /* CARPTS are the car's corners in the CAR's own coordinates, not the
@@ -8056,13 +8477,16 @@ function placeCar(C, dt, t){
 }
 
 function drive(dt){
-  // up/down arrows now trim the seat height, so they are no longer throttle
-  // and brake -- W and S are the drive controls
+  /* Arrows drive as well as WASD. Up and down were taken off throttle and brake
+     to trim the seat height, then the seat trim was removed with the rest of
+     the old camera controls and nothing was ever put back on them -- so the
+     obvious keys on the keyboard did nothing at all while left and right went
+     on steering. Both sets are live: W/S or up/down, A/D or left/right. */
   /* Three ways in, and they do not fight: the keyboard, a PS5 or Xbox pad over
      the Gamepad API, and the Arduino stick over Web Serial. These two stay let
      rather than const because the serial stick reassigns them below. */
-  let thr = keys['w']||controllerAccel;
-  let brk = keys['s']||controllerBrake;
+  let thr = keys['w']||keys['arrowup']||controllerAccel;
+  let brk = keys['s']||keys['arrowdown']||controllerBrake;
   const lft = keys['a']||keys['arrowleft'];
   const rgt = keys['d']||keys['arrowright'];
 
@@ -10470,9 +10894,31 @@ window.SIM={
   limitsHit(){ limitsHit(); },
   tlLock(){ return +_tlLock.toFixed(2); },
   lookBack(){ return LOOKBACK; },
+  cams(){ return CAMS.map(c=>c.name); },
+  tvWhy(){ return { cams:tvCams.length, mode:camMode, name:CAMS[camMode].name,
+                    isTv:!!CAMS[camMode].tv, freeroam:FREEROAM, orbit, freeLook,
+                    playing:!!TTREC.playing, live:!!TT.live, drone:+TT.drone.toFixed(1),
+                    shot:tvShot?tvShot.i:null,
+                    car:[+carState.wx.toFixed(0), +carState.wz.toFixed(0)],
+                    s:+tvCarS().toFixed(0),
+                    frames:(TTREC.best&&TTREC.best.f)?TTREC.best.f.length:0,
+                    pt:+(TTREC.pt||0).toFixed(2),
+                    cam:[+camera.position.x.toFixed(0),+camera.position.y.toFixed(0),
+                         +camera.position.z.toFixed(0)] }; },
+  playBest(){ if(typeof replayStart==='function'){ replayStart(); return true; } return false; },
   barriers(){ barrInit();
     return {cells:BARR.count, w:BARR.w, h:BARR.h, hit:+BARR_HIT.toFixed(2)}; },
   barrSeedNow(){ barrInit(); return barrReseed(); },
+  /* The walls, from the console: what is there, find them again, and put the
+     track-limit line editor back on screen now that it is off the bar. */
+  walls(){ wallsInit();
+    return {lines:WALLS.length, metres:Math.round(wallsTotal()), cells:BARR.count}; },
+  wallsFind(){ return wallsDetect(); },
+  wallsCopy(){ return m2Copy(); },
+  tlEdit(){ m2SetTool(null); if(!m2On) m2Show(true);
+    ['m2in','m2out','m2pen','m2brushwrap','m2copy'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.style.display=''; });
+    return 'track-limit line editor is back on the bar'; },
   barrGaps(){
     /* Walk just outside the road all the way round and count how far you can
        get without meeting a wall. A dashed barrier shows up as gaps. */
@@ -11520,7 +11966,6 @@ function qualifyingLoadSetStatus(text){
 function qualifyingWeatherReset(){
   qualifyingWeatherChoice='';
   qualifyingStartQueued=false;
-  if(qualifyingWeatherEl) qualifyingWeatherEl.classList.remove('answered');
   qualifyingWeatherButtons.forEach(btn=>{
     btn.classList.remove('on');
     btn.classList.remove('picked');
@@ -11550,13 +11995,20 @@ function qualifyingBegin(){
 }
 function qualifyingChooseWeather(kind){
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
-  /* The answer is taken the moment you give it.
+  /* The answer is taken the moment you give it, and it can be given again.
 
      The panel appeared while the circuit was still loading, so a press could
      land before anything was ready to act on it and nothing visible happened --
-     you pressed again, and again. Now the choice is recorded and acknowledged
-     first, the panel marks what you picked and fades out, and the loading
-     carries on underneath. When it finishes it already has your answer.
+     you pressed again, and again. So the choice is recorded and acknowledged
+     first, and the loading carries on underneath; when it finishes it already
+     has your answer.
+
+     What it also used to do was fade the whole row out on that first press.
+     That made the light a question asked once: pick Night by accident and the
+     only way back was to reload the page. The row stays now, lit on whichever
+     you last pressed, and pressing another simply moves the light -- right up
+     until the circuit is ready and the session actually begins, which is what
+     qualifyingStartQueued above is guarding.
 
      Setting the sky is the part that needs a loaded scene, so it goes last and
      inside a guard: if it cannot run yet it is applied on the way in instead. */
@@ -11566,7 +12018,6 @@ function qualifyingChooseWeather(kind){
     btn.classList.toggle('picked',on);
     btn.setAttribute('aria-pressed',on?'true':'false');
   });
-  if(qualifyingWeatherEl) qualifyingWeatherEl.classList.add('answered');
   try{ applyTimeOfDay(kind); }catch(e){ /* not built yet; qualifyingBegin does it */ }
   if(qualifyingTrackReady) qualifyingBegin();
   else qualifyingLoadSetStatus('Loading '+(TRACK&&TRACK.name||'the circuit'));
