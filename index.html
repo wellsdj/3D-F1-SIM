@@ -796,6 +796,7 @@ if('serviceWorker' in navigator){
   <div id="m2bar">
     <button id="m2wall" class="on">Draw walls</button>
     <button id="m2find">Find walls</button>
+    <button id="m2findadd">Find more</button>
     <button id="m2wallclear">Clear walls</button>
     <span id="m2info"></span>
     <button id="m2wallcopy">Copy walls</button>
@@ -6021,6 +6022,36 @@ function wallsBake(){
       if(BARR.data[k] && SURF.data[k]){ BARR.data[k]=0; BARR.count--; cut++; }
     }
   }
+  /* And the surveyed road on top of the paint, because the paint is not
+     everywhere. Walls were not only crossing over the track, they were poking
+     INTO it -- a traced footprint that lands a metre inside the white line is
+     a wall in the middle of the road, and no amount of "is it above me" finds
+     that. The stations know how wide the road is at every four metres, from
+     the mesh itself, so the road is swept clear between each pair of them.
+
+     Only the inside is cleared, plus a small margin. A barrier standing hard
+     against the kerb -- the Bus Stop, the pit wall -- is outside dR/dL and
+     survives, which is the whole point of using the measured width rather than
+     a fixed corridor. */
+  if(typeof tlSt!=='undefined' && tlSt.length){
+    const M=0.6;                     // margin, so nothing shaves the white line
+    for(let i=0;i<tlSt.length;i++){
+      const s=tlSt[i], n=tlSt[(i+1)%tlSt.length];
+      const steps=Math.max(1, Math.ceil(Math.hypot(n.x-s.x, n.z-s.z)/0.8));
+      for(let q=0;q<=steps;q++){
+        const t=q/steps;
+        const cx=s.x+(n.x-s.x)*t, cz=s.z+(n.z-s.z)*t;
+        const rx=s.rx, rz=s.rz;
+        const wR=s.dR+M, wL=s.dL+M;
+        const across=Math.ceil((wR+wL)/0.8);
+        for(let a=0;a<=across;a++){
+          const o=-wL+(wR+wL)*a/across;
+          const k=barrIdx(cx+rx*o, cz+rz*o);
+          if(k>=0 && BARR.data[k]){ BARR.data[k]=0; BARR.count--; cut++; }
+        }
+      }
+    }
+  }
   BARR_ONTRACK=cut;
   barrSave();
   return BARR.count;
@@ -7758,6 +7789,53 @@ document.getElementById('m2wallsave').onclick=()=>{
   setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1000);
   m2Note(WALLS.length+' walls saved to spa22-walls.json · '+wallsSize(txt));
 };
+/* Scan again and keep what is already there.
+
+   Find walls replaces everything, which is the wrong tool once a set has been
+   edited by hand: a stretch the detector missed cannot be picked up without
+   throwing away every correction made since. This runs the same pass and adds
+   only the lines that are not already covered -- a detected line whose whole
+   length already sits within a couple of metres of an existing wall is a
+   duplicate and is dropped. */
+document.getElementById('m2findadd').onclick=()=>{
+  m2Note('scanning again, keeping yours…');
+  setTimeout(()=>{
+    const mine=WALLS.map(l=>l.map(p=>({x:p.x,z:p.z})));
+    wallsSnapshot();
+    const r=wallsDetect();                       // this replaces WALLS
+    const found=WALLS.map(l=>l.map(p=>({x:p.x,z:p.z})));
+    /* A cell set of what is already walled, at two metres, so "is this new"
+       is an array read rather than a search over every existing line. */
+    const G=2, seen=new Set();
+    const key=(x,z)=>Math.round(x/G)+','+Math.round(z/G);
+    for(const l of mine)
+      for(let i=0;i+1<l.length;i++){
+        const d=Math.hypot(l[i+1].x-l[i].x, l[i+1].z-l[i].z);
+        const n=Math.max(1,Math.ceil(d/1));
+        for(let q=0;q<=n;q++)
+          seen.add(key(l[i].x+(l[i+1].x-l[i].x)*q/n, l[i].z+(l[i+1].z-l[i].z)*q/n));
+      }
+    let added=0;
+    const out=mine;
+    for(const l of found){
+      let novel=0, total=0;
+      for(let i=0;i+1<l.length;i++){
+        const d=Math.hypot(l[i+1].x-l[i].x, l[i+1].z-l[i].z);
+        const n=Math.max(1,Math.ceil(d/1));
+        for(let q=0;q<=n;q++){
+          total++;
+          if(!seen.has(key(l[i].x+(l[i+1].x-l[i].x)*q/n, l[i].z+(l[i+1].z-l[i].z)*q/n))) novel++;
+        }
+      }
+      if(total && novel/total > 0.5){ out.push(l); added++; }
+    }
+    WALLS.length=0; for(const l of out) WALLS.push(l);
+    wallsSave(); wallsBake(); m2SetTool('wall'); m2Draw(); m2Info();
+    m2Note(r.why ? r.why
+      : added+' new walls added, '+mine.length+' of yours kept ('
+        +(r.lines-added)+' were already there)');
+  },60);
+};
 document.getElementById('m2wallclear').onclick=()=>{
   wallsSnapshot(); WALLS.length=0; wallEnd(); wallsSave(); wallsBake();
   m2Draw(); m2Info(); m2Note('walls cleared');
@@ -7830,6 +7908,18 @@ let BARR_LURCH=0, BARR_SHAKE=0;
 let BARR_DMG=0;                 // metres per second off the top speed
 const BARR_DMG_MAX=22;          // about 80 kph, and no worse however many times
 const BARR_DMG_PER=0.16;        // of the speed carried in, kept as damage
+/* The line between a scrape and a shunt, measured as closing speed INTO the
+   wall's face rather than speed along the road. 11 m/s is about 40 kph: run
+   down a barrier at 300 kph at ten degrees and you are pushing 15 m/s into it,
+   which scrapes; turn thirty degrees into the same wall and it is 45, which
+   stops you. The angle does the work, which is what makes it feel like
+   physics rather than a trigger.
+
+   18 m/s is 65 kph of closing speed. It was 11, and at racing speed that is
+   within seven degrees of parallel -- so nearly everything that touched a
+   barrier still counted as a shunt and the distinction did nothing. */
+const BARR_SHUNT=18;
+let BARR_SPARK=0;               // rate limit for scrape sparks
 
 /* Is any corner of the car inside a wall, for a pose the car might take?
    Asked about poses the car has not moved to yet, which is what makes the
@@ -7898,6 +7988,7 @@ function barrCheck(dt){
   if(!wallsReady) wallsInit();
   BARR_LURCH*=Math.pow(0.02, dt/0.55);
   BARR_SHAKE*=Math.pow(0.02, dt/0.75);
+  if(BARR_SPARK>0) BARR_SPARK-=dt;
   if(BARR_HIT>0) BARR_HIT=Math.max(0,BARR_HIT-dt);
   if(!BARR.data||!BARR.count||CARPTS.length!==4) return false;
 
@@ -7921,32 +8012,115 @@ function barrCheck(dt){
   }
   if(!hit){ _bx=x1; _bz=z1; _bh=h; return false; }
 
-  /* Stopped. The car is put back to the last pose that was clear -- a hair
-     short of the wall, never inside it -- and everything that was moving it is
-     taken away, including the shove from any car that was leaning on it. */
+  /* WHICH WAY THE WALL FACES.
+
+     Everything below depends on this. A wall is only a wall in one direction:
+     arriving square into it is a shunt, and running down it at ten degrees is
+     a scrape that costs paint and a little speed. Without a normal the code
+     cannot tell those apart, and it treated both as the end of the race.
+
+     Taken from the grid rather than from the lines: finding the nearest of
+     4,333 polylines every frame needs an index nobody has built, while the
+     cells are already a spatial index and the answer is 48 array reads. Each
+     occupied cell nearby pulls the normal away from itself, weighted by
+     distance, so the result points out of the wall's face. */
+  function barrNormal(x,z){
+    let nx=0, nz=0, found=0;
+    for(let j=-3;j<=3;j++) for(let i=-3;i<=3;i++){
+      if(!i && !j) continue;
+      if(!barrOn(x+i, z+j)) continue;
+      const d=Math.hypot(i,j);
+      nx-=i/(d*d); nz-=j/(d*d); found++;
+    }
+    if(!found) return null;
+    const L=Math.hypot(nx,nz);
+    return L>1e-6 ? {x:nx/L, z:nz/L} : null;
+  }
+
   const v=carState.speed;
+  const hx=Math.sin(h), hz=Math.cos(h);
+  /* Where the car actually met it -- half a step past the last clear pose --
+     and which way that face points. Falling back to "straight back the way we
+     came" keeps a hit meaningful when the normal cannot be read. */
+  let nrm=barrNormal(okX+hx*0.9, okZ+hz*0.9) || barrNormal(okX, okZ);
+  if(!nrm) nrm={x:-hx, z:-hz};
+  /* Closing speed along the face. This is the only number that decides what
+     kind of contact this was: cos(0) into a wall at 300 kph is a shunt, and
+     the same 300 kph at ten degrees is 14 m/s of it, which is a scrape. */
+  const into=-(hx*nrm.x + hz*nrm.z);
+  const vN=Math.max(0, v*into);
+
+  _bx=okX; _bz=okZ; _bh=h;
+
+  /* ---- A SCRAPE. Under the threshold it does not stop you. ----
+
+     The car keeps the part of its velocity that runs ALONG the wall and loses
+     the part going into it, which is what a car sliding down an armco does.
+     It is nudged back out along the face so it is not left resting inside,
+     and it is allowed to keep moving: the tangential part of this frame's
+     movement is applied from the last clear pose, so the car travels down the
+     barrier instead of stopping dead against it. */
+  if(vN < BARR_SHUNT){
+    const tx=hx+nrm.x*into, tz=hz+nrm.z*into;       // heading, flattened onto the face
+    const tl=Math.hypot(tx,tz);
+    if(tl>1e-4){
+      const ux=tx/tl, uz=tz/tl;
+      const travel=Math.hypot(x1-_bx, z1-_bz) || (v*dt);
+      /* Try to slide. If the wall curves in and the slide is blocked too, the
+         car simply stays where it was -- it never ends up inside anything. */
+      const sx=okX+ux*travel, sz=okZ+uz*travel;
+      if(!barrBlocked(sx,sz,h)){ carState.wx=sx; carState.wz=sz; _bx=sx; _bz=sz; }
+      else { carState.wx=okX; carState.wz=okZ; }
+    } else { carState.wx=okX; carState.wz=okZ; }
+
+    /* Speed: the normal component is gone, and the rest is scrubbed at a rate
+       PER SECOND, not per frame.
+
+       Per frame was wrong and badly so: a shallow scrape touches the wall on
+       every frame it is alongside it, so a fixed fraction each time compounds
+       at sixty times a second. A seventy-metre slide down an armco -- a second
+       and a bit -- took a car from 324 kph to a standstill, which is exactly
+       the stopping-dead this was written to stop doing. */
+    const rate=clamp(0.04 + vN*0.035, 0.04, 0.5);      // fraction lost per second
+    const keep=Math.max(0, 1 - rate*dt);
+    carState.speed=Math.max(0, Math.sqrt(Math.max(0, v*v - vN*vN)) * keep);
+    /* And it bounces off, gently, as a shove rather than a teleport -- the
+       same channel a car leaning on you uses, so it drifts you off line and
+       has to be caught. */
+    PLAYER.bumpX += nrm.x*(0.8+vN*0.22);
+    PLAYER.bumpZ += nrm.z*(0.8+vN*0.22);
+    /* Sparks the whole way down it, not once: grinding along a barrier throws
+       them continuously. Rate-limited so a long scrape does not empty the
+       pool, and scaled by how hard it is leaning in. */
+    if(vN>1.5 && BARR_SPARK<=0){
+      BARR_SPARK=0.05;
+      const y=(carGroup?carGroup.position.y:0)+0.2;
+      spawnSparks(carState.wx-nrm.x*1.0, y, carState.wz-nrm.z*1.0, clamp(vN/40,0.04,0.30));
+    }
+    BARR_SHAKE=Math.max(BARR_SHAKE, clamp(vN*0.10,0,1.6));
+    return true;
+  }
+
+  /* ---- A SHUNT. Square into it, and that is the race. ---- */
   carState.wx=okX; carState.wz=okZ;
   carState.speed=0;
   PLAYER.bumpX=0; PLAYER.bumpZ=0;
   PLAYER.carVY=0;
-  _bx=okX; _bz=okZ; _bh=h;
 
-  /* Sitting against it costs nothing and says nothing: only an actual arrival
-     counts as a hit, and only once every couple of seconds. */
-  if(BARR_HIT>0 || v<1.2) return true;
+  if(BARR_HIT>0) return true;
   BARR_HIT=2.0;
 
-  const power=clamp(v/80, 0, 1);            // 0 at a crawl, 1 at 290 kph
-  BARR_DMG=Math.min(BARR_DMG_MAX, BARR_DMG + v*BARR_DMG_PER);
+  const power=clamp(vN/80, 0, 1);           // by the closing speed, not the road speed
+  BARR_DMG=Math.min(BARR_DMG_MAX, BARR_DMG + vN*BARR_DMG_PER);
   /* The weight goes forward. A lurch the camera folds into its pitch, and a
      burst of violence on top of the usual cockpit buzz, both proportional to
-     how fast it arrived -- at walking pace it is a nudge, at speed the horizon
+     how hard it arrived -- at walking pace it is a nudge, at speed the horizon
      drops out of the frame. */
   BARR_LURCH=Math.max(BARR_LURCH, 0.045+power*0.30);
   BARR_SHAKE=Math.max(BARR_SHAKE, power*9);
   const y=(carGroup?carGroup.position.y:0)+0.25;
-  spawnSparks(carState.wx+Math.sin(h)*1.9, y, carState.wz+Math.cos(h)*1.9, power);
-  if(typeof hitBarrier==='function') hitBarrier(Math.min(28, v));
+  spawnSparks(carState.wx+hx*1.9, y, carState.wz+hz*1.9, power);
+  if(typeof hitBarrier==='function') hitBarrier(Math.min(28, vN));
   if(typeof ttVoid==='function') ttVoid('into the barrier');
   const el=document.getElementById('limwarn');
   if(el){
