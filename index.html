@@ -5998,9 +5998,34 @@ function wallsBake(){
   for(const line of WALLS)
     for(let i=0;i+1<line.length;i++)
       barrStroke(line[i].x, line[i].z, line[i+1].x, line[i+1].z, WALL_W, true);
+  /* NOTHING ON THE TRACK IS A BARRIER.
+
+     The detector finds walls by looking for upright faces, and some of them
+     are directly over the racing surface: the timing gantry across the start
+     line, the bridges, the pit-lane overhang. They are walls by every test it
+     has -- tall, vertical, near the circuit -- and driving under one ended the
+     race on the straight at full speed.
+
+     Height cannot separate them, because the gantry's legs are real barriers
+     and its span is not, and both stand in the same footprint once flattened.
+     What does separate them is already in this file and costs nothing: the
+     painted track surface. It is the one authored statement of where the road
+     is, it lives on the same grid as this one cell for cell, and it is an
+     array read. Any barrier cell standing on painted track is removed.
+
+     Done here rather than in the lines themselves so the lines stay exactly as
+     drawn -- what is subtracted is the collision, not your work. */
+  let cut=0;
+  if(SURF.data && SURF.count && SURF.w===BARR.w && SURF.h===BARR.h){
+    for(let k=0;k<BARR.data.length;k++){
+      if(BARR.data[k] && SURF.data[k]){ BARR.data[k]=0; BARR.count--; cut++; }
+    }
+  }
+  BARR_ONTRACK=cut;
   barrSave();
   return BARR.count;
 }
+let BARR_ONTRACK=0;      // cells dropped for standing on the road, last bake
 /* One line is one flat run of numbers -- x,z,x,z -- rather than an array of
    pairs. Same coordinates to the centimetre, about half the characters, and
    the difference matters because this text is meant to be handed over: pasted
@@ -6454,7 +6479,8 @@ function m2Info(){
     let pts=0; for(const l of WALLS) pts+=l.length;
     info.textContent = WALLS.length
       ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
-         +pts.toLocaleString()+' points')
+         +pts.toLocaleString()+' points'
+         +(BARR_ONTRACK?' \u00b7 '+BARR_ONTRACK.toLocaleString()+' m\u00b2 over the road, not solid':''))
       : 'No walls yet \u2014 Find walls reads them off the circuit, or click to draw one';
   } else {
     const pts=tleLines[m2Edge];
@@ -11105,7 +11131,8 @@ window.SIM={
   /* The walls, from the console: what is there, find them again, and put the
      track-limit line editor back on screen now that it is off the bar. */
   walls(){ wallsInit();
-    return {lines:WALLS.length, metres:Math.round(wallsTotal()), cells:BARR.count}; },
+    return {lines:WALLS.length, metres:Math.round(wallsTotal()), cells:BARR.count,
+            onTrackDropped:BARR_ONTRACK, painted:SURF.count}; },
   wallsFind(){ return wallsDetect(); },
   wallsCopy(){ return m2Copy(); },
   tlEdit(){ m2SetTool(null); if(!m2On) m2Show(true);
