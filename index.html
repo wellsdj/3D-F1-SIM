@@ -798,6 +798,7 @@ if('serviceWorker' in navigator){
     <button id="m2find">Find walls</button>
     <button id="m2findadd">Find more</button>
     <button id="m2wallclear">Clear walls</button>
+    <button id="m2gaps">Show gaps</button>
     <span id="m2info"></span>
     <button id="m2wallcopy">Copy walls</button>
     <button id="m2wallsave">Save walls</button>
@@ -5977,6 +5978,71 @@ function wallsDetect(){
           metres:Math.round(wallsTotal()), ms:Math.round(performance.now()-t0)};
 }
 
+/* ------------------------------------------------------- where walls are NOT
+
+   The detector finds the walls that exist in the model, and around much of
+   this circuit there are none: measured over the lap, 64% of the left-hand
+   side and 70% of the right have no barrier within 25 m. No amount of work on
+   the collision changes that, and a fence offset from the track cannot close
+   it either -- it has to be cut wherever it would cross the road, and one gap
+   lets a car reach everything outside.
+
+   What can be done is to show exactly where the holes are, so they can be
+   drawn in by somebody who can see the circuit. That is what this is: every
+   four metres round the lap, look left and right for a wall within reach, and
+   mark the places that have none. Draw over the marks, and the marks go away.
+
+   The stations are the same ones track limits use, so this costs one pass over
+   about 1,750 points and nothing per frame. */
+const GAP_REACH=25;             // no wall within this is a gap worth showing
+const GAP_MIN=12;               // and only runs at least this long are worth drawing
+let GAPS=null;                  // [[{x,z},{x,z}...]] -- a band down each open stretch
+function wallsGaps(force){
+  if(GAPS && !force) return GAPS;
+  GAPS=[];
+  if(typeof tlSt==='undefined' || !tlSt.length || !SEG.n) return GAPS;
+  const n=tlSt.length;
+  /* Grouped into RUNS, not marked station by station. Two thirds of this lap
+     has no barrier within 25 m, so a mark every four metres carpets the map
+     and tells you nothing about where to start. A band down each open stretch
+     of twelve metres or more is a target you can actually draw over. */
+  for(const side of [1,-1]){
+    const open=new Array(n);
+    for(let i=0;i<n;i++){
+      const s=tlSt[i], rx=s.rx*side, rz=s.rz*side;
+      const from=(side>0?s.dR:s.dL)+1;
+      let found=false;
+      for(let d=from; d<=GAP_REACH && !found; d+=1.5){
+        const px=s.x+rx*d, pz=s.z+rz*d;
+        const list=segsAround(px,pz,3);
+        for(let q=0;q<list.length;q++){
+          const t=list[q];
+          const ax=SEG.x0[t], az=SEG.z0[t], ux=SEG.x1[t]-ax, uz=SEG.z1[t]-az;
+          const L2=ux*ux+uz*uz;
+          let u = L2>1e-9 ? ((px-ax)*ux+(pz-az)*uz)/L2 : 0;
+          u = u<0?0:(u>1?1:u);
+          const dx=px-(ax+ux*u), dz=pz-(az+uz*u);
+          if(dx*dx+dz*dz < 9){ found=true; break; }
+        }
+      }
+      open[i]=!found;
+    }
+    let run=[];
+    for(let i=0;i<=n;i++){
+      if(i<n && open[i]){
+        const s=tlSt[i], rx=s.rx*side, rz=s.rz*side;
+        const from=(side>0?s.dR:s.dL)+3;
+        run.push({x:s.x+rx*from, z:s.z+rz*from});
+      } else {
+        if(run.length*TL_STEP>=GAP_MIN) GAPS.push(run);
+        run=[];
+      }
+    }
+  }
+  return GAPS;
+}
+let m2ShowGaps=false;
+
 /* Load once, and bake once, whether or not the editor is ever opened -- the
    walls have to stop the car on a lap driven straight from the loading screen.
    Baking is what puts the lines into the grid barrCheck reads, so a session
@@ -6215,7 +6281,7 @@ function wallsUndo(){
   WALLS.length=0;
   for(const l of d) WALLS.push(l.map(p=>({x:p.x, z:p.z})));
   wallDraw=null; wallDrawIdx=-1; wallSel=-1; wallSelPt=-1;
-  wallsSave(); wallsBake();
+  wallsSave(); wallsBake(); GAPS=null;
   return true;
 }
 
@@ -6230,6 +6296,7 @@ function wallCommit(){
   if(wallDrawIdx<0){ WALLS.push(wallDraw); wallDrawIdx=WALLS.length-1; }
   else WALLS[wallDrawIdx]=wallDraw;
   wallsSave(); wallsBake();
+  GAPS=null;                    // a wall was drawn: the gaps are stale
 }
 function wallEnd(){
   if(wallDraw && wallDraw.length<2 && wallDrawIdx<0){ /* a lone point: nothing */ }
@@ -6483,7 +6550,9 @@ function m2Draw(){
      hit one -- at full-lap zoom there are thousands of points and drawing a
      square on each turns the circuit into a solid block. */
   if(WALLS.length){
-    g.strokeStyle='rgba(255,70,60,.92)';
+    /* Faded right back while the gaps are showing, so what is left on screen
+       is the thing to be drawn rather than the thing already done. */
+    g.strokeStyle=m2ShowGaps?'rgba(255,70,60,.22)':'rgba(255,70,60,.92)';
     g.lineWidth=2; g.lineJoin='round'; g.lineCap='round';
     g.beginPath();
     for(const line of WALLS){
@@ -6493,7 +6562,7 @@ function m2Draw(){
       }
     }
     g.stroke();
-    if(m2Sc>0.55){
+    if(m2Sc>0.55 && !m2ShowGaps){
       g.fillStyle='rgba(255,215,210,.95)';
       const r=3;
       for(const line of WALLS)
@@ -6504,6 +6573,24 @@ function m2Draw(){
         }
     }
   }
+  /* The gaps: every place round the lap with no barrier within reach, drawn as
+     a bar sticking out of the track on the side that is open. Draw a wall over
+     one and it stops being a gap the next time they are counted. */
+  if(m2ShowGaps){
+    const gaps=wallsGaps();
+    g.strokeStyle='rgba(90,220,255,.9)';
+    g.lineWidth=4; g.lineCap='round'; g.lineJoin='round';
+    g.beginPath();
+    for(const run of gaps){
+      for(let i=0;i<run.length;i++){
+        const x=m2sx(run[i].x), y=m2sy(run[i].z);
+        i?g.lineTo(x,y):g.moveTo(x,y);
+      }
+    }
+    g.stroke();
+    g.lineWidth=2;
+  }
+
   /* The line in hand, in amber, with a band from the last point to the pointer
      so it is obvious where the next click lands. */
   if(m2Tool==='wall' && wallDraw && wallDraw.length){
@@ -6597,6 +6684,7 @@ function m2Info(){
     info.textContent = WALLS.length
       ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
          +pts.toLocaleString()+' points'
+         +(m2ShowGaps&&GAPS?' \u00b7 '+GAPS.length+' gaps left':'')
          +(BARR_ONTRACK?' \u00b7 '+BARR_ONTRACK.toLocaleString()+' m\u00b2 not solid ('
             +BARR_ONPAINT.toLocaleString()+' your paint, '+BARR_ONROAD.toLocaleString()
             +' the survey)':''))
@@ -7923,6 +8011,19 @@ document.getElementById('m2findadd').onclick=()=>{
       : added+' new walls added, '+mine.length+' of yours kept ('
         +(r.lines-added)+' were already there)');
   },60);
+};
+document.getElementById('m2gaps').onclick=()=>{
+  m2ShowGaps=!m2ShowGaps;
+  document.getElementById('m2gaps').classList.toggle('on', m2ShowGaps);
+  if(m2ShowGaps){
+    m2Note('finding the gaps\u2026');
+    setTimeout(()=>{
+      const n=wallsGaps(true).length;
+      m2Draw(); m2Info();
+      m2Note(n ? n+' stretches with no barrier within '+GAP_REACH+' m \u2014 draw over the blue'
+                : 'no gaps: every part of the lap has a barrier within '+GAP_REACH+' m');
+    },50);
+  } else { m2Draw(); m2Info(); m2Note('gaps hidden'); }
 };
 document.getElementById('m2wallclear').onclick=()=>{
   wallsSnapshot(); WALLS.length=0; wallEnd(); wallsSave(); wallsBake();
