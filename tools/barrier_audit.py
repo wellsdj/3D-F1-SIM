@@ -181,12 +181,26 @@ def main():
                 blocked |= val(barr, p + N * lx + T * lz) == 1
         free[:, a] = (~blocked) & (val(surf, p) == 1)
     widest = np.zeros(n)
+    lo = np.zeros(n); hi = np.zeros(n)
     for i in range(n):
         best = cur = 0.0
-        for v in free[i]:
-            cur = cur + 0.25 if v else 0.0
-            best = max(best, cur)
+        bend = end = 0
+        for a, v in enumerate(free[i]):
+            if v:
+                cur += 0.25
+                end = a
+            else:
+                cur = 0.0
+            if cur > best:
+                best, bend = cur, end
         widest[i] = best
+        # WHERE the widest run is, not just how wide. Placing cars at
+        # +/- widest/2 from the centreline assumed the run was centred on it,
+        # and it is not: on a corner the clear track is all to one side, so the
+        # outermost cars were being driven off the road and into the barriers
+        # that are correctly there. The bounds are carried now.
+        hi[i] = OFF[bend]
+        lo[i] = OFF[bend] - best + 0.25
     walled = int((widest < CAR_W).sum())
     print(f'\nclear corridor: median {np.median(widest):.1f} m, worst '
           f'{widest.min():.1f} m at ({C[int(np.argmin(widest)), 0]:.0f}, '
@@ -259,6 +273,49 @@ def main():
             print(f'  {name:<22} clean lap')
     print(f'  total {total} contacts, {on_road} of them with a wall ON the road '
           f'(the rest are the car off the road into a wall at the edge)')
+
+    # ---- 3b. the whole field at once
+    """Ten cars, not one.
+
+    A single car down the middle proves the middle is clear and nothing else.
+    A race is ten cars spread across the road, each on its own line, and the
+    ones that matter are the outside two -- they run where the barriers are.
+    They are staggered down the lap as well as across it so they are sampling
+    ten different parts of the circuit at any moment, the way a field is."""
+    FIELD = 10
+    print(f'\nthe full field, {FIELD} cars at once:')
+    field_hits, field_on_road = 0, 0
+    worst_car = None
+    for c in range(FIELD):
+        # spread across whatever road is actually there, not a fixed metre
+        frac = (c / (FIELD - 1)) * 2 - 1                 # -1 .. +1
+
+        def line(i, frac=frac):
+            # The corridor has to be read at the point the car IS. A stagger
+            # down the lap was mixing the two -- the offset for metre i came
+            # from the clear track at metre i+lead, which on a corner is the
+            # far side of the road, so cars were being steered into walls that
+            # are correctly there. Every car drives the whole lap anyway, so a
+            # stagger buys nothing a collision audit can use.
+            j = i
+            a = lo[j] + CAR_HALF_W + 0.1        # inside edge of the usable road
+            b = hi[j] - CAR_HALF_W - 0.1        # outside edge
+            if b < a:
+                return (lo[j] + hi[j]) / 2
+            return a + (b - a) * (frac + 1) / 2
+
+        h = lap(line)
+        on = 0
+        for _, x, z, _ in h:
+            i2, j2 = int(math.floor(x - MINX)), int(math.floor(z - MINZ))
+            if 0 <= i2 < W and 0 <= j2 < H and surf[j2, i2]:
+                on += 1
+        field_hits += len(h)
+        field_on_road += on
+        tag = 'clean' if not h else f'{len(h)} contacts ({on} with a wall on the road)'
+        print(f'  car {c + 1:2d}  {frac:+.2f} across the road   {tag}')
+    print(f'  field total: {field_hits} contacts, {field_on_road} with a wall on the road')
+    on_road += field_on_road
 
     # ---- 4. where a missed wall would be
     REACH, step = 45.0, 0.5
