@@ -6026,14 +6026,42 @@ function wallsBake(){
      everywhere. Walls were not only crossing over the track, they were poking
      INTO it -- a traced footprint that lands a metre inside the white line is
      a wall in the middle of the road, and no amount of "is it above me" finds
-     that. The stations know how wide the road is at every four metres, from
-     the mesh itself, so the road is swept clear between each pair of them.
+     that. The stations know how wide the road is at every four metres, so the
+     road is swept clear between each pair of them.
 
-     Only the inside is cleared, plus a small margin. A barrier standing hard
-     against the kerb -- the Bus Stop, the pit wall -- is outside dR/dL and
-     survives, which is the whole point of using the measured width rather than
-     a fixed corridor. */
-  if(typeof tlSt!=='undefined' && tlSt.length){
+     BUT THE SWEEP IS HELD TO THE PAINT, and that is the whole point of the
+     next twenty lines.
+
+     A wall was drawn on the map and did not stop the car. It was this: the
+     measured half-width is allowed up to TL_SIDE_MAX, twelve metres, and where
+     the white-line ray finds nothing -- the pit entry, a gap in the markings,
+     anywhere the run-off is bare asphalt -- the previous station's width
+     CARRIES OVER. One over-wide station therefore deletes every barrier within
+     twelve and a half metres of the racing line, and a real armco standing
+     eight metres off the road is inside that. The line stayed on the map,
+     because the lines are never touched; only the collision went.
+
+     So the sweep may only clear a cell that is also within NEAR of painted
+     track. The paint is hand-authored and is the honest statement of where the
+     road is; the stations are a measurement that can fail quietly. Letting the
+     measurement extend the paint by a couple of metres is useful, letting it
+     overrule the paint by twelve is how a barrier disappears. */
+  /* One metre, not three. Three still deleted a wall standing two metres
+     outside the paint -- which is precisely the barrier hard against the kerb
+     the survey was never meant to touch. The paint is 76,000 m2 of carefully
+     drawn road; all the survey is needed for is tidying its ragged edge, so a
+     metre is the whole job. */
+  const NEAR=1;                      // how far the survey may reach past the paint
+  const nearPaint=(x,z)=>{
+    for(let j=-NEAR;j<=NEAR;j++) for(let i=-NEAR;i<=NEAR;i++){
+      if(i*i+j*j>NEAR*NEAR) continue;
+      const k=surfIdx(x+i, z+j);
+      if(k>=0 && SURF.data[k]) return true;
+    }
+    return false;
+  };
+  let roadCut=0;
+  if(typeof tlSt!=='undefined' && tlSt.length && SURF.data && SURF.count){
     const M=0.6;                     // margin, so nothing shaves the white line
     for(let i=0;i<tlSt.length;i++){
       const s=tlSt[i], n=tlSt[(i+1)%tlSt.length];
@@ -6046,17 +6074,24 @@ function wallsBake(){
         const across=Math.ceil((wR+wL)/0.8);
         for(let a=0;a<=across;a++){
           const o=-wL+(wR+wL)*a/across;
-          const k=barrIdx(cx+rx*o, cz+rz*o);
-          if(k>=0 && BARR.data[k]){ BARR.data[k]=0; BARR.count--; cut++; }
+          const px=cx+rx*o, pz=cz+rz*o;
+          const k=barrIdx(px,pz);
+          if(k>=0 && BARR.data[k] && nearPaint(px,pz)){
+            BARR.data[k]=0; BARR.count--; roadCut++;
+          }
         }
       }
     }
   }
-  BARR_ONTRACK=cut;
+  cut+=roadCut;
+  BARR_ONPAINT=cut-roadCut; BARR_ONROAD=roadCut; BARR_ONTRACK=cut;
   barrSave();
   return BARR.count;
 }
-let BARR_ONTRACK=0;      // cells dropped for standing on the road, last bake
+/* Split, because which one removed a wall is the whole diagnosis: the paint is
+   hand-drawn and trustworthy, the survey is a measurement that can fail. */
+let BARR_ONPAINT=0, BARR_ONROAD=0;
+let BARR_ONTRACK=0;      // both, for the readout
 /* One line is one flat run of numbers -- x,z,x,z -- rather than an array of
    pairs. Same coordinates to the centimetre, about half the characters, and
    the difference matters because this text is meant to be handed over: pasted
@@ -6511,7 +6546,9 @@ function m2Info(){
     info.textContent = WALLS.length
       ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
          +pts.toLocaleString()+' points'
-         +(BARR_ONTRACK?' \u00b7 '+BARR_ONTRACK.toLocaleString()+' m\u00b2 over the road, not solid':''))
+         +(BARR_ONTRACK?' \u00b7 '+BARR_ONTRACK.toLocaleString()+' m\u00b2 not solid ('
+            +BARR_ONPAINT.toLocaleString()+' your paint, '+BARR_ONROAD.toLocaleString()
+            +' the survey)':''))
       : 'No walls yet \u2014 Find walls reads them off the circuit, or click to draw one';
   } else {
     const pts=tleLines[m2Edge];
@@ -11306,7 +11343,8 @@ window.SIM={
      track-limit line editor back on screen now that it is off the bar. */
   walls(){ wallsInit();
     return {lines:WALLS.length, metres:Math.round(wallsTotal()), cells:BARR.count,
-            onTrackDropped:BARR_ONTRACK, painted:SURF.count}; },
+            onTrackDropped:BARR_ONTRACK, byPaint:BARR_ONPAINT, bySurvey:BARR_ONROAD,
+            painted:SURF.count}; },
   wallsFind(){ return wallsDetect(); },
   wallsCopy(){ return m2Copy(); },
   tlEdit(){ m2SetTool(null); if(!m2On) m2Show(true);
