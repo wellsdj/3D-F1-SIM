@@ -8020,6 +8020,21 @@ let BARR_SPARK=0;               // rate limit for scrape sparks
    Both are pending amounts rather than target values, so they add to whatever
    the driver is doing instead of fighting it -- hold the throttle through a
    bump and the engine and the barrier are simply both at work. */
+/* No contact may last longer than this. Whatever the geometry does, a car
+   that has been touching a wall for a tenth of a second is stuck in it, and
+   being stuck is never the right answer -- it is the failure mode that
+   survives every other fix, because it needs only one corner case in 4,334
+   walls to happen. So it is handled as a class rather than as a bug: hold the
+   contact past the limit and the car is put back on clear ground, whatever
+   the reason it was there. */
+const BARR_MAX_TOUCH=0.10;
+let BARR_TOUCH=0;               // seconds of unbroken contact
+/* The last pose the car stood completely free in. This is the guarantee of
+   last resort: pushing out along the wall's normal works for a wall, and fails
+   in a pocket -- in a narrow V the normal points at the other face, so there
+   is no clear ground that way at any distance. Somewhere the car legitimately
+   was, on the other hand, is always clear, because it was standing there. */
+let _freeX=null, _freeZ=0, _freeH=0;
 let BARR_BLEED=0;               // m/s still to be taken off
 let BARR_TURN=0;                // radians still to be turned, signed
 const BARR_BLEED_TAU=0.20;      // how quickly the speed goes
@@ -8064,6 +8079,34 @@ const segKey=(i,j)=>i*73856093 ^ j*19349663;
 function wallsIndexBuild(near){
   const X0=[],Z0=[],X1=[],Z1=[];
   for(const line of WALLS){
+    /* THE CLEARANCE RULE DECIDES PER WALL, NOT PER SEGMENT.
+
+       Dropping individual segments that came too near the road punched HOLES
+       in walls that are mostly where they should be: measured on the baked
+       set, 63 polylines were being cut into pieces, one of them into five,
+       across 113 metres. That is a wall you drive through in places and not
+       others, and once through it you are inside it.
+
+       A wall is one object. If most of it stands clear of the road it is a
+       real barrier and all of it is kept, wobbles in the tracing included. If
+       most of it lies within the keep-out it was never a barrier -- it is a
+       kerb edge or a white line the detector mistook for one -- and all of it
+       goes. Nothing is ever half-kept. */
+    let inside=0, total=0;
+    if(near){
+      for(let i=0;i+1<line.length;i++){
+        const ax=line[i].x, az=line[i].z, bx=line[i+1].x, bz=line[i+1].z;
+        const d=Math.hypot(bx-ax, bz-az);
+        if(d<1e-4) continue;
+        const parts=Math.max(1, Math.ceil(d/4));
+        for(let q=0;q<parts;q++){
+          const t=(q+0.5)/parts;
+          total++;
+          if(near(ax+(bx-ax)*t, az+(bz-az)*t)) inside++;
+        }
+      }
+      if(total && inside/total > 0.6) continue;      // a mis-trace: drop it whole
+    }
     for(let i=0;i+1<line.length;i++){
       const ax=line[i].x, az=line[i].z, bx=line[i+1].x, bz=line[i+1].z;
       const d=Math.hypot(bx-ax, bz-az);
@@ -8073,10 +8116,8 @@ function wallsIndexBuild(near){
       const parts=Math.max(1, Math.ceil(d/4));
       for(let q=0;q<parts;q++){
         const t0=q/parts, t1=(q+1)/parts;
-        const px=ax+(bx-ax)*t0, pz=az+(bz-az)*t0;
-        const qx=ax+(bx-ax)*t1, qz=az+(bz-az)*t1;
-        if(near && near((px+qx)/2, (pz+qz)/2)) continue;   // too near the road
-        X0.push(px); Z0.push(pz); X1.push(qx); Z1.push(qz);
+        X0.push(ax+(bx-ax)*t0); Z0.push(az+(bz-az)*t0);
+        X1.push(ax+(bx-ax)*t1); Z1.push(az+(bz-az)*t1);
       }
     }
   }
@@ -8244,7 +8285,11 @@ function barrCheck(dt){
     if(barrBlocked(px,pz,h)){ hit=true; break; }
     okX=px; okZ=pz;
   }
-  if(!hit){ _bx=x1; _bz=z1; _bh=h; return false; }
+  if(!hit){
+    _bx=x1; _bz=z1; _bh=h; BARR_TOUCH=0;
+    _freeX=x1; _freeZ=z1; _freeH=h;
+    return false;
+  }
 
   /* WHICH WAY THE WALL FACES.
 
@@ -8316,6 +8361,7 @@ function barrCheck(dt){
     return {x:nx, z:nz};
   }
 
+  BARR_TOUCH+=dt;
   const v=carState.speed;
   const hx=Math.sin(h), hz=Math.cos(h);
   /* Where the car actually met it -- half a step past the last clear pose --
@@ -8328,6 +8374,44 @@ function barrCheck(dt){
      the same 300 kph at ten degrees is 14 m/s of it, which is a scrape. */
   const into=-(hx*nrm.x + hz*nrm.z);
   const vN=Math.max(0, v*into);
+
+  /* STUCK FOR MORE THAN A TENTH OF A SECOND: GET OUT.
+
+     Everything below assumes the car is beside a wall and can leave. Sometimes
+     it is not -- it has ended up between two walls, or inside one where the
+     tracing crosses itself, and every frame it is pushed back to a pose that
+     is also touching. The car then grinds there for seconds and arrives
+     somewhere unintended.
+
+     So the geometry gets a tenth of a second to sort itself out, and after
+     that the car is simply moved along the normal until it stands clear. Up to
+     eight metres, in half-metre steps, taking the first pose that works. */
+  if(BARR_TOUCH>BARR_MAX_TOUCH){
+    /* Out along the wall's normal first, which is right for a wall. Then, if
+       that finds nothing -- a pocket, where the normal points at the other
+       face -- fanned out around the circle, and finally back to the last pose
+       the car stood free in, which cannot fail because it happened. */
+    let ox=null, oz=0;
+    for(let a=0; a<8 && ox===null; a++){
+      const ang=(a%2?-1:1)*Math.ceil(a/2)*(Math.PI/6);      // 0, ±30, ±60, ±90
+      const dx2=nrm.x*Math.cos(ang)-nrm.z*Math.sin(ang);
+      const dz2=nrm.x*Math.sin(ang)+nrm.z*Math.cos(ang);
+      for(let d=0.5; d<=8.0; d+=0.5){
+        const px=okX+dx2*d, pz=okZ+dz2*d;
+        if(!barrBlocked(px,pz,h)){ ox=px; oz=pz; break; }
+      }
+    }
+    if(ox===null && _freeX!==null && !barrBlocked(_freeX,_freeZ,_freeH)){
+      ox=_freeX; oz=_freeZ; carState.hdg=_freeH;
+    }
+    if(ox!==null){
+      carState.wx=ox; carState.wz=oz;
+      _bx=ox; _bz=oz; _bh=carState.hdg;
+      BARR_TOUCH=0;
+      PLAYER.bumpX += nrm.x*2; PLAYER.bumpZ += nrm.z*2;
+      return true;
+    }
+  }
 
   _bx=okX; _bz=okZ; _bh=h;
 
@@ -11305,7 +11389,7 @@ function raceStart(opts){
      the collision's memory of where the car was is dropped -- it is about to
      be teleported onto the grid, and a swept test between here and there would
      read as driving through everything in between. */
-  BARR_DMG=0; BARR_LURCH=0; BARR_SHAKE=0; BARR_HIT=0; _bx=null;
+  BARR_DMG=0; BARR_LURCH=0; BARR_SHAKE=0; BARR_HIT=0; BARR_TOUCH=0; _bx=null; _freeX=null;
   aiField(RACE_CARS-1);                 // you, and nine of them
   racePlace('player', 0);               // pole
   for(let k=0;k<AIS.length;k++){
