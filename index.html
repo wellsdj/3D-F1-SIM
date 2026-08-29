@@ -7989,17 +7989,17 @@ let BARR_LURCH=0, BARR_SHAKE=0;
 let BARR_DMG=0;                 // metres per second off the top speed
 const BARR_DMG_MAX=22;          // about 80 kph, and no worse however many times
 const BARR_DMG_PER=0.16;        // of the speed carried in, kept as damage
-/* The line between a scrape and a shunt, measured as closing speed INTO the
-   wall's face rather than speed along the road. 11 m/s is about 40 kph: run
-   down a barrier at 300 kph at ten degrees and you are pushing 15 m/s into it,
-   which scrapes; turn thirty degrees into the same wall and it is 45, which
-   stops you. The angle does the work, which is what makes it feel like
-   physics rather than a trigger.
+/* The line between a bounce and a shunt, as an ANGLE and not a speed.
 
-   18 m/s is 65 kph of closing speed. It was 11, and at racing speed that is
-   within seven degrees of parallel -- so nearly everything that touched a
-   barrier still counted as a shunt and the distinction did nothing. */
-const BARR_SHUNT=18;
+   into is the cosine of the angle between where the car is pointing and the
+   wall's face, so 0.5 is thirty degrees: brush a barrier at anything shallower
+   and you bounce off it with your speed intact, arrive at more than thirty
+   degrees and you have driven into it.
+
+   It used to be a closing speed of 18 m/s, which made the same clip harmless
+   at 150 kph and race-ending at 300. The angle is the thing that decides
+   whether a car bounces or stops, and now it is the only thing. */
+const BARR_SHUNT_COS=0.5;
 let BARR_SPARK=0;               // rate limit for scrape sparks
 
 /* Is any corner of the car inside a wall, for a pose the car might take?
@@ -8133,46 +8133,52 @@ function barrCheck(dt){
 
   _bx=okX; _bz=okZ; _bh=h;
 
-  /* ---- A SCRAPE. Under the threshold it does not stop you. ----
+  /* ---- A BOUNCE. The angle decides, and it costs you nothing. ----
 
-     The car keeps the part of its velocity that runs ALONG the wall and loses
-     the part going into it, which is what a car sliding down an armco does.
-     It is nudged back out along the face so it is not left resting inside,
-     and it is allowed to keep moving: the tangential part of this frame's
-     movement is applied from the last clear pose, so the car travels down the
-     barrier instead of stopping dead against it. */
-  if(vN < BARR_SHUNT){
-    const tx=hx+nrm.x*into, tz=hz+nrm.z*into;       // heading, flattened onto the face
-    const tl=Math.hypot(tx,tz);
-    if(tl>1e-4){
-      const ux=tx/tl, uz=tz/tl;
-      const travel=Math.hypot(x1-_bx, z1-_bz) || (v*dt);
-      /* Try to slide. If the wall curves in and the slide is blocked too, the
-         car simply stays where it was -- it never ends up inside anything. */
-      const sx=okX+ux*travel, sz=okZ+uz*travel;
-      if(!barrBlocked(sx,sz,h)){ carState.wx=sx; carState.wz=sz; _bx=sx; _bz=sz; }
-      else { carState.wx=okX; carState.wz=okZ; }
-    } else { carState.wx=okX; carState.wz=okZ; }
+     What this is now: a reflection. The car's direction of travel is mirrored
+     in the wall's face, damped on the normal axis only, and its SPEED IS NOT
+     TOUCHED. Clip a barrier at a shallow angle and you come off it still doing
+     what you were doing, pointed a little further from the wall -- which is
+     what bouncing is, and what brushing an armco actually costs a real car,
+     which is paint.
 
-    /* Speed: the normal component is gone, and the rest is scrubbed at a rate
-       PER SECOND, not per frame.
+     Two things were wrong before. The threshold was a closing SPEED, so the
+     same twelve-degree clip was a harmless scrape at 150 kph and a race-ending
+     shunt at 300: the angle you hit it at decided nothing, the speedometer
+     did. And it scrubbed -- every frame in contact took a slice off, so a bump
+     cost a chunk of the straight afterwards.
 
-       Per frame was wrong and badly so: a shallow scrape touches the wall on
-       every frame it is alongside it, so a fixed fraction each time compounds
-       at sixty times a second. A seventy-metre slide down an armco -- a second
-       and a bit -- took a car from 324 kph to a standstill, which is exactly
-       the stopping-dead this was written to stop doing. */
-    const rate=clamp(0.04 + vN*0.035, 0.04, 0.5);      // fraction lost per second
-    const keep=Math.max(0, 1 - rate*dt);
-    carState.speed=Math.max(0, Math.sqrt(Math.max(0, v*v - vN*vN)) * keep);
-    /* And it bounces off, gently, as a shove rather than a teleport -- the
-       same channel a car leaning on you uses, so it drifts you off line and
-       has to be caught. */
-    PLAYER.bumpX += nrm.x*(0.8+vN*0.22);
-    PLAYER.bumpZ += nrm.z*(0.8+vN*0.22);
-    /* Sparks the whole way down it, not once: grinding along a barrier throws
-       them continuously. Rate-limited so a long scrape does not empty the
-       pool, and scaled by how hard it is leaning in. */
+     Now it is the angle against the wall's own face and nothing else. Under
+     thirty degrees you bounce off. Steeper than that you have driven into a
+     wall rather than brushed one, and that is the branch below. */
+  if(into < BARR_SHUNT_COS){
+    /* Mirror the heading in the face. e is how much of the normal component
+       comes back: 1 is a billiard ball, 0 is sliding flat along the wall. Half
+       sends the car away from the barrier without throwing it across the road.
+       The direction is renormalised, so the speed carried out is exactly the
+       speed carried in. */
+    const e=0.5;
+    const dx2=hx + (1+e)*into*nrm.x;
+    const dz2=hz + (1+e)*into*nrm.z;
+    const dl=Math.hypot(dx2,dz2);
+    if(dl>1e-4) carState.hdg=Math.atan2(dx2/dl, dz2/dl);
+    carState.speed=v;                                  // untouched, deliberately
+
+    /* Carry on from the clear side along the new heading, so the car leaves
+       the wall this frame rather than resting on it until the next one. */
+    const nhx=Math.sin(carState.hdg), nhz=Math.cos(carState.hdg);
+    const travel=Math.hypot(x1-_bx, z1-_bz) || (v*dt);
+    const sx=okX+nhx*travel, sz=okZ+nhz*travel;
+    if(!barrBlocked(sx,sz,carState.hdg)){ carState.wx=sx; carState.wz=sz; }
+    else { carState.wx=okX; carState.wz=okZ; }
+    _bx=carState.wx; _bz=carState.wz; _bh=carState.hdg;
+
+    /* A shove outward as well, so a car held against the wall by its own
+       steering is eased off it rather than grinding along it. */
+    PLAYER.bumpX += nrm.x*(0.6+vN*0.10);
+    PLAYER.bumpZ += nrm.z*(0.6+vN*0.10);
+    /* Sparks where it touched, rate-limited so a long graze does not empty the
+       pool. No debris: bouncing off a barrier does not shed bodywork. */
     if(vN>1.5 && BARR_SPARK<=0){
       BARR_SPARK=0.05;
       const y=(carGroup?carGroup.position.y:0)+0.2;
@@ -8227,7 +8233,10 @@ function barrCheck(dt){
   BARR_SHAKE=Math.max(BARR_SHAKE, power*9);
   const y=(carGroup?carGroup.position.y:0)+0.25;
   spawnSparks(carState.wx+hx*1.9, y, carState.wz+hz*1.9, power);
-  if(typeof hitBarrier==='function') hitBarrier(Math.min(28, vN));
+  /* No debris. hitBarrier() threw one to eight lumps of bodywork off the car
+     and left them lying on the circuit; a barrier takes paint and a wing, not
+     a shower of parts, and they were the things falling off. Car-to-car
+     contact still sheds bodywork -- that is a different system and it stays. */
   if(typeof ttVoid==='function') ttVoid('into the barrier');
   const el=document.getElementById('limwarn');
   if(el){
