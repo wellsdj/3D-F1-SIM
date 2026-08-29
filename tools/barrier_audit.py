@@ -73,11 +73,32 @@ def unpack_surf(d):
     return data.reshape(H, W), W, H, d['x'], d['z']
 
 
-def bake_walls(walls, W, H, MINX, MINZ):
-    """barrStroke: a filled disc of radius WALL_W swept along every segment."""
+def bake_walls(walls, W, H, MINX, MINZ, surf=None):
+    """wallsBake: a filled disc of radius WALL_W swept along every segment, and
+    pushed off the track by its own half-width so the strip's inner face lands
+    on the drawn line rather than half a metre inside it."""
     data = np.zeros((H, W), np.uint8)
     r2 = WALL_W * WALL_W
     step = max(0.6, WALL_W * 0.4)
+    R = 5
+
+    def away(x, z):
+        ax = az = 0.0
+        found = 0
+        for j in range(-R, R + 1):
+            for i in range(-R, R + 1):
+                d2 = i * i + j * j
+                if not d2 or d2 > R * R:
+                    continue
+                ii = int(math.floor(x - MINX)) + i
+                jj = int(math.floor(z - MINZ)) + j
+                if 0 <= ii < W and 0 <= jj < H and surf[jj, ii]:
+                    ax -= i / d2; az -= j / d2; found += 1
+        if not found:
+            return None
+        L = math.hypot(ax, az)
+        return (ax / L, az / L) if L > 1e-6 else None
+
     for line in walls:
         pts = [(line[i], line[i + 1]) for i in range(0, len(line) - 1, 2)]
         for a in range(len(pts) - 1):
@@ -85,6 +106,10 @@ def bake_walls(walls, W, H, MINX, MINZ):
             n = max(1, math.ceil(math.hypot(x1 - x0, z1 - z0) / step))
             for s in range(n + 1):
                 cx, cz = x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n
+                if surf is not None:
+                    d = away(cx, cz)
+                    if d:
+                        cx += d[0] * WALL_W; cz += d[1] * WALL_W
                 i0 = max(0, math.floor(cx - WALL_W - MINX))
                 i1 = min(W - 1, math.ceil(cx + WALL_W - MINX))
                 j0 = max(0, math.floor(cz - WALL_W - MINZ))
@@ -149,7 +174,7 @@ def main():
     print(f'grid {W}x{H} at ({MINX},{MINZ})   {len(walls)} wall lines   '
           f'{int(surf.sum())} m2 painted')
 
-    barr = bake_walls(walls, W, H, MINX, MINZ)
+    barr = bake_walls(walls, W, H, MINX, MINZ, surf)
     raw = int(barr.sum())
     on_paint = int(((barr == 1) & (surf == 1)).sum())
     barr[(barr == 1) & (surf == 1)] = 0        # wallsBake's rule

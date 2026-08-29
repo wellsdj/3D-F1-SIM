@@ -5996,9 +5996,53 @@ function wallsInit(){
 function wallsBake(){
   if(!barrInit()) return 0;
   BARR.data.fill(0); BARR.count=0;
-  for(const line of WALLS)
-    for(let i=0;i+1<line.length;i++)
-      barrStroke(line[i].x, line[i].z, line[i+1].x, line[i+1].z, WALL_W, true);
+  /* THE WALL STARTS AT THE LINE, NOT HALF A METRE INSIDE IT.
+
+     The line you draw is the face of the barrier -- it is traced off the front
+     of the armco -- but it was being rasterised as the CENTRE of a strip 1.6 m
+     thick, so 0.8 m of collision stood in front of the wall, on the track side.
+     Add the car's own nose at 1.8 m and the car stopped two and a half metres
+     short of the thing it was supposed to be touching, which is what "a tiny
+     bit out of centre" looks like from the cockpit.
+
+     It cannot simply be made thinner: the grid is one metre a cell, and below
+     about 1.6 m the strip stops being continuous. Measured over all 4,333
+     lines -- 413,386 samples along them -- a half-width of 0.8 m leaves no
+     holes at all, 0.65 m leaves 1,800, and 0.45 m leaves 60,000. A hole is a
+     place a car drives through a wall, so the thickness stays.
+
+     Instead the strip is pushed off the track by its own half-width, so its
+     inner face lands on the line. Which way is "off the track" comes from the
+     paint: the barrier is on the side the road is not. Where no paint is near
+     enough to say -- the far side of a run-off, the paddock -- nothing is
+     moved, because a guess there would be worse than the half metre it fixes. */
+  const R=5;
+  const awayFromPaint=(x,z)=>{
+    let ax=0, az=0, found=0;
+    for(let j=-R;j<=R;j++) for(let i=-R;i<=R;i++){
+      const d2=i*i+j*j;
+      if(!d2 || d2>R*R) continue;
+      const k=surfIdx(x+i, z+j);
+      if(k>=0 && SURF.data[k]){ ax-=i/d2; az-=j/d2; found++; }
+    }
+    if(!found) return null;
+    const L=Math.hypot(ax,az);
+    return L>1e-6 ? [ax/L, az/L] : null;
+  };
+  for(const line of WALLS){
+    for(let i=0;i+1<line.length;i++){
+      const x0=line[i].x, z0=line[i].z, x1=line[i+1].x, z1=line[i+1].z;
+      const d=Math.hypot(x1-x0, z1-z0);
+      const n=Math.max(1, Math.ceil(d/Math.max(0.6, WALL_W*0.4)));
+      for(let q=0;q<=n;q++){
+        const t=q/n;
+        let cx=x0+(x1-x0)*t, cz=z0+(z1-z0)*t;
+        const away=awayFromPaint(cx,cz);
+        if(away){ cx+=away[0]*WALL_W; cz+=away[1]*WALL_W; }
+        barrDisc(cx, cz, WALL_W, true);
+      }
+    }
+  }
   /* NOTHING ON THE TRACK IS A BARRIER.
 
      The detector finds walls by looking for upright faces, and some of them
@@ -8139,10 +8183,36 @@ function barrCheck(dt){
   }
 
   /* ---- A SHUNT. Square into it, and that is the race. ---- */
-  carState.wx=okX; carState.wz=okZ;
   carState.speed=0;
   PLAYER.bumpX=0; PLAYER.bumpZ=0;
   PLAYER.carVY=0;
+
+  /* AND OFF THE WALL, FACING ALONG IT -- otherwise the car is stuck there for
+     good, and this is a genuine deadlock rather than an annoyance.
+
+     Look at what the three lines above used to leave behind. Speed is zero.
+     The yaw rate is speed * tan(steer) / wheelbase, so at zero speed the car
+     CANNOT TURN however hard the wheel is held. The heading therefore stays
+     pointing into the wall, so the throttle drives the car into the wall, so
+     the movement is refused and the speed is set to zero again. Every frame,
+     for ever. The only way out was to reload the page.
+
+     So the car is pushed back out along the face until it stands clear, and
+     turned to lie along the barrier -- keeping whichever way down it it was
+     already going. That is roughly what happens to a real car that hits a
+     wall and slews to a stop against it, and it means the throttle now points
+     somewhere useful instead of into armco. */
+  let ox=okX, oz=okZ;
+  for(let d=0.5; d<=5.0; d+=0.5){
+    const px=okX+nrm.x*d, pz=okZ+nrm.z*d;
+    if(!barrBlocked(px,pz,h)){ ox=px; oz=pz; break; }
+  }
+  const wx2=-nrm.z, wz2=nrm.x;                 // along the wall
+  const sgn=(hx*wx2 + hz*wz2)>=0 ? 1 : -1;     // the way we were already going
+  const nh=Math.atan2(wx2*sgn, wz2*sgn);
+  if(!barrBlocked(ox,oz,nh)) carState.hdg=nh;
+  carState.wx=ox; carState.wz=oz;
+  _bx=ox; _bz=oz; _bh=carState.hdg;
 
   if(BARR_HIT>0) return true;
   BARR_HIT=2.0;
