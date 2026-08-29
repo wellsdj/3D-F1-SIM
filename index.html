@@ -8136,11 +8136,10 @@ function barrCheck(dt){
   /* ---- A BOUNCE. The angle decides, and it costs you nothing. ----
 
      What this is now: a reflection. The car's direction of travel is mirrored
-     in the wall's face, damped on the normal axis only, and its SPEED IS NOT
-     TOUCHED. Clip a barrier at a shallow angle and you come off it still doing
-     what you were doing, pointed a little further from the wall -- which is
-     what bouncing is, and what brushing an armco actually costs a real car,
-     which is paint.
+     in the wall's face and damped on the normal axis only. Clip one at a
+     shallow angle and you come off it pointed further from the wall, having
+     paid for the part of your speed that was going into it -- which is what
+     bouncing is.
 
      Two things were wrong before. The threshold was a closing SPEED, so the
      same twelve-degree clip was a harmless scrape at 150 kph and a race-ending
@@ -8155,14 +8154,23 @@ function barrCheck(dt){
     /* Mirror the heading in the face. e is how much of the normal component
        comes back: 1 is a billiard ball, 0 is sliding flat along the wall. Half
        sends the car away from the barrier without throwing it across the road.
-       The direction is renormalised, so the speed carried out is exactly the
-       speed carried in. */
+
+       And the speed that comes out is the length of the reflected velocity,
+       not the speed that went in. That is the whole of the slowing-down, and
+       it needs no rule of its own: the part running along the wall is kept
+       whole and the part going into it comes back halved, so what a bump costs
+       falls out of the angle by itself. Three degrees costs nothing you would
+       notice, thirty costs a tenth of the speed. Renormalising this to keep
+       the speed exactly -- which is what it did a moment ago -- was a step too
+       far in the other direction: hitting a wall should cost something. */
     const e=0.5;
+    const vt=v*Math.sqrt(Math.max(0, 1 - into*into));   // along the face, kept
+    const vn=v*into*e;                                  // into it, halved and reversed
     const dx2=hx + (1+e)*into*nrm.x;
     const dz2=hz + (1+e)*into*nrm.z;
     const dl=Math.hypot(dx2,dz2);
     if(dl>1e-4) carState.hdg=Math.atan2(dx2/dl, dz2/dl);
-    carState.speed=v;                                  // untouched, deliberately
+    carState.speed=Math.hypot(vt, vn);
 
     /* Carry on from the clear side along the new heading, so the car leaves
        the wall this frame rather than resting on it until the next one. */
