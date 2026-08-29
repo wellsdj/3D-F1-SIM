@@ -176,10 +176,16 @@ def main():
 
     barr = bake_walls(walls, W, H, MINX, MINZ, surf)
     raw = int(barr.sum())
-    on_paint = int(((barr == 1) & (surf == 1)).sum())
-    barr[(barr == 1) & (surf == 1)] = 0        # wallsBake's rule
-    print(f'barriers: {raw} cells, {on_paint} of them dropped for standing on '
-          f'painted track, {int(barr.sum())} live')
+    # wallsBake's rule: nothing within BARR_CLEAR metres of painted track is a
+    # barrier. Not just nothing ON it -- a wall traced a metre outside the white
+    # line is a trap, because putting a wheel over the line is racing.
+    BARR_CLEAR = 2
+    from scipy import ndimage as _nd
+    near_road = _nd.distance_transform_edt(surf == 0) <= BARR_CLEAR
+    on_paint = int(((barr == 1) & near_road).sum())
+    barr[(barr == 1) & near_road] = 0
+    print(f'barriers: {raw} cells, {on_paint} dropped for being within '
+          f'{BARR_CLEAR} m of painted track, {int(barr.sum())} live')
 
     C = resample(centreline(surf.astype(bool)), MINX, MINZ)
     T = np.gradient(C, axis=0); T /= np.linalg.norm(T, axis=1)[:, None]
@@ -374,7 +380,7 @@ def main():
     being read as the fault it exists to prevent. What matters is whether the
     circuit is passable (walled) and whether any wall the car reached was
     standing on the road (on_road)."""
-    left_on_paint = int(((barr == 1) & (surf == 1)).sum())    # after the bake: must be 0
+    left_on_paint = int(((barr == 1) & near_road).sum())      # after the bake: must be 0
     bad = (left_on_paint > 0) or (walled > 0) or (on_road > 0)
     print('\nFAIL - see above' if bad else
           '\nPASS - no barrier stands on the drivable circuit anywhere on the lap')

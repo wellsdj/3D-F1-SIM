@@ -6060,10 +6060,38 @@ function wallsBake(){
 
      Done here rather than in the lines themselves so the lines stay exactly as
      drawn -- what is subtracted is the collision, not your work. */
+  /* NOTHING WITHIN BARR_CLEAR OF THE ROAD IS A BARRIER, not just nothing on it.
+
+     Standing on the paint was never the whole problem. A wall traced a metre
+     outside the white line is a trap: put one wheel over the line -- which is
+     racing, and which the track-limits code treats as a warning at worst --
+     and the race is over. On a real circuit there is grass, then kerb, then
+     run-off, and only then armco; a barrier hard against the white line is
+     almost always a mis-traced edge rather than a wall that is really there.
+
+     So the clearance is two metres from painted track, not zero. That is wide
+     enough to throw away the mis-traces and narrow enough to keep the genuinely
+     close walls -- the pit wall down the straight sits further off the paint
+     than this. */
+  const BARR_CLEAR=2;
   let cut=0;
   if(SURF.data && SURF.count && SURF.w===BARR.w && SURF.h===BARR.h){
-    for(let k=0;k<BARR.data.length;k++){
-      if(BARR.data[k] && SURF.data[k]){ BARR.data[k]=0; BARR.count--; cut++; }
+    const R2=BARR_CLEAR*BARR_CLEAR;
+    for(let j=0;j<BARR.h;j++){
+      for(let i=0;i<BARR.w;i++){
+        const k=j*BARR.w+i;
+        if(!BARR.data[k]) continue;
+        let near=false;
+        for(let b=-BARR_CLEAR;b<=BARR_CLEAR && !near;b++){
+          for(let a=-BARR_CLEAR;a<=BARR_CLEAR;a++){
+            if(a*a+b*b>R2) continue;
+            const ii=i+a, jj=j+b;
+            if(ii<0||jj<0||ii>=BARR.w||jj>=BARR.h) continue;
+            if(SURF.data[jj*BARR.w+ii]){ near=true; break; }
+          }
+        }
+        if(near){ BARR.data[k]=0; BARR.count--; cut++; }
+      }
     }
   }
   /* And the surveyed road on top of the paint, because the paint is not
@@ -8193,9 +8221,23 @@ function barrCheck(dt){
        notice, thirty costs a tenth of the speed. Renormalising this to keep
        the speed exactly -- which is what it did a moment ago -- was a step too
        far in the other direction: hitting a wall should cost something. */
-    const e=0.5;
-    const vt=v*Math.sqrt(Math.max(0, 1 - into*into));   // along the face, kept
-    const vn=v*into*e;                                  // into it, halved and reversed
+    /* e is how much of the speed going INTO the wall comes back out of it. A
+       quarter, not a half: half threw the car far enough across the road that
+       a clip on the left cost you the right-hand side of the circuit as well.
+       A quarter pushes you off the barrier and no further.
+
+       MU is the other half of the answer, and it is what a graze should
+       actually cost. Bouncing alone only ever spends the part of the speed
+       aimed at the wall, which at five degrees is almost none of it -- so a
+       brush was free. A car scraping along a barrier is also being rubbed
+       along it, and that friction acts on the speed running ALONG the face,
+       in proportion to how hard it is being pressed in. That is the term that
+       makes a graze cost something you notice at any angle. */
+    const e=0.25;
+    const MU=0.35;
+    const vIn=v*into;                                   // pressed into the face
+    const vt=Math.max(0, v*Math.sqrt(Math.max(0, 1 - into*into)) - MU*vIn);
+    const vn=vIn*e;                                     // and what comes back
     const dx2=hx + (1+e)*into*nrm.x;
     const dz2=hz + (1+e)*into*nrm.z;
     const dl=Math.hypot(dx2,dz2);
@@ -8221,8 +8263,8 @@ function barrCheck(dt){
        channel a car leaning on you uses, so it carries the car out over about
        a third of a second instead of placing it there. That is what actually
        separates the car from the barrier now. */
-    PLAYER.bumpX += nrm.x*(0.6+vn);
-    PLAYER.bumpZ += nrm.z*(0.6+vn);
+    PLAYER.bumpX += nrm.x*(0.3+vn);
+    PLAYER.bumpZ += nrm.z*(0.3+vn);
     /* Sparks where it touched, rate-limited so a long graze does not empty the
        pool. No debris: bouncing off a barrier does not shed bodywork. */
     if(vN>1.5 && BARR_SPARK<=0){
