@@ -179,7 +179,7 @@ def main():
     # wallsBake's rule: nothing within BARR_CLEAR metres of painted track is a
     # barrier. Not just nothing ON it -- a wall traced a metre outside the white
     # line is a trap, because putting a wheel over the line is racing.
-    BARR_CLEAR = 2
+    BARR_CLEAR = 0.5
     from scipy import ndimage as _nd
     near_road = _nd.distance_transform_edt(surf == 0) <= BARR_CLEAR
     on_paint = int(((barr == 1) & near_road).sum())
