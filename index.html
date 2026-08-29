@@ -8001,6 +8001,22 @@ const BARR_DMG_PER=0.16;        // of the speed carried in, kept as damage
    whether a car bounces or stops, and now it is the only thing. */
 const BARR_SHUNT_COS=0.5;
 let BARR_SPARK=0;               // rate limit for scrape sparks
+/* A bounce is not instant, and this is what stops it reading as a teleport.
+
+   The reflection is computed the moment the car touches, but applying it in
+   that one frame moves the car and spins it between two drawn images -- which
+   is exactly what teleporting looks like. The answer is not to soften the
+   physics but to pay it out over a few frames: the turn and the speed it costs
+   are held here and eased in, so the car is seen to be knocked off line rather
+   than found somewhere else already pointing differently.
+
+   Both are pending amounts rather than target values, so they add to whatever
+   the driver is doing instead of fighting it -- hold the throttle through a
+   bump and the engine and the barrier are simply both at work. */
+let BARR_BLEED=0;               // m/s still to be taken off
+let BARR_TURN=0;                // radians still to be turned, signed
+const BARR_BLEED_TAU=0.20;      // how quickly the speed goes
+const BARR_TURN_TAU=0.11;       // how quickly the car comes round
 
 /* Is any corner of the car inside a wall, for a pose the car might take?
    Asked about poses the car has not moved to yet, which is what makes the
@@ -8070,6 +8086,20 @@ function barrCheck(dt){
   BARR_LURCH*=Math.pow(0.02, dt/0.55);
   BARR_SHAKE*=Math.pow(0.02, dt/0.75);
   if(BARR_SPARK>0) BARR_SPARK-=dt;
+  /* Pay out whatever the last contact still owes, before anything else looks
+     at where the car is or how fast it is going. */
+  if(BARR_BLEED>0){
+    const take=Math.min(BARR_BLEED, BARR_BLEED*Math.min(1, dt/BARR_BLEED_TAU) + 0.4*dt);
+    carState.speed=Math.max(0, carState.speed-take);
+    BARR_BLEED-=take;
+    if(BARR_BLEED<0.02) BARR_BLEED=0;
+  }
+  if(BARR_TURN!==0){
+    const t=BARR_TURN*Math.min(1, dt/BARR_TURN_TAU);
+    carState.hdg+=t;
+    BARR_TURN-=t;
+    if(Math.abs(BARR_TURN)<0.002) BARR_TURN=0;
+  }
   if(BARR_HIT>0) BARR_HIT=Math.max(0,BARR_HIT-dt);
   if(!BARR.data||!BARR.count||CARPTS.length!==4) return false;
 
@@ -8169,22 +8199,30 @@ function barrCheck(dt){
     const dx2=hx + (1+e)*into*nrm.x;
     const dz2=hz + (1+e)*into*nrm.z;
     const dl=Math.hypot(dx2,dz2);
-    if(dl>1e-4) carState.hdg=Math.atan2(dx2/dl, dz2/dl);
-    carState.speed=Math.hypot(vt, vn);
 
-    /* Carry on from the clear side along the new heading, so the car leaves
-       the wall this frame rather than resting on it until the next one. */
-    const nhx=Math.sin(carState.hdg), nhz=Math.cos(carState.hdg);
-    const travel=Math.hypot(x1-_bx, z1-_bz) || (v*dt);
-    const sx=okX+nhx*travel, sz=okZ+nhz*travel;
-    if(!barrBlocked(sx,sz,carState.hdg)){ carState.wx=sx; carState.wz=sz; }
-    else { carState.wx=okX; carState.wz=okZ; }
-    _bx=carState.wx; _bz=carState.wz; _bh=carState.hdg;
+    /* The car stays where it was last clear. It used to be moved a whole
+       frame's travel along the brand new heading in the same instant the
+       heading changed, which is two teleports at once: the car appeared
+       somewhere else, already pointing somewhere else. */
+    carState.wx=okX; carState.wz=okZ;
+    _bx=okX; _bz=okZ; _bh=carState.hdg;
 
-    /* A shove outward as well, so a car held against the wall by its own
-       steering is eased off it rather than grinding along it. */
-    PLAYER.bumpX += nrm.x*(0.6+vN*0.10);
-    PLAYER.bumpZ += nrm.z*(0.6+vN*0.10);
+    /* The turn and the speed it costs are queued, not applied. */
+    if(dl>1e-4){
+      let d=Math.atan2(dx2/dl, dz2/dl)-carState.hdg;
+      while(d>Math.PI) d-=Math.PI*2;
+      while(d<-Math.PI) d+=Math.PI*2;
+      if(Math.abs(d)>Math.abs(BARR_TURN)) BARR_TURN=d;
+    }
+    const loss=Math.max(0, v-Math.hypot(vt,vn));
+    if(loss>BARR_BLEED) BARR_BLEED=loss;
+
+    /* And the push off the wall arrives as a velocity, through the same
+       channel a car leaning on you uses, so it carries the car out over about
+       a third of a second instead of placing it there. That is what actually
+       separates the car from the barrier now. */
+    PLAYER.bumpX += nrm.x*(0.6+vn);
+    PLAYER.bumpZ += nrm.z*(0.6+vn);
     /* Sparks where it touched, rate-limited so a long graze does not empty the
        pool. No debris: bouncing off a barrier does not shed bodywork. */
     if(vN>1.5 && BARR_SPARK<=0){
@@ -8224,9 +8262,18 @@ function barrCheck(dt){
   const wx2=-nrm.z, wz2=nrm.x;                 // along the wall
   const sgn=(hx*wx2 + hz*wz2)>=0 ? 1 : -1;     // the way we were already going
   const nh=Math.atan2(wx2*sgn, wz2*sgn);
-  if(!barrBlocked(ox,oz,nh)) carState.hdg=nh;
+  /* Turned round over a third of a second rather than in one frame -- the car
+     is stopped, so there is time to watch it slew, and snapping it looked like
+     the car had been picked up and put down facing the other way. */
+  if(!barrBlocked(ox,oz,nh)){
+    let d=nh-carState.hdg;
+    while(d>Math.PI) d-=Math.PI*2;
+    while(d<-Math.PI) d+=Math.PI*2;
+    BARR_TURN=d;
+  }
   carState.wx=ox; carState.wz=oz;
   _bx=ox; _bz=oz; _bh=carState.hdg;
+  BARR_BLEED=0;                                // it is already stopped
 
   if(BARR_HIT>0) return true;
   BARR_HIT=2.0;
