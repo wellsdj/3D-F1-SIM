@@ -791,7 +791,7 @@ if('serviceWorker' in navigator){
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
   <div id="m2hint">Click to drop a point, click again for the next &mdash; the line joins them up
     &middot; drag a point to move it &middot; Shift-click a point to delete it
-    &middot; <b>Alt-click to delete a whole wall</b>
+    &middot; <b>click a wall to select it, then Delete</b> (or Alt-click)
     &middot; Enter or right-click ends the line &middot; Find walls reads them off the circuit
     &middot; arrow keys to move about (Shift for further) &middot; scroll to zoom</div>
   <div id="m2bar">
@@ -4676,6 +4676,20 @@ addEventListener('keydown',e=>{
     if(!m2On){ m2Tool='wall'; wallEnd(); }   // G is the wall editor, nothing else
     m2Show(!m2On);
   }
+  /* Delete removes the picked wall. The keyboard is where a delete belongs --
+     Alt-clicking works but is a thing to remember, and this is the key the
+     hand is already reaching for. */
+  if(m2On && m2Tool==='wall' && (k==='delete'||k==='backspace')){
+    if(wallPick>=0 && WALLS[wallPick]){
+      wallsSnapshot();
+      const n=WALLS[wallPick].length;
+      WALLS.splice(wallPick,1);
+      wallPick=-1;
+      wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
+      m2Note('wall deleted \u2014 '+n+' points. Undo puts it back');
+    } else m2Note('click a wall first, then Delete');
+    e.preventDefault(); return;
+  }
   /* Enter finishes the line in hand without ending the session's editing, so
      one wall follows another without touching the mouse. */
   if(k==='enter' && m2On && m2Tool==='wall' && wallDraw){
@@ -5801,6 +5815,7 @@ function barrReseed(){ if(!BARR.data) return 0;
 const WALL_KEY='f1sim.walls.spa22';
 const WALLS=[];                    // polylines, each [{x,z},…], in model coords
 let wallDraw=null;                 // the line being drawn, or null
+let wallPick=-1;                   // the wall clicked on, highlighted and deletable
 let wallDrawIdx=-1;                // where that line lives in WALLS once it is real
 let wallSel=-1, wallSelPt=-1;      // the point being dragged
 /* Half a metre is the number: a kerb is under it, an armco is over it. A face
@@ -6286,7 +6301,7 @@ function wallsUndo(){
   const d=JSON.parse(t);
   WALLS.length=0;
   for(const l of d) WALLS.push(l.map(p=>({x:p.x, z:p.z})));
-  wallDraw=null; wallDrawIdx=-1; wallSel=-1; wallSelPt=-1;
+  wallDraw=null; wallDrawIdx=-1; wallSel=-1; wallSelPt=-1; wallPick=-1;
   wallsSave(); wallsBake(); GAPS=null;
   return true;
 }
@@ -6312,6 +6327,29 @@ function wallEnd(){
    Measured in screen pixels rather than metres so it stays grabbable at every
    zoom -- at full-lap zoom a metre is a fraction of a pixel. */
 const WALL_GRAB=9;
+/* The wall under the pointer, tested against its LINES and not only its points.
+   Picking by point alone means aiming at a handful of pixels that are not even
+   drawn when zoomed out, which is no way to choose the thing you want to
+   delete. Anywhere along a wall picks it. */
+const WALL_PICK=7;
+function wallPickAt(sx,sy){
+  let best=WALL_PICK*WALL_PICK, found=-1;
+  for(let li=0;li<WALLS.length;li++){
+    const line=WALLS[li];
+    for(let i=0;i+1<line.length;i++){
+      const ax=m2sx(line[i].x),   ay=m2sy(line[i].z);
+      const bx=m2sx(line[i+1].x), by=m2sy(line[i+1].z);
+      const ux=bx-ax, uy=by-ay;
+      const L2=ux*ux+uy*uy;
+      let t = L2>1e-9 ? ((sx-ax)*ux+(sy-ay)*uy)/L2 : 0;
+      t = t<0?0:(t>1?1:t);
+      const dx=sx-(ax+ux*t), dy=sy-(ay+uy*t);
+      const d=dx*dx+dy*dy;
+      if(d<best){ best=d; found=li; }
+    }
+  }
+  return found;
+}
 function wallHit(sx,sy){
   let best=WALL_GRAB*WALL_GRAB, hit=null;
   for(let li=0;li<WALLS.length;li++){
@@ -6568,6 +6606,20 @@ function m2Draw(){
       }
     }
     g.stroke();
+    /* The picked wall, over the top and unmistakable. */
+    if(wallPick>=0 && WALLS[wallPick]){
+      const line=WALLS[wallPick];
+      g.strokeStyle='rgba(255,225,60,1)'; g.lineWidth=4;
+      g.beginPath();
+      for(let i=0;i<line.length;i++){
+        const x=m2sx(line[i].x), y=m2sy(line[i].z);
+        i?g.lineTo(x,y):g.moveTo(x,y);
+      }
+      g.stroke();
+      g.fillStyle='rgba(255,225,60,1)';
+      for(const p of line) g.fillRect(m2sx(p.x)-3, m2sy(p.z)-3, 6, 6);
+      g.lineWidth=2;
+    }
     if(m2Sc>0.55 && !m2ShowGaps){
       g.fillStyle='rgba(255,215,210,.95)';
       const r=3;
@@ -6687,6 +6739,11 @@ function m2Info(){
   if(!info) return;
   if(m2Tool==='wall'){
     let pts=0; for(const l of WALLS) pts+=l.length;
+    if(wallPick>=0 && WALLS[wallPick]){
+      info.textContent='wall selected \u00b7 '+WALLS[wallPick].length
+        +' points \u00b7 press Delete to remove it';
+      return;
+    }
     info.textContent = WALLS.length
       ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
          +pts.toLocaleString()+' points'
@@ -6900,6 +6957,7 @@ function m2Init(){
         wallsSnapshot();
         const n=WALLS[hit.line].length;
         WALLS.splice(hit.line,1);
+        wallPick=-1;
         wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
         m2Note('wall removed — '+n+' points. Undo puts it back');
         return;
@@ -6915,12 +6973,27 @@ function m2Init(){
         m2Note(line.length<2?'line removed':'point removed');
         return;
       }
-      /* An existing point under the pointer is grabbed, not added to. */
+      /* An existing point under the pointer is grabbed, not added to -- and
+         picks its wall at the same time, so the thing being dragged is also
+         the thing Delete would remove. */
       if(hit && !wallDraw){
         wallsSnapshot();
-        wallSel=hit.line; wallSelPt=hit.i;
-        c.setPointerCapture(e.pointerId); m2Draw(); return;
+        wallSel=hit.line; wallSelPt=hit.i; wallPick=hit.line;
+        c.setPointerCapture(e.pointerId); m2Draw(); m2Info(); return;
       }
+      /* Anywhere along a wall picks it, so long as a line is not being drawn.
+         Mid-line every click is a point, or a wall could never be drawn
+         alongside another one -- which is most of what gets drawn here. */
+      if(!wallDraw){
+        const pick=wallPickAt(x,y);
+        if(pick>=0){
+          wallPick=pick;
+          m2Draw(); m2Info();
+          m2Note('wall selected — press Delete to remove it, or click away');
+          return;
+        }
+      }
+      wallPick=-1;
       /* Otherwise: a new point. The first one starts a line, and every one
          after it extends the same line until it is ended. */
       const wx=m2wx(x), wz=m2wz(y);
@@ -7947,6 +8020,7 @@ document.getElementById('m2find').onclick=()=>{
   setTimeout(()=>{
     wallsSnapshot();
     const r=wallsDetect();
+    wallPick=-1;
     m2SetTool('wall'); m2Draw(); m2Info();
     m2Note(r.why ? r.why
       : r.lines+' walls found \u2014 '+r.metres.toLocaleString()+' m of them, off '
@@ -8025,6 +8099,7 @@ document.getElementById('m2findadd').onclick=()=>{
       if(total && novel/total > 0.5){ out.push(l); added++; }
     }
     WALLS.length=0; for(const l of out) WALLS.push(l);
+    wallPick=-1;
     wallsSave(); wallsBake(); m2SetTool('wall'); m2Draw(); m2Info();
     m2Note(r.why ? r.why
       : added+' new walls added, '+mine.length+' of yours kept ('
@@ -8045,7 +8120,7 @@ document.getElementById('m2gaps').onclick=()=>{
   } else { m2Draw(); m2Info(); m2Note('gaps hidden'); }
 };
 document.getElementById('m2wallclear').onclick=()=>{
-  wallsSnapshot(); WALLS.length=0; wallEnd(); wallsSave(); wallsBake();
+  wallsSnapshot(); WALLS.length=0; wallEnd(); wallPick=-1; wallsSave(); wallsBake();
   m2Draw(); m2Info(); m2Note('walls cleared');
 };
 document.getElementById('m2undo2').onclick=()=>{
