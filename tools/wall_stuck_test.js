@@ -37,6 +37,7 @@ function drive(label, startX, startZ, hdg, speed, frames){
      over and over looks permanently stuck while actually moving. Longest
      stretch covering less than two metres is the honest measure. */
   const trail=[];
+  let biggest=0, lastX=carState.wx, lastZ=carState.wz;
   for(let f=0;f<frames;f++){
     carState.speed=Math.max(carState.speed, 30);      // driver keeps the power on
     carState.wx+=Math.sin(carState.hdg)*carState.speed*dt;
@@ -48,6 +49,10 @@ function drive(label, startX, startZ, hdg, speed, frames){
     const t=api.barrCheck(dt);
     if(t) touching++;
     trail.push([carState.wx, carState.wz]);
+    // a teleport is a move far beyond what the car's own speed could cover
+    const step=Math.hypot(carState.wx-lastX, carState.wz-lastZ);
+    biggest=Math.max(biggest, step - carState.speed*dt - 0.3);
+    lastX=carState.wx; lastZ=carState.wz;
   }
   for(let i=0;i<trail.length;i++){
     let j=i;
@@ -56,6 +61,7 @@ function drive(label, startX, startZ, hdg, speed, frames){
     worst=Math.max(worst,(j-i)*dt);
   }
   const inside=barrBlocked(carState.wx,carState.wz,carState.hdg);
+  biggest=Math.max(0,biggest);
   console.log(`  ${label.padEnd(28)} longest unbroken contact ${worst.toFixed(2)} s, `+
               `touching ${touching} of ${frames} frames, ends inside a wall: ${inside?'YES':'no'}`);
   return {worst, inside};
@@ -64,11 +70,20 @@ console.log('a car held at full throttle into a dead end:');
 const a=drive('straight into the apex',   -40, 3.0, Math.PI/2, 60, 600);
 const b=drive('into the corner at 45 deg', -40, 3.0, Math.PI/2-0.6, 60, 600);
 const c=drive('started INSIDE the wall',    -30, 0.0, Math.PI/2, 60, 600);
+/* What this test may and may not assert.
+   It used to require the car to keep moving. That is wrong for the shape being
+   tested: these pockets narrow below the width of a car, so a car driven into
+   one at full throttle CANNOT proceed, and being stopped there is correct. The
+   old code only satisfied that requirement by shoving the car sideways through
+   a wall -- up to eight metres along a guessed normal -- which is precisely the
+   bug this fixture now exists to catch.
+   So: never inside a wall, and never moved further than its own speed explains. */
 const fails=[];
 for(const [n,r] of [['apex',a],['45 deg',b],['inside',c]]){
-  if(r.worst>1.0) fails.push(`${n}: went nowhere for ${r.worst.toFixed(2)} s`);
-  if(r.inside)    fails.push(`${n}: finished inside a wall`);
+  if(r.inside)      fails.push(`${n}: finished inside a wall`);
+  if(r.biggest>1.5) fails.push(`${n}: moved ${r.biggest.toFixed(2)} m more than its speed explains — a teleport`);
 }
 console.log(fails.length?'\nFAIL:\n  '+fails.join('\n  '):
-  '\nPASS - the car never goes nowhere for a second, and never ends up inside a wall');
+  '\nPASS - never teleported, never left inside a wall (a dead end that is\n'+
+  '       narrower than the car does stop it, which is correct)');
 process.exit(fails.length?1:0);

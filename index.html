@@ -791,6 +791,7 @@ if('serviceWorker' in navigator){
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
   <div id="m2hint">Click to drop a point, click again for the next &mdash; the line joins them up
     &middot; drag a point to move it &middot; Shift-click a point to delete it
+    &middot; <b>Alt-click to delete a whole wall</b>
     &middot; Enter or right-click ends the line &middot; Find walls reads them off the circuit
     &middot; arrow keys to move about (Shift for further) &middot; scroll to zoom</div>
   <div id="m2bar">
@@ -6891,14 +6892,26 @@ function m2Init(){
          finishes the line rather than starting a stray one. */
       if(e.button===2){ wallEnd(); m2Draw(); m2Info(); return; }
       const hit=wallHit(x,y);
-      /* Shift on a point deletes it. A line down to one point is not a line,
-         so that removes the line. */
+      /* Alt on a wall deletes the WHOLE wall, which is the one that matters
+         for clearing out what the detector produced: a found wall is often
+         thirty points long, and taking it away a point at a time is thirty
+         shift-clicks. Alt anywhere along it and it is gone. */
+      if(hit && (e.altKey||e.metaKey)){
+        wallsSnapshot();
+        const n=WALLS[hit.line].length;
+        WALLS.splice(hit.line,1);
+        wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
+        m2Note('wall removed — '+n+' points. Undo puts it back');
+        return;
+      }
+      /* Shift on a point deletes just that point. A line down to one point is
+         not a line, so that removes the line. */
       if(hit && e.shiftKey){
         wallsSnapshot();
         const line=WALLS[hit.line];
         line.splice(hit.i,1);
         if(line.length<2) WALLS.splice(hit.line,1);
-        wallsSave(); wallsBake(); m2Draw(); m2Info();
+        wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
         m2Note(line.length<2?'line removed':'point removed');
         return;
       }
@@ -6936,7 +6949,8 @@ function m2Init(){
         p.x=m2wx(x); p.z=m2wz(y);
       } else {
         const h=wallHit(x,y);
-        c.style.cursor = h ? 'grab' : 'crosshair';
+        c.style.cursor = h ? ((e.altKey||e.metaKey) ? 'not-allowed'
+                             : (e.shiftKey ? 'cell' : 'grab')) : 'crosshair';
       }
       m2Draw(); return;
     }
@@ -8481,32 +8495,61 @@ function barrCheck(dt){
   const into=-(hx*nrm.x + hz*nrm.z);
   const vN=Math.max(0, v*into);
 
-  /* STUCK FOR MORE THAN A TENTH OF A SECOND: GET OUT.
+  /* STUCK FOR MORE THAN A TENTH OF A SECOND: GET OUT, BY THE SHORTEST ROUTE.
 
      Everything below assumes the car is beside a wall and can leave. Sometimes
      it is not -- it has ended up between two walls, or inside one where the
-     tracing crosses itself, and every frame it is pushed back to a pose that
-     is also touching. The car then grinds there for seconds and arrives
-     somewhere unintended.
+     tracing crosses itself -- and every frame it is pushed back to a pose that
+     is also touching. So after a tenth of a second the car is simply moved to
+     clear ground.
 
-     So the geometry gets a tenth of a second to sort itself out, and after
-     that the car is simply moved along the normal until it stands clear. Up to
-     eight metres, in half-metre steps, taking the first pose that works. */
+     THE ORDER OF THAT SEARCH IS THE WHOLE THING. It used to run angle-major:
+     the wall's own normal was tried at every distance from half a metre to
+     EIGHT before any other direction was considered. A normal is a good guess
+     and it is not always right -- read off a jagged trace, or with the car
+     sitting exactly on a segment, it can point across the road instead of away
+     from it -- and when it was wrong the car was moved eight metres along it.
+     On a ten-metre road with the walls a metre off it, that is the far side.
+     Hit the right-hand wall and end up against the left-hand one.
+
+     Distance-major now: every direction is tried at half a metre, then every
+     direction at one metre, and so on. The car therefore always moves the
+     SHORTEST distance that frees it, and a wrong normal costs half a metre
+     instead of eight.
+
+     The reach stays at eight metres, and shortening it was a mistake I made
+     and undid: three metres fixed the sideways throw but left a car wedged in
+     a narrow pocket with nowhere inside three metres to go, and it sat there
+     for nine seconds. The reach was never the bug -- the ORDER was. With the
+     nearest escape always taken first, a long reach only ever gets used when
+     nothing closer exists. */
   if(BARR_TOUCH>BARR_MAX_TOUCH){
-    /* Out along the wall's normal first, which is right for a wall. Then, if
-       that finds nothing -- a pocket, where the normal points at the other
-       face -- fanned out around the circle, and finally back to the last pose
-       the car stood free in, which cannot fail because it happened. */
+    const DIRS=8, REACH=8.0;
     let ox=null, oz=0;
-    for(let a=0; a<8 && ox===null; a++){
-      const ang=(a%2?-1:1)*Math.ceil(a/2)*(Math.PI/6);      // 0, ±30, ±60, ±90
-      const dx2=nrm.x*Math.cos(ang)-nrm.z*Math.sin(ang);
-      const dz2=nrm.x*Math.sin(ang)+nrm.z*Math.cos(ang);
-      for(let d=0.5; d<=8.0; d+=0.5){
+    for(let d=0.5; d<=REACH && ox===null; d+=0.5){
+      for(let a=0; a<DIRS; a++){
+        const ang=(a%2?-1:1)*Math.ceil(a/2)*(Math.PI/6);    // 0, ±30, ±60, ±90
+        const dx2=nrm.x*Math.cos(ang)-nrm.z*Math.sin(ang);
+        const dz2=nrm.x*Math.sin(ang)+nrm.z*Math.cos(ang);
         const px=okX+dx2*d, pz=okZ+dz2*d;
         if(!barrBlocked(px,pz,h)){ ox=px; oz=pz; break; }
       }
     }
+    /* Last resort: the pose the car last stood free in. Only reached when
+       nothing in any direction within eight metres works, which means the car
+       is wedged somewhere a search cannot get it out of.
+
+       NOT guarded by distance, and that was tried twice and undone twice. A
+       car deep in a narrow V has no free pose within eight metres, and often
+       none within twenty-five either -- the last place it stood free is back
+       where it entered. Refusing that leaves it wedged for the whole race,
+       which is the exact failure this hatch exists to prevent.
+
+       It is safe to be unguarded because of the search above it: the sideways
+       throw came from taking a long move in a wrongly-guessed direction, and
+       the distance-major order fixed that at its source. By the time this line
+       runs, no direction at any distance up to eight metres works, so the only
+       thing left is somewhere the car has actually been. */
     if(ox===null && _freeX!==null && !barrBlocked(_freeX,_freeZ,_freeH)){
       ox=_freeX; oz=_freeZ; carState.hdg=_freeH;
     }
