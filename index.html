@@ -10853,7 +10853,7 @@ function aiLocate(d, x, z){
    them crash. Racing harder against each other is not the same as driving
    faster than the car can go, and only the first was asked for. */
 const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.97, clear:2.9, blue:45, race:8, threat:1.2,
-                hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:7.0, follow:60, abreast:2.6, followK:0.85 };
+                hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:3.0, follow:60, abreast:2.6, followK:0.85 };
 /* Where another car is, relative to this one: how far up or down the road, and
    which side of the line. It used to ask only about the player, because there
    was only ever the player and one AI. With a full grid every driver has to see
@@ -11152,8 +11152,15 @@ function aiTraffic(d, dt){
      slower rate the gap it opened lagged a good half metre behind the gap it
      had decided on. */
   /* Coming off the grid the move across is made slowly -- a car peeling out of
-     its box takes the run to the first corner to reach the line, it does not
-     snap onto it in the first second. Full rate again after that. */
+     its box does not snap onto the line in the first second.
+
+     THREE SECONDS, NOT SEVEN. Seven was chosen so that a car "takes the run to
+     the first corner to reach the line", and at Spa the run to the first corner
+     is about seven seconds -- so every car was still arriving at the line at
+     the exact moment it needed to already be on it, and took the tightest
+     corner on the circuit from wherever the grid had left it. That is the
+     gravel. Three seconds still looks like a car easing across rather than
+     snapping, and it is done with well before the braking zone. */
   const grid=(d._gridT!==undefined && d._gridT<AI_TRAF.gridBlend)
     ? 0.14+0.86*(d._gridT/AI_TRAF.gridBlend) : 1;
   const step=(d._urgent?T.ease*2.4:T.ease)*grid*dt;
@@ -11268,8 +11275,48 @@ function aiPedals(d, C){
      the forward pass built it at full power, so asking for the profile ahead is
      asking for full throttle exactly where full throttle is what fits. */
   const K=(d.speedK||1);
+  /* A CAR OFF THE LINE CANNOT TAKE THE CORNER AT THE LINE'S SPEED.
+
+     The profile V is solved for the racing line. A car three metres off it has
+     a tighter arc through the same corner and less road to run out into, and
+     until now it was still asking for the racing line's speed the whole way
+     down the braking zone -- which is precisely how a car that started wide
+     arrived at the first corner too fast and put two wheels in the gravel.
+
+     The penalty is applied to every point the brakes look at, not just to the
+     one the car is standing on, so it brakes EARLIER rather than discovering
+     the problem at the apex. Nothing at all until 1.5 m off, and never more
+     than a quarter, so it costs nothing in clear air where the car is on its
+     line anyway.
+
+     MEASURED AGAINST THE LINE ITS OWN PROFILE WAS SOLVED FOR, not against the
+     racing line. V here is d.vAct, the profile for whichever of race/in/out
+     the car has chosen, so a car deliberately running the inside line already
+     has the inside line's speeds and must not be charged again for being off
+     the racing one. What is left after that subtraction is the thing that
+     actually hurts: the car is not on ANY line it has a profile for. Coming
+     off the grid that is the whole four metres, which is the case this exists
+     for.
+
+     AND THE SIZE OF IT IS THE PHYSICS, not a ramp I picked. Corner speed goes
+     as the square root of the radius, so a car displaced e metres into a
+     corner of radius R can hold sqrt((R-e)/R) of the line's speed -- and the
+     curvature at every station is already stored to build the profile, so
+     R = 1/k is free. A first attempt used a hand-tuned ramp and was 1% short
+     at two metres off at a 25 m hairpin, which is exactly the case it was
+     written for. This cannot be short: it IS the limit.
+
+     It also needs no gate. On a straight k is zero and the penalty is exactly
+     1, so a car running wide down the Kemmel is charged nothing, which is
+     correct -- there is no corner there to fail to make. */
+  const _lineLat=(d.field && d.field[d.line]) ? (d.field[d.line][d.i]||0) : 0;
+  const _off=Math.abs((d.off||0)-_lineLat);
+  const offAt=q2=>{
+    const k=Math.abs((d.ks&&d.ks[q2])||0);
+    return Math.sqrt(Math.max(0.5, 1-_off*k));
+  };
   /* The corner's speed, or what the traffic allows, whichever is less. */
-  const tgt=Math.min(V[j]*K, d.capV===undefined?Infinity:d.capV);
+  const tgt=Math.min(V[j]*K*offAt(j), d.capV===undefined?Infinity:d.capV);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
 
@@ -11315,7 +11362,7 @@ function aiPedals(d, C){
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
-    const there=Math.min(V[q]*K, d.capV===undefined?Infinity:d.capV);
+    const there=Math.min(V[q]*K*offAt(q), d.capV===undefined?Infinity:d.capV);
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
     if(cap<capMin) capMin=cap;
     if(v>cap){
