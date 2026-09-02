@@ -4099,7 +4099,12 @@ const _dustC=new THREE.Color();
    nine cars could plough through a gravel trap in total silence while you threw
    a plume from the same trap a second later. It takes a car now, and yours is
    simply the default. */
-function spawnDust(speed, from){
+/* grass=true throws a different plume: green, lower, shorter-lived. Without
+   it a car running wide onto the verge threw sand, because there was only ever
+   one colour and it was gravel's. The comment beside the AI emitter has long
+   claimed grass "throws a thinner plume of its own" -- this is that plume,
+   which until now did not exist. */
+function spawnDust(speed, from, grass){
   const i=dustHead; dustHead=(dustHead+1)%DUST_N;
   const g=from||carGroup;
   const h=g.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
@@ -4112,12 +4117,20 @@ function spawnDust(speed, from){
      so the plume drifts outward and hangs rather than trailing in a line. */
   const back=speed*(0.18+Math.random()*0.30);
   dustVel[i*3]  =-fx*back - fz*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustVel[i*3+1]= 1.1+Math.random()*2.4 + speed*0.035;
+  dustVel[i*3+1]= grass ? 0.5+Math.random()*1.0 + speed*0.012
+                        : 1.1+Math.random()*2.4 + speed*0.035;
   dustVel[i*3+2]=-fz*back + fx*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustMax[i]=dustLife[i]=0.7+Math.random()*0.9;
-  // sand: warm, desaturated, and varied so the plume is not one flat colour
-  _dustC.setHSL(0.108+Math.random()*0.035, 0.34+Math.random()*0.16,
-                0.56+Math.random()*0.16);
+  dustMax[i]=dustLife[i]=grass ? 0.35+Math.random()*0.35    // settles quickly
+                                : 0.7+Math.random()*0.9;
+  if(grass)
+    /* Torn grass and damp earth: green, dark, and much less saturated than
+       sand, so a car on the verge does not look like it is in a gravel trap. */
+    _dustC.setHSL(0.24+Math.random()*0.06, 0.20+Math.random()*0.14,
+                  0.26+Math.random()*0.12);
+  else
+    // sand: warm, desaturated, and varied so the plume is not one flat colour
+    _dustC.setHSL(0.108+Math.random()*0.035, 0.34+Math.random()*0.16,
+                  0.56+Math.random()*0.16);
   const col=dustPts.geometry.attributes.color.array;
   col[i*3]=_dustC.r; col[i*3+1]=_dustC.g; col[i*3+2]=_dustC.b;
 }
@@ -9705,7 +9718,9 @@ function placeCar(C, dt, t){
     const frac=C.surf.loose?(C.surf.looseFrac||1):(C.surf.grassFrac||1)*0.55;
     C._spray=(C._spray||0) + (18+C.st.speed*2.0)*frac*dt;
     let guard=0;
-    while(C._spray>=1 && guard++<4){ C._spray-=1; spawnDust(C.st.speed, C.group); }
+    while(C._spray>=1 && guard++<4){
+      C._spray-=1; spawnDust(C.st.speed, C.group, !C.surf.loose);
+    }
     if(C._spray>1.5) C._spray=1.5;
   } else C._spray=0;
   C.slipAng += (slipT-C.slipAng)*(1-Math.pow(0.05,dt));
@@ -10729,7 +10744,22 @@ function aiLocate(d, x, z){
    Noticing stays long, because standing aside for a genuinely faster car should
    begin early. Changing line is now a thing you do about a car you can nearly
    touch. */
-const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.90, clear:2.9, blue:25, race:8, threat:2,
+/* BRAVERY LIVES IN THREE OF THESE NUMBERS.
+
+   blue    how much quicker a car behind must be before this one stands aside.
+           At 25 kph of pace advantage a car was waving past rivals it was
+           racing; a blue flag is for being lapped, not for being pressured, so
+           it takes 45 now. That alone is most of "they should want the
+           position".
+   yieldK  and when it does stand aside, it lifts 3% rather than 10%. Moving
+           over is a line change, not a pit stop.
+   threat  how much quicker somebody has to be before this car bothers
+           defending. Lower, so it covers the inside sooner.
+
+   What is deliberately NOT raised is pace, which is the one that would make
+   them crash. Racing harder against each other is not the same as driving
+   faster than the car can go, and only the first was asked for. */
+const AI_TRAF={ look:75, line:30, ease:4.0, yieldK:0.97, clear:2.9, blue:45, race:8, threat:1.2,
                 hold:1.25, overlap:12, giveK:0.94, pinK:0.82, gridBlend:7.0, follow:60, abreast:2.6, followK:0.85 };
 /* Where another car is, relative to this one: how far up or down the road, and
    which side of the line. It used to ask only about the player, because there
@@ -10875,8 +10905,14 @@ function aiTraffic(d, dt){
       d.mode='defend'; d.line='in';
     } else if(near<T.line && !behind && dv<-2){       // right there, in the way: go by
       d.mode='pass'; d.line=youInside?'out':'in';
-      const clear=Math.abs(d.lat-rel.lat)>T.clear;
-      if(rel.gap<14 && !clear) d.speedK=Math.min(1, theirs/Math.max(1,mine));
+      /* Only match their speed while genuinely stuck directly behind. This used
+         to fire whenever the gap was under 14 m regardless of how far across
+         the road the two of them were, so a car halfway alongside slowed itself
+         to the pace of the car it was passing -- which is how a pass stalls
+         into a queue. Once there is a metre and a half of daylight it stays on
+         its own pace and completes the move. */
+      const clear=Math.abs(d.lat-rel.lat)>1.5;
+      if(rel.gap<10 && !clear) d.speedK=Math.min(1, theirs/Math.max(1,mine));
     } else if(rel.apart<14){                     // side by side: take the other line
       d.mode='hold'; d.line=youInside?'out':'in';
     }
@@ -10950,27 +10986,62 @@ function aiTraffic(d, dt){
      Blanchimont and everything at La Source, which is where they were ending up
      in the gravel. */
   let cap=Infinity;
-  const look=(x,z,vth,lat)=>{
-    const n=d.n, i=d.i;
+  /* IS THAT CAR IN MY WAY, OR MERELY NEAR THE RACING LINE?
+
+     This walked forward along the bare centreline and asked whether anybody was
+     within 2.6 m of it. The `lat` argument was accepted and then never used, so
+     the question being answered was "is that car near the LINE" when the
+     question that matters is "is that car in front of ME". Both ways round are
+     wrong, and both were measured on the geometry of a bunched first corner --
+     this car at 108 kph, a rival 20 m ahead at 90:
+
+       - THIS CAR 3 m WIDE, RIVAL ON THE LINE 3 m ACROSS FROM IT: old rule caps
+         to 139 kph, new rule does not cap. Nobody is in the way; the rival is
+         simply near the line. In a bunch every car is off the line and somebody
+         is always on it, so every car was capping off a car it was nowhere
+         near. That is the concertina.
+       - BOTH PUSHED THE SAME 3 m WIDE, RIVAL DIRECTLY AHEAD: old rule does not
+         cap at all, new rule caps to 139. The dangerous half of the same bug --
+         the one car that genuinely was in front went unseen.
+
+     So it is asked along the path this car is actually on -- the line offset by
+     its own lateral -- against where the other car actually is. In clear air
+     nothing changes: the offset is zero and this is the old test. In a bunch it
+     is the difference between nine cars capping each other and nine cars
+     racing, and a bunch is what the first corner is. */
+  const look=(x,z,vth)=>{
+    const n=d.n, i=d.i, myLat=d.lat||0;
     let gap=Infinity;
     for(let m=1;m<=Math.round(AI_TRAF.follow/d.ds);m++){
-      const q=(i+m)%n;
-      if((d.x[q]-x)**2+(d.z[q]-z)**2 < AI_TRAF.abreast*AI_TRAF.abreast){ gap=m*d.ds; break; }
+      const q=(i+m)%n, r=(q+1)%n;
+      const tx=d.x[r]-d.x[q], tz=d.z[r]-d.z[q], tl=Math.hypot(tx,tz)||1;
+      const px=d.x[q]+(tz/tl)*myLat, pz=d.z[q]-(tx/tl)*myLat;   // my path, not the line
+      if((px-x)**2+(pz-z)**2 < AI_TRAF.abreast*AI_TRAF.abreast){ gap=m*d.ds; break; }
     }
     if(gap===Infinity) return;
     const room=Math.max(0, gap-CAR_LEN*1.5);
     const allow=Math.sqrt(vth*vth + 2*46*AI_TRAF.followK*room);
     if(allow<cap) cap=allow;
   };
-  look(carState.wx, carState.wz, carState.speed, 0);
+  look(carState.wx, carState.wz, carState.speed);
   for(const o of AIS){
     if(o===d||!o.car||!o.on) continue;
-    look(o.car.st.wx, o.car.st.wz, o.car.st.speed, o.lat||0);
+    look(o.car.st.wx, o.car.st.wz, o.car.st.speed);
   }
+  /* Off the line into a slow corner, give a little of the corner speed back --
+     a car shoved wide has a tighter arc and less road to take it in.
+
+     Softened, and it only ever mattered at one place. The test is `slow`, and
+     the only corner on this circuit slow enough to trip it is the first one --
+     which is also the only corner the whole field arrives at still bunched, so
+     every car was off the line, every car took the full penalty, and the first
+     corner was the one that crawled. Eight per cent at most now rather than
+     sixteen, and it needs two metres of displacement rather than 1.2 before it
+     starts. */
   const wide=Math.abs(d.lat||0);
-  if(wide>1.2){
+  if(wide>2.0){
     const slow=d.v[d.i]<45;                       // a corner worth respecting
-    if(slow) cap=Math.min(cap, d.v[d.i]*(1-Math.min(0.16,(wide-1.2)*0.05)));
+    if(slow) cap=Math.min(cap, d.v[d.i]*(1-Math.min(0.08,(wide-2.0)*0.03)));
   }
   d.capV=cap;
   /* Twice the rate when it is getting out of your way. The normal ease is set
@@ -11118,7 +11189,11 @@ function aiPedals(d, C){
      where a driver would put them and go on properly, instead of forty metres
      early at three quarters of a pedal. That was the complaint, and that is
      what is fixed. */
-  const BRAKE=46;
+  /* The bias picked up at the start of this lap: what this driver BELIEVES it
+     can brake at, which is not always what it can. The car itself is unchanged
+     -- 46 is still the real number everywhere else -- so believing 6% too much
+     really does cost it the corner. */
+  const BRAKE=46*(d.brakeJit||1);
   if(!AI_LATE_BRAKE) return {thr:0, brk:clamp(-a/BRAKE,0,1)};
   let need=0, capMin=Infinity;
   const N=Math.min(d.n-1, Math.round(200/d.ds));
@@ -11510,7 +11585,10 @@ function aiField(n){
                       _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
                       _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
                       _prevLap:0, outside:0, room:99, _onBrakes:false, _brkS:0,
-                      _gridT:undefined, lapN:0, capV:Infinity });
+                      _gridT:undefined, lapN:0, capV:Infinity,
+                      /* The first lap needs a bias too -- it is set when a car crosses
+                         the line, and on lap one it has not crossed it yet. */
+                      brakeJit:0.94+Math.random()*0.12 });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -11591,6 +11669,14 @@ function raceClock(dt){
     if(!d.car || !d.on || d.finish) continue;
     if(d._prevLap>d.n*0.9 && d.i<d.n*0.1){
       d.lapN=(d.lapN||0)+1;
+      /* A DIFFERENT LAP EACH LAP. Every driver picks up a small braking bias
+         when it crosses the line and keeps it for that lap: above one it leaves
+         the brakes fractionally later than it can really afford and runs a
+         little deep, below one it brakes early and gives the corner away. Plus
+         or minus six per cent, which is enough that no two laps are the same
+         and a car occasionally makes a mess of a corner, and small enough that
+         it is a scruffy lap rather than a trip into the barrier. */
+      d.brakeJit=0.94+Math.random()*0.12;
       if(d.lapN>=RACE_LAPS) d.finish=RACE.raceT;
     }
     d._prevLap=d.i;
