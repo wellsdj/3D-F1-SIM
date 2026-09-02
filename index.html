@@ -780,6 +780,17 @@ if('serviceWorker' in navigator){
 </script>
 </head>
 <body>
+<div id="perf"></div>
+<style>
+#perf{position:fixed;left:12px;top:12px;z-index:60;display:none;
+  font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#dff1f6;background:rgba(8,14,18,.78);border:1px solid rgba(140,200,220,.25);
+  border-radius:8px;padding:9px 12px;white-space:pre;pointer-events:none;
+  text-shadow:0 1px 2px rgba(0,0,0,.6);min-width:230px}
+#perf.on{display:block}
+#perf b{color:#7fe3ff;font-weight:600}
+#perf .warn{color:#ffcc66}
+</style>
 <canvas id="c"></canvas>
 <div id="vignette"></div>
 
@@ -4682,6 +4693,23 @@ addEventListener('keydown',e=>{
   /* R does nothing. It used to put the car back on the line and start the lap
      again, which is a keystroke away from throwing away a lap you were in the
      middle of -- and it sits next to the keys you actually drive with. */
+  /* F puts the frame budget on screen, and the two settings under it are the
+     two that actually move it. Nothing here is a code change: they are the
+     knobs a WebGL page has. */
+  if(k==='f' && !m2On){ PERF_ON=!PERF_ON; perfDraw(); return; }
+  if(PERF_ON && (k==='['||k===']')){
+    RENDER_SCALE=clamp(RENDER_SCALE+(k===']'?0.25:-0.25), 0.5, 2.0);
+    perfApply(); perfDraw(); return;
+  }
+  if(PERF_ON && k==='u'){
+    renderer.shadowMap.enabled=!renderer.shadowMap.enabled;
+    /* r128 caches the compiled programs, and shadows are compiled in. Without
+       this the switch does nothing until something else forces a recompile. */
+    scene.traverse(o=>{ if(o.isMesh&&o.material){
+      (Array.isArray(o.material)?o.material:[o.material])
+        .forEach(m=>{ if(m) m.needsUpdate=true; }); } });
+    perfDraw(); return;
+  }
   /* G opens the circuit from above with the brush in hand. The button that used
      to do this is set to display:none -- it was tidied off the screen as a tool
      rather than a control -- so until now there was no way to reach the paint at
@@ -12860,6 +12888,52 @@ const STEP=1/60, MAX_STEPS=15, LONG_STEP=0.1;
 const PROF={phys:0, place:0, cull:0, draw:0, steps:0, frames:0, probes:0};
 function profReset(){ for(const k in PROF) PROF[k]=0; }
 let _acc=0, _simFps=60;
+/* WHAT IS COSTING THE FRAME.
+
+   There has been a profiler behind SIM.prof() for a long time, which is the
+   right numbers in the wrong place: you cannot read a console while driving,
+   and the frame rate question is always "what was happening WHEN it dropped".
+   So the same numbers, on screen, on a key.
+
+   The two settings beside them are the two biggest levers in any WebGL page
+   and neither of them is a code change:
+
+   RENDER SCALE multiplies the pixels being shaded. The default caps at 1.75,
+   so on a Retina display the card is filling three times the pixels of a 1.0
+   buffer. If drawMs falls when this comes down, the frame is fill-bound and
+   this is the fix -- no amount of rewriting the language touches it.
+
+   SHADOWS re-render every caster from the sun's point of view, every frame,
+   into a 2048x2048 map. If drawMs falls sharply with them off, that is where
+   the frame went. */
+let PERF_ON=false, RENDER_SCALE=1.75, _perfT=0;
+function perfApply(){
+  renderer.setPixelRatio(Math.min(devicePixelRatio, RENDER_SCALE));
+  renderer.setSize(innerWidth, innerHeight, false);
+}
+function perfDraw(){
+  const el=document.getElementById('perf');
+  if(!el) return;
+  el.classList.toggle('on', PERF_ON);
+  if(!PERF_ON) return;
+  const f=Math.max(1,PROF.frames), i=renderer.info;
+  const fps=_simFps, slow=fps<50?' class="warn"':'';
+  const pr=renderer.getPixelRatio();
+  el.innerHTML=
+     '<b>'+fps.toFixed(0)+' fps</b>   '+(1000/Math.max(1,fps)).toFixed(1)+' ms/frame\n'
+    +'draw   <span'+slow+'>'+(PROF.draw/f).toFixed(2)+' ms</span>\n'
+    +'physics '+(PROF.phys/f).toFixed(2)+' ms\n'
+    +'\n'
+    +'draw calls  '+i.render.calls+'\n'
+    +'triangles   '+i.render.triangles.toLocaleString()+'\n'
+    +'geometries  '+i.memory.geometries+'\n'
+    +'textures    '+i.memory.textures+'\n'
+    +'\n'
+    +'render scale '+RENDER_SCALE.toFixed(2)+'  ('+pr.toFixed(2)+' used)   [ ]\n'
+    +'shadows      '+(renderer.shadowMap.enabled?'on ':'off')+'                U\n'
+    +'F to hide';
+  profReset();
+}
 function frame(now){
   requestAnimationFrame(frame);
   const raw=Math.min((now-last)/1000, 0.25); last=now;
@@ -12877,6 +12951,7 @@ function frame(now){
      sliding into slow motion, which is the thing you actually notice. */
   if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; steps++; }
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
+  if(PERF_ON && (_perfT+=dt)>0.25){ _perfT=0; perfDraw(); }
   tmDraw();
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
   windU.value=t;
