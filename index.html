@@ -1434,7 +1434,36 @@ const MAXSPEED    = 100;    // m/s = 360 km/h exactly
    the twitch that came with the last of it. */
 const A_GRIP      = 50;     // m/s^2 of lateral grip, ~5.1 g
 
+/* Everything that throws a shadow, so the ones too far away to throw a visible
+   one can stop being re-rendered into the map.
+
+   This array has been filled in nine places and read in none of them: the cull
+   it exists for was never written. Meanwhile the shadow pass draws every
+   caster in the scene a second time, and a ten-car field is 480 meshes and
+   about 974,000 triangles of that on its own -- rendered once for the picture
+   and once for the sun, whether the car is beside you or a kilometre up the
+   road with its shadow off the edge of the map entirely.
+
+   The map covers 110 m now. A caster further than 80 m from the car cannot put
+   anything inside it, so it is switched off. The flag is only written when it
+   changes, and the sweep runs ten times a second rather than every frame,
+   because neither the scenery nor the field moves 80 m in a tenth of a
+   second. */
 const shadowCasters=[];
+const SHADOW_CAST_DIST=80, _SCD2=SHADOW_CAST_DIST*SHADOW_CAST_DIST;
+let _castT=0;
+function shadowCastCull(dt, cx, cz){
+  if((_castT+=dt)<0.1) return;
+  _castT=0;
+  for(let i=0;i<shadowCasters.length;i++){
+    const o=shadowCasters[i];
+    if(!o || !o.parent) continue;
+    const e=o.matrixWorld.elements;
+    const dx=e[12]-cx, dz=e[14]-cz;
+    const on=(dx*dx+dz*dz)<_SCD2;
+    if(o.castShadow!==on) o.castShadow=on;
+  }
+}
 const treeCells=[];
 
 /* ================================================================= TRACK ==
@@ -2469,15 +2498,44 @@ function boardTexture(num){
 
 /* --------------------------------------------------------------- renderer */
 const canvas   = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+/* MULTISAMPLING, BUT ONLY WHERE IT IS WORTH THE BANDWIDTH.
+
+   On a display with more than one device pixel per CSS pixel the buffer is
+   already supersampled, and MSAA on top of that costs a full extra sample
+   buffer for an edge improvement almost nobody can see. It stays on for
+   ordinary 1x screens, where it is the difference between clean edges and
+   stair-steps. This is a context attribute -- it cannot be changed after the
+   renderer exists -- so it is decided once, here. */
+const _hiDPI = devicePixelRatio >= 1.5;
+const renderer = new THREE.WebGLRenderer({canvas, antialias:!_hiDPI,
+                                          powerPreference:'high-performance'});
+/* THE SINGLE BIGGEST NUMBER IN THIS FILE FOR FRAME RATE.
+
+   It capped at 1.75, so a Retina display was shading 1.75 x 1.75 = just over
+   THREE TIMES the pixels of a 1.0 buffer, every frame, for every pass. At 1.25
+   it is 1.56 times -- half the fragment work of 1.75 for a picture that is
+   still sharper than native. Everything else on this page is a rounding error
+   next to it.
+
+   [ and ] move it live and the choice is remembered, so anyone who prefers the
+   sharper picture to the frames can have it back in one keystroke. */
+const _savedScale=parseFloat(localStorage.getItem('gfxScale')||'');
+renderer.setPixelRatio(Math.min(devicePixelRatio,
+  (_savedScale>=0.5&&_savedScale<=2) ? _savedScale : 1.25));
 renderer.setSize(innerWidth,innerHeight,false);
 renderer.outputEncoding   = THREE.sRGBEncoding;
 renderer.toneMapping      = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.02;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
-const MAXANISO = renderer.capabilities.getMaxAnisotropy();
+/* PCF rather than PCFSoft: the soft variant takes several extra taps per
+   fragment for a slightly kinder edge, and it is paid on every lit surface in
+   frame. */
+renderer.shadowMap.type    = THREE.PCFShadowMap;
+/* Four, not sixteen. Anisotropic filtering takes extra texture samples at
+   grazing angles, and the road ahead is nothing but grazing angles -- so this
+   is paid on most of the screen, most of the time. The step from 4 to 16 is
+   hard to see on a moving image and is four times the samples. */
+const MAXANISO = Math.min(4, renderer.capabilities.getMaxAnisotropy());
 
 const scene  = new THREE.Scene();
 const HORIZON = 0xb9c9d6;
@@ -2521,10 +2579,15 @@ const raceHemi = new THREE.HemisphereLight(sRGB(0x9fc3e2).getHex(), sRGB(0x4d4a3
 scene.add(raceHemi);
 const sun = new THREE.DirectionalLight(sRGB(0xfff2dc).getHex(), 2.35);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.left=-72; sun.shadow.camera.right=72;
-sun.shadow.camera.top=72;   sun.shadow.camera.bottom=-72;
-sun.shadow.camera.near=1;   sun.shadow.camera.far=420;
+/* A 2048 map over a 144 m box is 14 texels per metre; a 1024 map over a 110 m
+   box is 9.3. A quarter of the memory and a quarter of the fill for a shadow
+   that is a third softer, and the smaller box also means fewer casters are
+   inside it to be re-rendered -- which is the part that costs geometry rather
+   than fill. */
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left=-55; sun.shadow.camera.right=55;
+sun.shadow.camera.top=55;   sun.shadow.camera.bottom=-55;
+sun.shadow.camera.near=1;   sun.shadow.camera.far=260;
 sun.shadow.bias=-0.0006; sun.shadow.normalBias=0.035;
 // r128 never recomputes this itself -- updateMatrices() reads projectionMatrix
 // but never rebuilds it, so without this the frustum stays at its default
@@ -11652,6 +11715,12 @@ function aiSpawnOne(d){
   if(d.car||!carObj) return false;
   const g=new THREE.Group(); scene.add(g);
   const m=carObj.clone(true);
+  /* The clone inherits castShadow from the model it came from, but it is not
+     in shadowCasters, so nothing could ever switch it off -- and nine rival
+     cars are 480 meshes and about 974,000 triangles rendered a second time for
+     the sun, most of them nowhere near the car. Registering them is what puts
+     them under the distance cull. */
+  m.traverse(o=>{ if(o.isMesh && o.castShadow) shadowCasters.push(o); });
   g.add(m); d.obj=g;
   d.liv=LIVERIES[(AIS.indexOf(d)+LIVERIES.length)%LIVERIES.length] || LIVERIES[0];
   d.name=d.liv.name;
@@ -12906,10 +12975,12 @@ let _acc=0, _simFps=60;
    SHADOWS re-render every caster from the sun's point of view, every frame,
    into a 2048x2048 map. If drawMs falls sharply with them off, that is where
    the frame went. */
-let PERF_ON=false, RENDER_SCALE=1.75, _perfT=0;
+let PERF_ON=false, _perfT=0;
+let RENDER_SCALE=(_savedScale>=0.5&&_savedScale<=2)?_savedScale:1.25;
 function perfApply(){
   renderer.setPixelRatio(Math.min(devicePixelRatio, RENDER_SCALE));
   renderer.setSize(innerWidth, innerHeight, false);
+  try{ localStorage.setItem('gfxScale', String(RENDER_SCALE)); }catch(e){}
 }
 function perfDraw(){
   const el=document.getElementById('perf');
@@ -12930,7 +13001,9 @@ function perfDraw(){
     +'textures    '+i.memory.textures+'\n'
     +'\n'
     +'render scale '+RENDER_SCALE.toFixed(2)+'  ('+pr.toFixed(2)+' used)   [ ]\n'
-    +'shadows      '+(renderer.shadowMap.enabled?'on ':'off')+'                U\n'
+    +'shadows      '+(renderer.shadowMap.enabled?'on ':'off')
+      +' '+sun.shadow.mapSize.x+'px           U\n'
+    +'msaa         '+(_hiDPI?'off (hi-dpi)':'on')+'\n'
     +'F to hide';
   profReset();
 }
@@ -12951,6 +13024,7 @@ function frame(now){
      sliding into slow motion, which is the thing you actually notice. */
   if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; steps++; }
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
+  shadowCastCull(dt, carState.wx, carState.wz);
   if(PERF_ON && (_perfT+=dt)>0.25){ _perfT=0; perfDraw(); }
   tmDraw();
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
