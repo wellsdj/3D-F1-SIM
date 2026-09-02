@@ -6013,7 +6013,7 @@ function wallsDetect(){
    about 1,750 points and nothing per frame. */
 const GAP_REACH=25;             // no wall within this is a gap worth showing
 const GAP_MIN=12;               // and only runs at least this long are worth drawing
-let GAPS=null; ONROAD=null;                  // [[{x,z},{x,z}...]] -- a band down each open stretch
+let GAPS=null;                               // [[{x,z},{x,z}...]] -- a band down each open stretch
 function wallsGaps(force){
   if(GAPS && !force) return GAPS;
   GAPS=[];
