@@ -1449,6 +1449,43 @@ const A_GRIP      = 50;     // m/s^2 of lateral grip, ~5.1 g
    changes, and the sweep runs ten times a second rather than every frame,
    because neither the scenery nor the field moves 80 m in a tenth of a
    second. */
+/* AI EXCURSIONS, COUNTED WHERE THEY ACTUALLY HAPPEN.
+
+   I tried to test "do the rivals put a wheel on the gravel at the first
+   corner" offline and could not: reproducing it needs the racing line and the
+   track limits, and both are built from the track mesh at load. The harness I
+   wrote drove cars along the circuit's spine with the spine's curvature, so a
+   displaced car met exactly the same corner as a centred one and nothing ever
+   ran wide -- it reported no excursions before the fix and none after, which
+   is a broken test rather than a passing one, and it is deleted.
+
+   The place where the racing line and the track limits both exist is the game.
+   So the game counts it: every time a rival crosses its own track limit, and
+   where. Read it off the F overlay after a start. */
+const AI_OFF={events:0, worst:0, atFirst:0, since:0};
+function aiOffTrackWatch(d){
+  /* Reading d._spare, which aiTraffic has already worked out this frame.
+
+     The obvious way to write this was to ask tlStation where the car is. That
+     would have been a bad bug: tlStation keeps ONE shared cursor and searches
+     twenty stations either side of it, so asking it about nine cars scattered
+     round the lap misses the window every time, falls back to sweeping all
+     ~1,850 stations, and does that nine times a frame -- while also dragging
+     the player's own cursor round the circuit behind them. The number was
+     already computed a few lines earlier for nothing. */
+  if(!d || d._spare===undefined) return;
+  const over=-d._spare-1.3;      // aiRoom keeps 1.3 m back from the white line
+  const out=over>0;
+  if(out && !d._wasOut){
+    AI_OFF.events++;
+    /* The first corner is the one under question, and it is the slowest place
+       on the circuit -- so "the field is still near the start" plus "this is a
+       slow corner" identifies it without hard-coding a station. */
+    if(RACE.raceT<25 && d.v && d.v[d.i]<32) AI_OFF.atFirst++;
+  }
+  if(out && over>AI_OFF.worst) AI_OFF.worst=over;
+  d._wasOut=out;
+}
 const shadowCasters=[];
 const SHADOW_CAST_DIST=80, _SCD2=SHADOW_CAST_DIST*SHADOW_CAST_DIST;
 let _castT=0;
@@ -11141,6 +11178,7 @@ function aiTraffic(d, dt){
   const edgeSide=off>=0?1:-1;
   const roomHere=aiRoom(d.i, edgeSide);
   const spare=roomHere-Math.abs(off);              // metres of road still there
+  d._spare=spare;                                 // read by aiOffTrackWatch
   if(spare<1.5){
     const over=clamp((1.5-spare)/2.5, 0, 1);
     cap=Math.min(cap, Math.max(d.v[d.i]*0.55, d.v[d.i]*(1-0.20*over)));
@@ -12078,6 +12116,7 @@ function raceStart(opts){
   }
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
+  AI_OFF.events=0; AI_OFF.worst=0; AI_OFF.atFirst=0;
   RACE.raceT=0; RACE.lapN=0; RACE.pos=1; RESULT.on=false; RESULT.rows=[]; RESULT.you=0; RESULT._left=-1;
   for(const d of AIS){ d.finish=0; d.lapN=0; d._prevLap=d.i; }
   RACE.hold=RACE_HOLD[0]+Math.random()*(RACE_HOLD[1]-RACE_HOLD[0]);
@@ -12235,6 +12274,7 @@ function aiStep(d, dt, t){
   stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(d, C, dt)}, dt);
   /* And then the barriers, which apply to them exactly as they do to you. */
   if(aiWall(C, dt)) d.hitWall=(d.hitWall||0)+1;
+  aiOffTrackWatch(d);
   placeCar(C, dt, t);
   d.t+=dt;
   /* Recorded in here rather than polled from outside: a headless browser asking
@@ -13046,6 +13086,9 @@ function perfDraw(){
     +'triangles   '+i.render.triangles.toLocaleString()+'\n'
     +'geometries  '+i.memory.geometries+'\n'
     +'textures    '+i.memory.textures+'\n'
+    +'\n'
+    +'AI off track '+AI_OFF.events+'   at turn 1: '+AI_OFF.atFirst
+      +'   worst '+AI_OFF.worst.toFixed(1)+' m\n'
     +'\n'
     +'render scale '+RENDER_SCALE.toFixed(2)+'  ('+pr.toFixed(2)+' used)   [ ]\n'
     +'shadows      '+(renderer.shadowMap.enabled?'on ':'off')
