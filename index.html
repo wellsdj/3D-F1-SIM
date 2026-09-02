@@ -13024,10 +13024,14 @@ function frame(now){
      sliding into slow motion, which is the thing you actually notice. */
   if(_acc>=STEP){ stepWorld(Math.min(_acc,LONG_STEP)); _acc=0; steps++; }
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
-  shadowCastCull(dt, carState.wx, carState.wz);
-  if(PERF_ON && (_perfT+=dt)>0.25){ _perfT=0; perfDraw(); }
   tmDraw();
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
+  /* Below the declaration of dt, not above it. Placing these two lines where
+     the frame counters are read looked tidy and put them two lines before dt
+     exists, which is a dead-zone throw on the first frame and takes the whole
+     loop with it. */
+  shadowCastCull(dt, carState.wx, carState.wz);
+  if(PERF_ON && (_perfT+=dt)>0.25){ _perfT=0; perfDraw(); }
   windU.value=t;
 
   /* The garage is a real inspection view, not a still image. The normal
