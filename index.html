@@ -792,6 +792,7 @@ if('serviceWorker' in navigator){
   <div id="m2hint">Click to drop a point, click again for the next &mdash; the line joins them up
     &middot; drag a point to move it &middot; Shift-click a point to delete it
     &middot; <b>click a wall to select it, then Delete</b> (or Alt-click)
+    &middot; <b style="color:#ff9628">orange</b> = standing on the road
     &middot; Enter or right-click ends the line &middot; Find walls reads them off the circuit
     &middot; arrow keys to move about (Shift for further) &middot; scroll to zoom</div>
   <div id="m2bar">
@@ -4685,7 +4686,7 @@ addEventListener('keydown',e=>{
       const n=WALLS[wallPick].length;
       WALLS.splice(wallPick,1);
       wallPick=-1;
-      wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
+      wallsSave(); wallsBake(); GAPS=null; ONROAD=null; m2Draw(); m2Info();
       m2Note('wall deleted \u2014 '+n+' points. Undo puts it back');
     } else m2Note('click a wall first, then Delete');
     e.preventDefault(); return;
@@ -6012,7 +6013,7 @@ function wallsDetect(){
    about 1,750 points and nothing per frame. */
 const GAP_REACH=25;             // no wall within this is a gap worth showing
 const GAP_MIN=12;               // and only runs at least this long are worth drawing
-let GAPS=null;                  // [[{x,z},{x,z}...]] -- a band down each open stretch
+let GAPS=null; ONROAD=null;                  // [[{x,z},{x,z}...]] -- a band down each open stretch
 function wallsGaps(force){
   if(GAPS && !force) return GAPS;
   GAPS=[];
@@ -6058,6 +6059,39 @@ function wallsGaps(force){
   return GAPS;
 }
 let m2ShowGaps=false;
+
+/* WHICH WALLS ARE STANDING ON THE ROAD.
+
+   The bake already refuses to make these solid, so they do no harm to drive
+   through -- but they are still drawn, they are still in the file, and they
+   are the ones worth deleting. Finding them by eye among four thousand walls
+   is the hard part, so they are simply coloured differently.
+
+   A wall counts as on the road when more than a quarter of the points sampled
+   along it land on painted track. A quarter rather than a half because the
+   ones that matter are usually a mis-trace that clips across a corner, not a
+   whole wall lying down the middle of it. Computed once and cached, because
+   it walks every metre of every wall. */
+let ONROAD=null;
+function wallsOnRoad(){
+  if(ONROAD) return ONROAD;
+  ONROAD=new Set();
+  if(!SURF.data||!SURF.count) return ONROAD;
+  for(let li=0;li<WALLS.length;li++){
+    const line=WALLS[li];
+    let on=0, tot=0;
+    for(let i=0;i+1<line.length;i++){
+      const ax=line[i].x, az=line[i].z, bx=line[i+1].x, bz=line[i+1].z;
+      const L=Math.hypot(bx-ax,bz-az), n=Math.max(1,Math.round(L/2));
+      for(let q=0;q<=n;q++){
+        const t=q/n, k=surfIdx(ax+(bx-ax)*t, az+(bz-az)*t);
+        tot++; if(k>=0&&SURF.data[k]) on++;
+      }
+    }
+    if(tot && on/tot > 0.25) ONROAD.add(li);
+  }
+  return ONROAD;
+}
 
 /* Load once, and bake once, whether or not the editor is ever opened -- the
    walls have to stop the car on a lap driven straight from the loading screen.
@@ -6302,7 +6336,7 @@ function wallsUndo(){
   WALLS.length=0;
   for(const l of d) WALLS.push(l.map(p=>({x:p.x, z:p.z})));
   wallDraw=null; wallDrawIdx=-1; wallSel=-1; wallSelPt=-1; wallPick=-1;
-  wallsSave(); wallsBake(); GAPS=null;
+  wallsSave(); wallsBake(); GAPS=null; ONROAD=null;
   return true;
 }
 
@@ -6317,7 +6351,7 @@ function wallCommit(){
   if(wallDrawIdx<0){ WALLS.push(wallDraw); wallDrawIdx=WALLS.length-1; }
   else WALLS[wallDrawIdx]=wallDraw;
   wallsSave(); wallsBake();
-  GAPS=null;                    // a wall was drawn: the gaps are stale
+  GAPS=null; ONROAD=null;                    // a wall was drawn: the gaps are stale
 }
 function wallEnd(){
   if(wallDraw && wallDraw.length<2 && wallDrawIdx<0){ /* a lone point: nothing */ }
@@ -6606,6 +6640,23 @@ function m2Draw(){
       }
     }
     g.stroke();
+    /* The ones standing on the road, in orange over the red. */
+    if(!m2ShowGaps){
+      const bad=wallsOnRoad();
+      if(bad.size){
+        g.strokeStyle='rgba(255,150,40,.95)'; g.lineWidth=3;
+        g.beginPath();
+        for(const li of bad){
+          const line=WALLS[li];
+          for(let i=0;i<line.length;i++){
+            const x=m2sx(line[i].x), y=m2sy(line[i].z);
+            i?g.lineTo(x,y):g.moveTo(x,y);
+          }
+        }
+        g.stroke();
+        g.lineWidth=2;
+      }
+    }
     /* The picked wall, over the top and unmistakable. */
     if(wallPick>=0 && WALLS[wallPick]){
       const line=WALLS[wallPick];
@@ -6620,15 +6671,35 @@ function m2Draw(){
       for(const p of line) g.fillRect(m2sx(p.x)-3, m2sy(p.z)-3, 6, 6);
       g.lineWidth=2;
     }
-    if(m2Sc>0.55 && !m2ShowGaps){
-      g.fillStyle='rgba(255,215,210,.95)';
-      const r=3;
-      for(const line of WALLS)
+    /* THE HANDLES, AT EVERY ZOOM.
+
+       These used to appear only above a zoom of 0.55, because ten thousand
+       points each drawn as a square turns the whole circuit into a solid
+       block. That reasoning was right and the remedy was wrong: zoomed out you
+       got red lines and nothing to aim at, which is the view you are in when
+       you are looking for a wall to delete.
+
+       So the cull is by SCREEN SPACING rather than by zoom. A point is drawn
+       only if it is at least six pixels from the last one drawn on its line --
+       far enough apart to be separate marks, close enough to show the shape.
+       Zoomed out a long traced wall reduces to a handful of dots along its
+       length; zoomed in every point appears, because by then they are all more
+       than six pixels apart. Nothing is ever a solid block, and there is
+       always something to see. */
+    if(!m2ShowGaps){
+      const r = m2Sc>0.55 ? 3 : 2, MIN=6*6;
+      g.fillStyle='rgba(255,222,216,.95)';
+      for(const line of WALLS){
+        let lx=-1e9, ly=-1e9;
         for(const p of line){
           const x=m2sx(p.x), y=m2sy(p.z);
           if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
+          const dx=x-lx, dy=y-ly;
+          if(dx*dx+dy*dy < MIN) continue;
+          lx=x; ly=y;
           g.fillRect(x-r, y-r, r*2, r*2);
         }
+      }
     }
   }
   /* The gaps: every place round the lap with no barrier within reach, drawn as
@@ -6748,6 +6819,8 @@ function m2Info(){
       ? (WALLS.length+' walls \u00b7 '+Math.round(wallsTotal()).toLocaleString()+' m \u00b7 '
          +pts.toLocaleString()+' points'
          +(m2ShowGaps&&GAPS?' \u00b7 '+GAPS.length+' gaps left':'')
+         +((!m2ShowGaps&&wallsOnRoad().size)
+            ? ' \u00b7 '+wallsOnRoad().size+' on the road (orange)' : '')
          +(BARR_ONTRACK?' \u00b7 '+BARR_ONTRACK.toLocaleString()+' m\u00b2 not solid ('
             +BARR_ONPAINT.toLocaleString()+' your paint, '+BARR_ONROAD.toLocaleString()
             +' the survey)':''))
@@ -6958,7 +7031,7 @@ function m2Init(){
         const n=WALLS[hit.line].length;
         WALLS.splice(hit.line,1);
         wallPick=-1;
-        wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
+        wallsSave(); wallsBake(); GAPS=null; ONROAD=null; m2Draw(); m2Info();
         m2Note('wall removed — '+n+' points. Undo puts it back');
         return;
       }
@@ -6969,7 +7042,7 @@ function m2Init(){
         const line=WALLS[hit.line];
         line.splice(hit.i,1);
         if(line.length<2) WALLS.splice(hit.line,1);
-        wallsSave(); wallsBake(); GAPS=null; m2Draw(); m2Info();
+        wallsSave(); wallsBake(); GAPS=null; ONROAD=null; m2Draw(); m2Info();
         m2Note(line.length<2?'line removed':'point removed');
         return;
       }
