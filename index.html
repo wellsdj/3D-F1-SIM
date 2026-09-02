@@ -8274,9 +8274,9 @@ let BARR_LURCH=0, BARR_SHAKE=0;
    gives back. It accumulates, so a driver who leans on the barriers all lap
    ends up slower than one who does not, and it is capped so a bad lap is still
    a drivable one. */
-let BARR_DMG=0;                 // metres per second off the top speed
-const BARR_DMG_MAX=22;          // about 80 kph, and no worse however many times
-const BARR_DMG_PER=0.16;        // of the speed carried in, kept as damage
+/* Kept at zero and read by nothing. The damage model it belonged to is gone;
+   the name survives only because the offline harnesses assert it stays 0. */
+let BARR_DMG=0;
 /* The line between a bounce and a shunt, as an ANGLE and not a speed.
 
    into is the cosine of the angle between where the car is pointing and the
@@ -8907,7 +8907,6 @@ function barrCheck(dt){
   BARR_HIT=2.0;
 
   const power=clamp(vN/80, 0, 1);           // by the closing speed, not the road speed
-  BARR_DMG=Math.min(BARR_DMG_MAX, BARR_DMG + vN*BARR_DMG_PER);
   /* The weight goes forward. A lurch the camera folds into its pitch, and a
      burst of violence on top of the usual cockpit buzz, both proportional to
      how hard it arrived -- at walking pace it is a nudge, at speed the horizon
@@ -8923,8 +8922,8 @@ function barrCheck(dt){
   if(typeof ttVoid==='function') ttVoid('into the barrier');
   const el=document.getElementById('limwarn');
   if(el){
-    const kph=Math.round(BARR_DMG*3.6);
-    el.innerHTML='<b>INTO THE BARRIER</b><span>'+kph+' kph of damage</span>';
+    el.innerHTML='<b>INTO THE BARRIER</b><span>'
+                +Math.round(vN*3.6)+' kph into the wall</span>';
     el.classList.add('show');
     setTimeout(()=>el.classList.remove('show'), 3200);
   }
@@ -9387,12 +9386,15 @@ function applyPedals(st, thr, brk, surf, dt){
   else if(brk>0) st.speed -= 46*dt*brk;
   else st.speed -= (0.8 + st.speed*0.028)*dt;
   st.speed=clamp(st.speed,0,MAXSPEED);
-  /* Barrier damage, and only on the player's car -- the AI is not carrying a
-     bill for a wall it hit. It is a ceiling rather than a drag, so the car
-     still accelerates exactly as it did and simply runs out of road sooner.
-     That is the part you feel: the corners are unchanged and the straight is
-     where the lap has gone. */
-  if(st===carState && BARR_DMG>0) st.speed=Math.min(st.speed, MAXSPEED-BARR_DMG);
+  /* NO DAMAGE MODEL. There was one here: every barrier hit took a slice off the
+     player's top speed, up to about 80 kph, so a scruffy race ended with the
+     car unable to reach 360 down the Kemmel. It is gone at Wells's request --
+     hitting a wall costs the time it costs at the moment you hit it, and
+     nothing after that. The car is the same car on lap twenty as on lap one.
+
+     A hit still LOOKS and FEELS like a hit: the sparks, the shake, the lurch,
+     the weight going forward and the speed it scrubs off are all unchanged.
+     What is gone is the ledger. */
 }
 /* The yaw the car actually gets for a given steering angle. The geometric
    rate alone would allow ~17 g at top speed, so it is capped at what the
@@ -11028,20 +11030,29 @@ function aiTraffic(d, dt){
     if(o===d||!o.car||!o.on) continue;
     look(o.car.st.wx, o.car.st.wz, o.car.st.speed);
   }
-  /* Off the line into a slow corner, give a little of the corner speed back --
-     a car shoved wide has a tighter arc and less road to take it in.
+  /* RUNNING OUT OF ROAD.
 
-     Softened, and it only ever mattered at one place. The test is `slow`, and
-     the only corner on this circuit slow enough to trip it is the first one --
-     which is also the only corner the whole field arrives at still bunched, so
-     every car was off the line, every car took the full penalty, and the first
-     corner was the one that crawled. Eight per cent at most now rather than
-     sixteen, and it needs two metres of displacement rather than 1.2 before it
-     starts. */
-  const wide=Math.abs(d.lat||0);
-  if(wide>2.0){
-    const slow=d.v[d.i]<45;                       // a corner worth respecting
-    if(slow) cap=Math.min(cap, d.v[d.i]*(1-Math.min(0.08,(wide-2.0)*0.03)));
+     This asked how far the car had been shoved off the line, and only at slow
+     corners. Both halves were the wrong question. Displacement is not danger:
+     three metres off the line at Blanchimont is the width of the circuit and
+     nothing at all, three metres off it at the exit of the first corner is the
+     grass. And it read d.lat, the offset the car has been TOLD to run, rather
+     than d.off, where the car has actually ended up -- which are different
+     exactly when it matters, because a car running wide is by definition not
+     where it was told to be.
+
+     So: how much tarmac is left on the side the car is drifting towards, and
+     nothing else. Inside a metre and a half of the edge it starts giving speed
+     back, up to a fifth of it at the edge itself. On a wide part of the
+     circuit this never fires however far off-line the car is, which is what
+     stops it becoming the first-corner concertina again. */
+  const off=d.off||0;
+  const edgeSide=off>=0?1:-1;
+  const roomHere=aiRoom(d.i, edgeSide);
+  const spare=roomHere-Math.abs(off);              // metres of road still there
+  if(spare<1.5){
+    const over=clamp((1.5-spare)/2.5, 0, 1);
+    cap=Math.min(cap, Math.max(d.v[d.i]*0.55, d.v[d.i]*(1-0.20*over)));
   }
   d.capV=cap;
   /* Twice the rate when it is getting out of your way. The normal ease is set
@@ -11082,7 +11093,15 @@ function aiTraffic(d, dt){
    pursuit already produces exactly the steady-state curvature needed to hold an
    arc; a second copy of it is not anticipation, it is turning twice as hard as
    the corner asks and then correcting. */
-const AI_TUNE={ look0:5, lookK:0.32, lookMin:8, lookMax:42, lead:1.6, ff:0.0, ffAt:0.12 };
+/* wideK: extra lock when the car is further off the line than it asked to be.
+   Pure pursuit already corrects -- it aims from where the car actually is --
+   but it does so over a 40 m lookahead, which is a gentle answer to a car
+   sliding towards the grass. This is the sharper one, and it is deliberately
+   small: a fifth of full lock at its very worst. Steering gain is the easiest
+   way to make a car weave, so it only appears once the car is more than a
+   metre wide of its own line, and it is proportional after that. */
+const AI_TUNE={ look0:5, lookK:0.32, lookMin:8, lookMax:42, lead:1.6, ff:0.0, ffAt:0.12,
+                wideK:0.20, wideAt:1.0, wideFull:3.5 };
 function aiSteer(d, C, dt){
   const st=C.st, v=st.speed;
   const T=AI_TUNE;
@@ -11124,6 +11143,12 @@ function aiSteer(d, C, dt){
     const f=(d.i+Math.round(Math.max(2,v*T.ffAt)/d.ds))%d.n;
     const dFF=Math.atan(WHEELBASE*d.ks[f]);
     want += -dFF*STEER_RATIO/(STEER_LOCK*lockF)*T.ff;
+  }
+  /* Wider than it meant to be: turn in, on top of everything else. */
+  const err=(d.off||0)-(d.lat||0);
+  if(Math.abs(err)>T.wideAt){
+    const k=clamp((Math.abs(err)-T.wideAt)/(T.wideFull-T.wideAt), 0, 1)*T.wideK;
+    want += -Math.sign(err)*k;
   }
   want=clamp(want,-1,1);
   want=clamp(want+(want-C.steerIn)*T.lead, -1, 1);
@@ -11588,7 +11613,7 @@ function aiField(n){
                       _gridT:undefined, lapN:0, capV:Infinity,
                       /* The first lap needs a bias too -- it is set when a car crosses
                          the line, and on lap one it has not crossed it yet. */
-                      brakeJit:0.94+Math.random()*0.12 });
+                      brakeJit:0.93+Math.random()*0.10 });
     AIS.push(d);
     aiSpawnOne(d);
   }
@@ -11676,7 +11701,11 @@ function raceClock(dt){
          or minus six per cent, which is enough that no two laps are the same
          and a car occasionally makes a mess of a corner, and small enough that
          it is a scruffy lap rather than a trip into the barrier. */
-      d.brakeJit=0.94+Math.random()*0.12;
+      /* Skewed early. Symmetric +/-6% put cars on the grass: believing you can
+         brake 6% harder than you can is an overshoot at every corner of the
+         lap, and the corner it overshoots first is the slowest one. Mostly
+         cautious, occasionally a little late. */
+      d.brakeJit=0.93+Math.random()*0.10;
       if(d.lapN>=RACE_LAPS) d.finish=RACE.raceT;
     }
     d._prevLap=d.i;
