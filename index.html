@@ -4810,6 +4810,29 @@ addEventListener('keydown',e=>{
         .forEach(m=>{ if(m) m.needsUpdate=true; }); } });
     perfDraw(); return;
   }
+  /* L opens the same overhead view with the racing line in hand instead of the
+     walls. Red is where the cars brake, green is where they get back on the
+     power, amber is a corner being held at its limit. Drag a handle across the
+     circuit to move the line, and everything downstream -- curvature, the
+     speed profile, the colours -- is rebuilt on the spot, so what is on screen
+     is what the cars will do rather than a picture of it. */
+  if(k==='l' && FREEROAM && !TTREC.playing && !NET.watching){
+    if(!m2On || m2Tool!=='line'){ m2SetTool('line'); if(!m2On) m2Show(true); }
+    else m2Show(false);
+    m2Draw(); m2Info();
+    return;
+  }
+  if(m2On && m2Tool==='line'){
+    if(k==='z' && (e.metaKey||e.ctrlKey)){
+      m2Note(lineUndoStep()?'line put back':'nothing to undo'); m2Draw(); m2Info();
+      e.preventDefault(); return;
+    }
+    if(k==='delete'||k==='backspace'){
+      lineReset(); m2Note('line reset to the generated one'); m2Draw(); m2Info();
+      e.preventDefault(); return;
+    }
+    if(k==='c'){ lineCopy(); e.preventDefault(); return; }
+  }
   /* G opens the circuit from above with the brush in hand. The button that used
      to do this is set to display:none -- it was tidied off the screen as a tool
      rather than a control -- so until now there was no way to reach the paint at
@@ -5743,6 +5766,65 @@ function clearGround(v,pad){
    what the car is judged against, and Copy hands you the numbers to keep. */
 let m2Vis=[];
 let m2Brush=25;
+/* THE RACING LINE EDITOR.
+
+   LINE_STEP is how far apart the draggable handles are. The line itself has a
+   station every metre, which is far too many to grab one of, so a handle every
+   twenty metres stands for the stations around it and the drag is spread over
+   its neighbours with a raised cosine -- move one and the line bends through
+   it rather than developing a corner.
+
+   LINE_REACH is how far that spread goes. Forty metres each side: short enough
+   to place an apex, long enough that the result is a line a car could drive. */
+const LINE_STEP=20, LINE_REACH=40;
+let lineSel=-1, lineDragY=0, lineSnap=null, lineUndo=[];
+const LINE_KEY='aiLineAdj';
+/* Stored to two decimals as a plain array. Seven thousand numbers, nearly all
+   of them zero, so it packs to almost nothing and reads back exactly. */
+function lineSave(){
+  if(!AI.adj) return;
+  try{
+    const a=Array.from(AI.adj, v=>+v.toFixed(2));
+    localStorage.setItem(LINE_KEY, JSON.stringify(a));
+  }catch(e){}
+}
+function lineLoad(){
+  try{
+    const raw=localStorage.getItem(LINE_KEY);
+    if(!raw || !AI.n) return false;
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a) || a.length!==AI.n) return false;
+    AI.adj=Float64Array.from(a);
+    aiApplyAdj();
+    return true;
+  }catch(e){ return false; }
+}
+function lineReset(){
+  if(!AI.n) return;
+  lineUndo.push(Float64Array.from(AI.adj));
+  AI.adj=new Float64Array(AI.n);
+  aiApplyAdj(); lineSave();
+}
+function lineUndoStep(){
+  const prev=lineUndo.pop();
+  if(!prev) return false;
+  AI.adj=prev; aiApplyAdj(); lineSave(); return true;
+}
+/* The same handoff the walls use: the whole adjustment on the clipboard, so it
+   can be pasted back and baked into the file. */
+function lineCopy(){
+  const a=Array.from(AI.adj||[], v=>+v.toFixed(2));
+  const txt=JSON.stringify(a);
+  const msg=t=>{ const el=document.getElementById('m2info'); if(el){ el.textContent=t;
+                 setTimeout(()=>m2Info(),2600); } };
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(
+      ()=>msg('copied the line · '+a.filter(v=>v).length+' stations moved · '
+              +Math.round(txt.length/1024)+' KB'),
+      ()=>msg('copy blocked — it is in the console'));
+  console.log('racing line adjustment (metres, +ve right, one per station):\n'+txt);
+  return txt;
+}
 let m2Tool='wall', m2Rad=6, m2PtrX=null, m2PtrY=null, m2Painting=false;                  // metres of line either side that come with a drag
 let m2On=false, m2Edge=1, m2Drag=-1, m2Pan=false, m2Sc=0.16, m2X=0, m2Y=0, m2LX=0, m2LY=0;
 const m2El=()=>document.getElementById('m2canvas');
@@ -6863,6 +6945,43 @@ function m2Draw(){
 
   /* The line in hand, in amber, with a band from the last point to the pointer
      so it is obvious where the next click lands. */
+  /* THE RACING LINE, COLOURED BY WHAT THE CAR IS DOING.
+
+     Red where the speed profile is falling -- the car is on the brakes there.
+     Green where it is climbing -- that is where the power comes back on, which
+     is the thing Wells wants to move. Amber where it is neither: the car is
+     holding the corner at its limit and the throttle is doing nothing useful.
+
+     The colours are read straight off AI.v, so they are not a description of
+     the line, they ARE what the cars will do, and they change the moment the
+     line is edited. */
+  if(m2Tool==='line' && AI.n){
+    const n=AI.n;
+    g.lineWidth=3; g.lineCap='round';
+    for(let i=0;i<n;i+=2){
+      const j=(i+2)%n;
+      const dv=AI.v[j]-AI.v[i];
+      g.strokeStyle = dv<-0.06 ? 'rgba(255,74,58,.95)'      // braking
+                    : dv> 0.06 ? 'rgba(70,224,120,.95)'     // on the power
+                               : 'rgba(255,190,60,.85)';    // held at the limit
+      g.beginPath();
+      g.moveTo(m2sx(AI.x[i]), m2sy(AI.z[i]));
+      g.lineTo(m2sx(AI.x[j]), m2sy(AI.z[j]));
+      g.stroke();
+    }
+    /* The handles. Hollow where the line has not been touched, filled where it
+       has, so what has been changed is visible at a glance. */
+    const step=Math.max(1,Math.round(LINE_STEP/AI.ds));
+    for(let i=0;i<n;i+=step){
+      const x=m2sx(AI.x[i]), y=m2sy(AI.z[i]);
+      if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
+      const moved=Math.abs(AI.adj[i]||0)>0.05;
+      g.beginPath(); g.arc(x,y, i===lineSel?5:3.4, 0, 7);
+      if(moved||i===lineSel){ g.fillStyle=i===lineSel?'rgba(120,230,255,1)':'rgba(255,255,255,.9)'; g.fill(); }
+      else { g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=1.4; g.stroke(); }
+    }
+    g.lineWidth=2;
+  }
   if(m2Tool==='wall' && wallDraw && wallDraw.length){
     g.strokeStyle='rgba(255,176,32,.95)'; g.lineWidth=2;
     g.beginPath();
@@ -6949,6 +7068,21 @@ function m2Draw(){
 function m2Info(){
   const info=document.getElementById('m2info');
   if(!info) return;
+  if(m2Tool==='line'){
+    if(!AI.n){ info.textContent='no racing line yet'; return; }
+    let moved=0, worst=0;
+    for(let i=0;i<AI.n;i++){ const a=Math.abs(AI.adj[i]||0);
+      if(a>0.05) moved++; if(a>worst) worst=a; }
+    const at=lineSel>=0?lineSel:-1;
+    info.textContent = (at>=0
+        ? Math.round(AI.v[at]*3.6)+' kph here \u00b7 '
+          +(AI.adj[at]>0?'+':'')+(AI.adj[at]||0).toFixed(2)+' m \u00b7 '
+        : '')
+      + moved+' of '+AI.n+' stations moved'
+      + (worst>0.05?' \u00b7 up to '+worst.toFixed(1)+' m':'')
+      + ' \u00b7 red brakes, green power';
+    return;
+  }
   if(m2Tool==='wall'){
     let pts=0; for(const l of WALLS) pts+=l.length;
     if(wallPick>=0 && WALLS[wallPick]){
@@ -7158,6 +7292,25 @@ function m2Init(){
   c.addEventListener('pointerdown',e=>{
     window._m2downs=(window._m2downs||0)+1;
     const [x,y]=pos(e);
+    if(m2Tool==='line'){
+      /* Grab the nearest handle, and remember where the line was so the drag
+         is measured from the click rather than from the middle of nowhere. */
+      const step=Math.max(1,Math.round(LINE_STEP/AI.ds));
+      let best=18*18, hit=-1;
+      for(let i=0;i<AI.n;i+=step){
+        const dx=m2sx(AI.x[i])-x, dy=m2sy(AI.z[i])-y, d=dx*dx+dy*dy;
+        if(d<best){ best=d; hit=i; }
+      }
+      if(hit<0){ lineSel=-1; m2Draw(); m2Info(); return; }
+      lineSel=hit;
+      lineSnap=Float64Array.from(AI.adj);
+      lineUndo.push(Float64Array.from(AI.adj));
+      if(lineUndo.length>40) lineUndo.shift();
+      lineDragY=AI.adj[hit]||0;
+      c.setPointerCapture(e.pointerId);
+      m2Draw(); m2Info();
+      return;
+    }
     if(m2Tool==='wall'){
       /* Right-click, or a click with a line in progress and nowhere to go,
          finishes the line rather than starting a stray one. */
@@ -7229,6 +7382,61 @@ function m2Init(){
   });
   c.addEventListener('pointermove',e=>{
     const [x,y]=pos(e);
+    if(m2Tool==='line'){
+      if(lineSel<0){
+        /* Hovering: the cursor says whether there is a handle to take. */
+        const step=Math.max(1,Math.round(LINE_STEP/AI.ds));
+        let near=false;
+        for(let i=0;i<AI.n && !near;i+=step){
+          const dx=m2sx(AI.x[i])-x, dy=m2sy(AI.z[i])-y;
+          if(dx*dx+dy*dy<18*18) near=true;
+        }
+        c.style.cursor=near?'grab':'default';
+        return;
+      }
+      /* HOW FAR SIDEWAYS, not how far the mouse moved. The pointer is put back
+         onto the line's own normal at that station, so dragging along the
+         circuit does nothing and dragging across it moves the line by exactly
+         the distance the pointer is off it. */
+      const i=lineSel;
+      const wx=m2wx(x), wz=m2wz(y);
+      let a=(wx-AI.bx[i])*AI.nx[i] + (wz-AI.bz[i])*AI.nz[i];
+      /* Held to the road. aiRoom already knows how much there is and keeps
+         half a car back from the white line, so the line cannot be dragged
+         somewhere no car could follow it. */
+      const lim=(typeof aiRoom==='function') ? aiRoom(i, a>=0?1:-1) : 6;
+      a=Math.max(-lim, Math.min(lim, a));
+      /* HOW FAR THE DRAG SPREADS IS THE PHYSICS, not a constant.
+
+         A raised cosine of height a over a half-width R adds a curvature of
+         a*pi^2/(2R^2) at its peak. A car at speed v can hold k = aLat/v^2. Set
+         one against the other and the shortest reach a drag may use is
+
+             R = pi * v * sqrt(a / (2*aLat))
+
+         A fixed forty metres failed this: three metres of drag over forty is a
+         108 m radius, and a car at 250 kph can hold 164 m. The line would have
+         been drivable only because the speed profile quietly slowed the cars
+         down for a bend the editor had just put in -- moving the line on a
+         straight would have cost pace with nothing on screen to say so.
+
+         So a drag on the Kemmel spreads over a hundred metres and the same
+         drag at the hairpin over fifteen, and neither of them asks the car for
+         a corner it cannot take. */
+      const A_LAT_LINE=30;
+      const vHere=Math.max(8, AI.v?AI.v[i]:40);
+      const need=Math.PI*vHere*Math.sqrt(Math.abs(a)/(2*A_LAT_LINE));
+      const reach=Math.max(1,Math.round(Math.max(LINE_REACH, need)/AI.ds)), n=AI.n;
+      const base=lineSnap||AI.adj;
+      for(let d=-reach;d<=reach;d++){
+        const q=((i+d)%n+n)%n;
+        const w=0.5*(1+Math.cos(Math.PI*d/reach));
+        AI.adj[q]=(base[q]||0)*(1-w) + a*w;
+      }
+      aiApplyAdj(i-reach-2, i+reach+2);
+      m2Draw(); m2Info();
+      return;
+    }
     if(m2Tool==='wall'){
       m2PtrX=x; m2PtrY=y;                 // the rubber band to the next point
       if(wallSel>=0 && WALLS[wallSel] && WALLS[wallSel][wallSelPt]){
@@ -7285,6 +7493,10 @@ function m2Init(){
     }
   });
   c.addEventListener('pointerup',()=>{
+    if(m2Tool==='line'){
+      if(lineSel>=0){ lineSnap=null; lineSave(); m2Draw(); m2Info(); }
+      return;
+    }
     if(m2Tool==='wall'){
       if(wallSel>=0){                  // a point was being dragged
         wallSel=-1; wallSelPt=-1;
@@ -8215,10 +8427,23 @@ document.getElementById('m2out').onclick=()=>{ m2Edge=1; m2EdgeButtons(); m2Draw
    attached to them, which is why none of them did anything: Erase never
    selected, Clear never cleared, Undo was wired to the line editor's history and
    Copy handed back the old line rather than the paint. */
+const M2_HINT_WALL=document.getElementById('m2hint')
+                 ? document.getElementById('m2hint').innerHTML : '';
+const M2_HINT_LINE=
+  'Drag a handle across the circuit to move the racing line there '
+ +'&middot; <b style="color:#ff4a3a">red</b> = on the brakes '
+ +'&middot; <b style="color:#46e078">green</b> = on the power '
+ +'&middot; <b style="color:#ffbe3c">amber</b> = holding the corner '
+ +'&middot; the speeds are rebuilt as you drag, so the colours are what the cars '
+ +'will actually do &middot; <b>Cmd-Z</b> undo &middot; <b>Delete</b> back to the '
+ +'generated line &middot; <b>C</b> copies it for baking '
+ +'&middot; arrow keys to move about &middot; scroll to zoom';
 function m2SetTool(t){
   m2Tool=t;
   const on=(id,v)=>{ const el=document.getElementById(id); if(el) el.classList.toggle('on',v); };
   on('m2wall', t==='wall');
+  const h=document.getElementById('m2hint');
+  if(h) h.innerHTML = t==='line' ? M2_HINT_LINE : M2_HINT_WALL;
   const c=m2El(); if(c) c.style.cursor=t==='wall'?'crosshair':'default';
   m2Draw(); m2Info();
 }
@@ -10382,24 +10607,78 @@ const AI_MARGIN=1.20;
 const AI={ level:7, lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
            car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
 
+/* THE LINE, AND THE HAND-MADE ADJUSTMENT TO IT.
+
+   The racing line is sampled off the track's own centre curve, which knows
+   nothing about where a driver would actually put the car. AI.adj holds one
+   number per station -- metres to move the line sideways there, positive to
+   the right -- so the generated line can be corrected by hand without giving
+   up the parameterisation that everything else depends on. Zero everywhere is
+   exactly the line as it was.
+
+   Kept as an offset rather than as moved coordinates for three reasons: it
+   cannot wander off the circuit, it survives the curve being resampled, and it
+   is a few thousand small numbers rather than a few thousand coordinate pairs
+   when it comes to saving. */
 function aiBuild(margin){
   AI._margin=margin||AI_MARGIN;
   if(!TT.curve) return false;
   const L=TT.len, n=Math.max(16,Math.round(L/AI_STEP));
-  const P=new THREE.Vector3();
   AI.n=n; AI.len=L; AI.ds=L/n;
   AI.x=new Float64Array(n); AI.y=new Float64Array(n); AI.z=new Float64Array(n);
+  AI.bx=new Float64Array(n); AI.bz=new Float64Array(n);   // the curve, unadjusted
+  AI.nx=new Float64Array(n); AI.nz=new Float64Array(n);   // and its normal
+  const P=new THREE.Vector3();
   for(let i=0;i<n;i++){
     TT.curve.getPointAt(i/n,P);
-    const g=groundAt(P.x,P.z,1e9);
-    AI.x[i]=P.x; AI.y[i]=g.hit?g.y:P.y; AI.z[i]=P.z;
+    AI.bx[i]=P.x; AI.bz[i]=P.z;
+  }
+  for(let i=0;i<n;i++){
+    const a=(i-1+n)%n, b=(i+1)%n;
+    const tx=AI.bx[b]-AI.bx[a], tz=AI.bz[b]-AI.bz[a], tl=Math.hypot(tx,tz)||1;
+    AI.nx[i]=tz/tl; AI.nz[i]=-tx/tl;                      // +ve is to the right
+  }
+  if(!AI.adj || AI.adj.length!==n) AI.adj=new Float64Array(n);
+  aiApplyAdj();
+  lineRestore();
+  return true;
+}
+/* Lay the line down again from the curve plus the adjustment, and rebuild
+   everything that is measured from it. Called after every edit, which is why
+   it does not re-sample the curve: that is the slow part and it has not
+   changed. */
+function aiApplyAdj(lo, hi){
+  const n=AI.n;
+  /* Only the stations that moved get their ground height looked up again.
+     groundAt is a spatial query into the height field and this runs on every
+     pointer-move of a drag: doing all 7,400 of them sixty times a second is
+     seconds of work per second. The window is the drag's reach and a little
+     over. x and z are cheap and are always refreshed, so nothing can go stale.
+
+     Everything below -- curvature, the profile, the offset lines -- is plain
+     array arithmetic over the whole lap and is fast enough to do in full,
+     which matters because a corner's speed depends on the corner before it. */
+  const all=(lo===undefined);
+  for(let i=0;i<n;i++){
+    const a=AI.adj[i]||0;
+    AI.x[i]=AI.bx[i]+AI.nx[i]*a;
+    AI.z[i]=AI.bz[i]+AI.nz[i]*a;
+  }
+  const reGround=(i)=>{ const g=groundAt(AI.x[i],AI.z[i],1e9); AI.y[i]=g.hit?g.y:AI.y[i]||0; };
+  if(all){ for(let i=0;i<n;i++) reGround(i); }
+  else {
+    for(let d=lo;d<=hi;d++) reGround(((d%n)+n)%n);
   }
   AI.k=aiCurvature(AI_WIN);
   AI.ks=aiSigned(AI_WIN);
-  AI.v=aiProfile(AI.k, margin||AI_MARGIN);
-  aiBuildLines(margin);
+  AI.v=aiProfile(AI.k, AI._margin||AI_MARGIN);
+  aiBuildLines(AI._margin||AI_MARGIN);
   return true;
 }
+/* Anything saved from a previous session, applied once the line exists. Called
+   after aiBuild rather than inside it, or the load would recurse through
+   aiApplyAdj on every rebuild. */
+function lineRestore(){ if(AI.n && !AI._restored){ AI._restored=true; lineLoad(); } }
 /* One over the radius of the circle through the points a window either side --
    exact for an arc of any radius, and blind to the metre-scale wobble that a
    three-point estimate reads as a corner. */
