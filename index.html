@@ -5785,16 +5785,20 @@ function lineSave(){
   if(!AI.adj) return;
   try{
     const a=Array.from(AI.adj, v=>+v.toFixed(2));
-    localStorage.setItem(LINE_KEY, JSON.stringify(a));
+    const m=Array.from(AI.mark||[]);
+    localStorage.setItem(LINE_KEY, JSON.stringify({adj:a, mark:m}));
   }catch(e){}
 }
 function lineLoad(){
   try{
     const raw=localStorage.getItem(LINE_KEY);
     if(!raw || !AI.n) return false;
-    const a=JSON.parse(raw);
+    const o=JSON.parse(raw);
+    /* The old format was a bare array of offsets, before there were marks. */
+    const a=Array.isArray(o)?o:o.adj, m=Array.isArray(o)?null:o.mark;
     if(!Array.isArray(a) || a.length!==AI.n) return false;
     AI.adj=Float64Array.from(a);
+    if(m && m.length===AI.n) AI.mark=Int8Array.from(m);
     aiApplyAdj();
     return true;
   }catch(e){ return false; }
@@ -5803,12 +5807,15 @@ function lineReset(){
   if(!AI.n) return;
   lineUndo.push(Float64Array.from(AI.adj));
   AI.adj=new Float64Array(AI.n);
+  AI.mark=new Int8Array(AI.n);
   aiApplyAdj(); lineSave();
 }
 function lineUndoStep(){
   const prev=lineUndo.pop();
   if(!prev) return false;
-  AI.adj=prev; aiApplyAdj(); lineSave(); return true;
+  if(prev.mark){ AI.mark=prev.mark; aiPedalMap(); }
+  else AI.adj=prev, aiApplyAdj();
+  lineSave(); return true;
 }
 /* The same handoff the walls use: the whole adjustment on the clipboard, so it
    can be pasted back and baked into the file. */
@@ -6850,7 +6857,9 @@ function m2Draw(){
      edited in here. Handles appear once you are close enough in to actually
      hit one -- at full-lap zoom there are thousands of points and drawing a
      square on each turns the circuit into a solid block. */
-  if(WALLS.length){
+  /* The barriers are not what is being edited in line mode, and four thousand
+     of them over the top of the racing line is most of what is on screen. */
+  if(WALLS.length && m2Tool!=='line'){
     /* Faded right back while the gaps are showing, so what is left on screen
        is the thing to be drawn rather than the thing already done. */
     g.strokeStyle=m2ShowGaps?'rgba(255,70,60,.22)':'rgba(255,70,60,.92)';
@@ -6960,10 +6969,10 @@ function m2Draw(){
     g.lineWidth=3; g.lineCap='round';
     for(let i=0;i<n;i+=2){
       const j=(i+2)%n;
-      const dv=AI.v[j]-AI.v[i];
-      g.strokeStyle = dv<-0.06 ? 'rgba(255,74,58,.95)'      // braking
-                    : dv> 0.06 ? 'rgba(70,224,120,.95)'     // on the power
-                               : 'rgba(255,190,60,.85)';    // held at the limit
+      const pd=AI.pedal?AI.pedal[i]:0;
+      g.strokeStyle = pd<0 ? 'rgba(255,74,58,.95)'          // on the brakes
+                    : pd>0 ? 'rgba(70,224,120,.95)'         // on the power
+                           : 'rgba(255,190,60,.85)';        // holding the corner
       g.beginPath();
       g.moveTo(m2sx(AI.x[i]), m2sy(AI.z[i]));
       g.lineTo(m2sx(AI.x[j]), m2sy(AI.z[j]));
@@ -6976,9 +6985,15 @@ function m2Draw(){
       const x=m2sx(AI.x[i]), y=m2sy(AI.z[i]);
       if(x<-20||y<-20||x>c.width+20||y>c.height+20) continue;
       const moved=Math.abs(AI.adj[i]||0)>0.05;
-      g.beginPath(); g.arc(x,y, i===lineSel?5:3.4, 0, 7);
-      if(moved||i===lineSel){ g.fillStyle=i===lineSel?'rgba(120,230,255,1)':'rgba(255,255,255,.9)'; g.fill(); }
-      else { g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=1.4; g.stroke(); }
+      const mk=(AI.mark&&AI.mark[i])||0;
+      g.beginPath(); g.arc(x,y, (i===lineSel||mk)?5:3.4, 0, 7);
+      if(mk){                        // told what to do by hand: filled and ringed
+        g.fillStyle = mk>0 ? 'rgba(70,224,120,1)' : 'rgba(255,74,58,1)';
+        g.fill();
+        g.strokeStyle='rgba(255,255,255,.9)'; g.lineWidth=1.6; g.stroke();
+      } else if(moved||i===lineSel){
+        g.fillStyle=i===lineSel?'rgba(120,230,255,1)':'rgba(255,255,255,.9)'; g.fill();
+      } else { g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=1.4; g.stroke(); }
     }
     g.lineWidth=2;
   }
@@ -7074,12 +7089,14 @@ function m2Info(){
     for(let i=0;i<AI.n;i++){ const a=Math.abs(AI.adj[i]||0);
       if(a>0.05) moved++; if(a>worst) worst=a; }
     const at=lineSel>=0?lineSel:-1;
+    let marked=0; if(AI.mark) for(let i=0;i<AI.n;i++) if(AI.mark[i]) marked++;
     info.textContent = (at>=0
         ? Math.round(AI.v[at]*3.6)+' kph here \u00b7 '
           +(AI.adj[at]>0?'+':'')+(AI.adj[at]||0).toFixed(2)+' m \u00b7 '
         : '')
       + moved+' of '+AI.n+' stations moved'
       + (worst>0.05?' \u00b7 up to '+worst.toFixed(1)+' m':'')
+      + (marked?' \u00b7 '+marked+' set by hand':'')
       + ' \u00b7 red brakes, green power';
     return;
   }
@@ -7302,6 +7319,22 @@ function m2Init(){
         if(d<best){ best=d; hit=i; }
       }
       if(hit<0){ lineSel=-1; m2Draw(); m2Info(); return; }
+      /* Shift on a handle sets what the car should be doing there rather than
+         moving it: auto, then get on the power, then stay off it, then auto
+         again. It is a real instruction -- aiPedals reads the same array -- so
+         the dot changing colour and the car changing behaviour are one thing,
+         not a label. */
+      if(e.shiftKey){
+        const step2=Math.max(1,Math.round(LINE_STEP/AI.ds));
+        const lo=Math.max(0,hit-((step2/2)|0)), hi=hit+((step2/2)|0);
+        const now=AI.mark[hit]||0, next = now===0?1:(now===1?-1:0);
+        lineUndo.push({mark:Int8Array.from(AI.mark)});
+        for(let q=lo;q<=hi;q++) AI.mark[((q%AI.n)+AI.n)%AI.n]=next;
+        aiPedalMap(); lineSave(); m2Draw(); m2Info();
+        m2Note(next===1?'power on from here':next===-1?'off the throttle from here'
+                                                      :'back to automatic');
+        return;
+      }
       lineSel=hit;
       lineSnap=Float64Array.from(AI.adj);
       lineUndo.push(Float64Array.from(AI.adj));
@@ -7494,7 +7527,12 @@ function m2Init(){
   });
   c.addEventListener('pointerup',()=>{
     if(m2Tool==='line'){
-      if(lineSel>=0){ lineSnap=null; lineSave(); m2Draw(); m2Info(); }
+      if(lineSel>=0){
+        /* THE HANDLE IS LET GO HERE. It was not: lineSnap was cleared and
+           lineSel was left pointing at the handle, so every mouse move after
+           the button came up carried on dragging it. */
+        lineSel=-1; lineSnap=null; lineSave(); m2Draw(); m2Info();
+      }
       return;
     }
     if(m2Tool==='wall'){
@@ -8431,6 +8469,8 @@ const M2_HINT_WALL=document.getElementById('m2hint')
                  ? document.getElementById('m2hint').innerHTML : '';
 const M2_HINT_LINE=
   'Drag a handle across the circuit to move the racing line there '
+ +'&middot; <b>Shift-click a handle</b> to set what the car does there: '
+ +'power on, off the throttle, automatic '
  +'&middot; <b style="color:#ff4a3a">red</b> = on the brakes '
  +'&middot; <b style="color:#46e078">green</b> = on the power '
  +'&middot; <b style="color:#ffbe3c">amber</b> = holding the corner '
@@ -10639,9 +10679,50 @@ function aiBuild(margin){
     AI.nx[i]=tz/tl; AI.nz[i]=-tx/tl;                      // +ve is to the right
   }
   if(!AI.adj || AI.adj.length!==n) AI.adj=new Float64Array(n);
+  if(!AI.mark || AI.mark.length!==n) AI.mark=new Int8Array(n);
   aiApplyAdj();
   lineRestore();
   return true;
+}
+/* WHAT THE CARS ACTUALLY DO, STATION BY STATION.
+
+   The first version of the line editor coloured by the slope of the speed
+   profile: falling meant brakes, rising meant power. That is a fair guess and
+   it is not the same thing. The profile is the speed the corner ALLOWS; what
+   the car does is decided by aiPedals, which looks two hundred metres up the
+   road, brakes for whichever point binds first, holds the pedal on through a
+   band rather than pumping it, and gets back on the throttle only when nothing
+   ahead demands otherwise. Between them those differ most exactly where Wells
+   is looking: the last part of a corner, where the profile has started to
+   climb but the car is still waiting.
+
+   So this runs that rule along the line once and records the pedal it chose.
+   Same lookahead, same brake limit, same band. Recomputed after every edit,
+   which is why it is cheap: one pass, no allocation beyond the two arrays.
+
+   AI.mark is the hand override -- +1 get on the power here, -1 stay off it --
+   and it is applied here as well as in the car, so the colours show it. */
+function aiPedalMap(){
+  const n=AI.n; if(!n) return;
+  if(!AI.pedal || AI.pedal.length!==n) AI.pedal=new Int8Array(n);
+  const BRAKE=46, LOOK=Math.round(200/AI.ds), BAND=0.7;
+  const ahead=Math.round(100/AI.ds);
+  let on=false;
+  for(let i=0;i<n;i++){
+    const v=AI.v[i];
+    let capMin=Infinity;
+    for(let m=1;m<=LOOK;m++){
+      const q=(i+m)%n;
+      const cap=Math.sqrt(AI.v[q]*AI.v[q] + 2*BRAKE*m*AI.ds);
+      if(cap<capMin) capMin=cap;
+    }
+    if(v>capMin) on=true; else if(v<capMin-BAND) on=false;
+    let tgt=AI.v[(i+Math.round(Math.max(3,v*0.35)/AI.ds))%n];
+    const mk=AI.mark?AI.mark[i]:0;
+    if(mk>0) tgt=Math.max(tgt, AI.v[(i+ahead)%n]);   // asked for the power here
+    if(mk<0) tgt=Math.min(tgt, v);                   // asked to stay off it
+    AI.pedal[i] = on ? -1 : (tgt>v+0.05 ? 1 : 0);    // -1 brake, +1 power, 0 holding
+  }
 }
 /* Lay the line down again from the curve plus the adjustment, and rebuild
    everything that is measured from it. Called after every edit, which is why
@@ -10673,6 +10754,7 @@ function aiApplyAdj(lo, hi){
   AI.ks=aiSigned(AI_WIN);
   AI.v=aiProfile(AI.k, AI._margin||AI_MARGIN);
   aiBuildLines(AI._margin||AI_MARGIN);
+  aiPedalMap();
   return true;
 }
 /* Anything saved from a previous session, applied once the line exists. Called
@@ -11626,6 +11708,12 @@ function aiPedals(d, C){
      It also needs no gate. On a straight k is zero and the penalty is exactly
      1, so a car running wide down the Kemmel is charged nothing, which is
      correct -- there is no corner there to fail to make. */
+  /* The hand override from the line editor. Raising the target to the profile
+     a hundred metres on means "get on the power now" where the road ahead is
+     open, and means nothing at all where a corner is coming -- the profile
+     there is already low. It cannot make a car miss a braking point, because
+     the braking rule below reads the same profile and still binds. */
+  const _mk=(AI.mark&&AI.mark[d.i])||0;
   const _lineLat=(d.field && d.field[d.line]) ? (d.field[d.line][d.i]||0) : 0;
   const _off=Math.abs((d.off||0)-_lineLat);
   const offAt=q2=>{
@@ -11633,7 +11721,10 @@ function aiPedals(d, C){
     return Math.sqrt(Math.max(0.5, 1-_off*k));
   };
   /* The corner's speed, or what the traffic allows, whichever is less. */
-  const tgt=Math.min(V[j]*K*offAt(j), d.capV===undefined?Infinity:d.capV);
+  let tgt=Math.min(V[j]*K*offAt(j), d.capV===undefined?Infinity:d.capV);
+  if(_mk>0) tgt=Math.max(tgt, Math.min(V[(d.i+Math.round(100/d.ds))%d.n]*K,
+                                       d.capV===undefined?Infinity:d.capV));
+  if(_mk<0) tgt=Math.min(tgt, v);
   const a=(tgt*tgt-v*v)/(2*la);
   if(a>=0) return {thr:clamp(a/Math.max(1e-3,26.0*(1-(v/MAXSPEED)**2)),0,1), brk:0};
 
