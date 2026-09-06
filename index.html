@@ -650,6 +650,42 @@
   #home-settings .limit-choice.on{background:rgba(255,176,32,.15);border-color:rgba(255,176,32,.72);box-shadow:inset 3px 0 #ffb020}
   #home-settings .limit-choice b{display:block;font-size:10px;letter-spacing:.13em;text-transform:uppercase}
   #home-settings .limit-choice span{display:block;margin-top:4px;font-size:9px;letter-spacing:.03em;opacity:.5;text-transform:none}
+  /* The two modes, hidden until Race is pressed. Same shape as the tile above
+     them so the panel does not jump when it opens. */
+  #modepick{display:none;flex-direction:column;gap:8px;margin-top:8px}
+  #modepick.on{display:flex}
+  #modepick button{display:flex;align-items:center;gap:14px;width:100%;cursor:pointer;
+      font-family:var(--mono);color:var(--paper);text-align:left;
+      background:linear-gradient(105deg,rgba(17,25,37,.72),rgba(9,14,22,.62));
+      border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:15px 18px}
+  #modepick button:hover{background:linear-gradient(105deg,rgba(255,176,32,.18),rgba(17,25,37,.62));
+      border-color:#ffb020;transform:translateX(6px)}
+  #modepick button svg{width:30px;height:30px;flex:none}
+  #modepick button b{display:block;font-size:13px;letter-spacing:.16em;text-transform:uppercase}
+  #modepick button span{display:block;font-size:9.5px;letter-spacing:.1em;opacity:.55;
+      text-transform:uppercase;margin-top:3px}
+  #career{position:fixed;inset:0;z-index:40;display:none;padding:clamp(28px,6vw,80px);
+      background:linear-gradient(120deg,rgba(3,7,12,.97),rgba(6,12,20,.92)),url('home-hero.png') center/cover;
+      color:var(--paper);font-family:var(--mono)}
+  #career.on{display:flex;align-items:center}
+  .career-copy{max-width:520px;display:flex;flex-direction:column;gap:18px}
+  .career-intro{font-size:11px;letter-spacing:.1em;line-height:1.7;opacity:.6;text-transform:uppercase}
+  .career-field{display:flex;flex-direction:column;gap:7px}
+  .career-field span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;opacity:.5}
+  .career-field input{font-family:var(--mono);font-size:15px;letter-spacing:.1em;color:var(--paper);
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);
+      border-radius:9px;padding:13px 15px;outline:none}
+  .career-field input:focus{border-color:#ffb020;background:rgba(255,176,32,.09)}
+  .career-stats{display:flex;gap:10px}
+  .career-stats div{flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;padding:12px 14px}
+  .career-stats b{display:block;font-size:19px;letter-spacing:.06em;color:#ffb020}
+  .career-stats span{display:block;margin-top:3px;font-size:8.5px;letter-spacing:.18em;
+      text-transform:uppercase;opacity:.5}
+  .career-actions button{font-family:var(--mono);font-size:11px;letter-spacing:.18em;
+      text-transform:uppercase;color:#111;background:#ffb020;border:0;border-radius:9px;
+      padding:15px 26px;cursor:pointer}
+  .career-actions button:hover{filter:brightness(1.08)}
   #customize-home{position:absolute;right:clamp(24px,4vw,64px);bottom:clamp(28px,5vw,72px);z-index:5;
                   padding:13px 17px 12px;font:inherit;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
                   color:#f4f7fb;background:rgba(5,10,16,.56);border:1px solid rgba(236,234,228,.24);border-radius:4px;cursor:pointer;
@@ -1010,7 +1046,25 @@ if('serviceWorker' in navigator){
   </div>
   <div id="home-actions">
     <div id="pick">
-      <button data-track="spa22"><b>Race <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Start session <strong>↗</strong></small></button>
+      <button id="racepick" data-track="spa22"><b>Race <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Choose a mode <strong>↗</strong></small></button>
+    </div>
+    <div id="modepick">
+      <button id="modequick" type="button">
+        <!-- Drawn here rather than fetched. An inline SVG has no licence to
+             check and no file to go missing, and this page has to work with no
+             network at all. -->
+        <svg viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M24 4 L11 25 h9 l-3 15 13-21 h-9 z" fill="#ffb020"/>
+        </svg>
+        <b>Quick play</b><span>Straight onto the circuit. One race, ten cars.</span>
+      </button>
+      <button id="modecareer" type="button">
+        <svg viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M22 5 l4.6 9.6 10.4 1.5 -7.6 7.4 1.9 10.5 -9.3 -5 -9.3 5 1.9 -10.5 -7.6 -7.4 10.4 -1.5 z"
+                fill="none" stroke="#ffb020" stroke-width="2.4" stroke-linejoin="round"/>
+        </svg>
+        <b>Career</b><span>Your team, your car, and a championship to win.</span>
+      </button>
     </div>
     <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
     <button id="netbtn" type="button"><b>Connect controller</b><span>PS5 / Xbox · shoulder controls</span></button>
@@ -1057,6 +1111,28 @@ if('serviceWorker' in navigator){
     <button id="lapbook-back">Back to home</button>
   </div>
   </section>
+
+<section id="career" aria-hidden="true">
+  <button class="overlay-close" id="career-close" aria-label="Close career">×</button>
+  <div class="career-copy">
+    <div class="overlay-kicker">Career · Season one</div>
+    <h2>Name your <em>team.</em></h2>
+    <p class="career-intro">Everything you win from here is yours. Pick a name, build the car,
+      and take it through the championship.</p>
+    <label class="career-field">
+      <span>Team name</span>
+      <input id="career-team" type="text" maxlength="22" placeholder="Northgate Racing" autocomplete="off">
+    </label>
+    <div class="career-stats">
+      <div><b id="career-coins">1,000</b><span>Coins</span></div>
+      <div><b id="career-round">1 / 5</b><span>Round</span></div>
+      <div><b id="career-points">0</b><span>Points</span></div>
+    </div>
+    <div class="career-actions">
+      <button id="career-next" type="button">Build the car ↗</button>
+    </div>
+  </div>
+</section>
 
 <section id="customizer" aria-hidden="true">
   <div id="customizer-stage"></div>
@@ -12603,6 +12679,21 @@ function raceNose(){
   _raceNose=ahead+0.10;                  // and a hand's width behind the line
   return _raceNose;
 }
+/* HOW LONG A DRIVER SITS THERE AFTER THE LIGHTS.
+
+   A quarter of a second to 0.35 for everyone, drawn fresh at every start --
+   a hundred milliseconds of spread, which over the run to the first corner is
+   nearly two car lengths, so the order genuinely changes on the way there.
+
+   And then half a second on top for the two cars at the front. You start on
+   pole, so those are the two directly behind you: without the handicap they
+   simply led you away every time, and the run to the first corner had nothing
+   in it. With it they are sitting still while you are already moving, which is
+   what makes the first corner worth arriving at. */
+function aiReaction(d){
+  const base=0.25+Math.random()*0.10;
+  return base + ((d && d.gridSlot<=2) ? 0.5 : 0);
+}
 function racePlace(car, slot){
   if(!gridPts.length) gridPts=GRID_SLOTS.map(editModelToWorld);
   const g0=gridPts[slot] || gridPts[0];
@@ -12659,6 +12750,7 @@ function raceStart(opts){
     const d=AIS[k];
     if(!d||!d.car) continue;
     racePlace(d, k+1);                  // slot 0 is yours, they fill 1 to 9
+    d.gridSlot=k+1;                     // remembered: the front row is handicapped
     d.obj.visible=true;
     d.on=true; d.hold=true; d.laps=[]; d.t=0; d.worst=0;
     /* Nobody's foot comes off the clutch at the same instant. A quarter of a
@@ -12667,7 +12759,7 @@ function raceStart(opts){
        fans out and one that moves as a block. Over the run to the first corner
        that is several car lengths, so places change on the way there and the
        start is worth watching. */
-    d.react=0.25+Math.random()*0.10; d._react=0;
+    d.react=aiReaction(d); d._react=0;
   }
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
@@ -12767,10 +12859,7 @@ function raceStep(dt){
          the same race twice used the same nine reaction times both times: the
          grid is laid out once and re-run, so whoever got away well got away
          well every time. Every start is its own now. */
-      for(const d of AIS){
-        d.hold=false; d._react=0;
-        d.react=0.25+Math.random()*0.10;
-      }
+      for(const d of AIS){ d.hold=false; d._react=0; d.react=aiReaction(d); }
       document.body.classList.remove('racestart');
       TT.live=true; TT.t=0; ttReset();
     }
@@ -14388,6 +14477,62 @@ addEventListener('pointerdown',e=>{
 });
 document.getElementById('bestlapsbtn').onclick=openLapBook;
 document.getElementById('customize-home').onclick=openCustomizer;
+
+/* ------------------------------------------------------------------ career
+   The save, and the first screen of it. Coins, the round you are on, and the
+   points you have are held here and written to disk on every change, so a
+   season survives a reload -- which is the whole point of a career as opposed
+   to a race.
+
+   The upgrade shop, the championship table and the invented driver names are
+   the next piece of this; what is here is the entry: name the team, build the
+   car, go racing, and the numbers that carry between rounds. */
+const CAREER_KEY='careerSave';
+const CAREER={ active:false, team:'', coins:1000, round:1, rounds:5, points:0,
+               aero:0, power:0 };
+function careerLoad(){
+  try{
+    const raw=localStorage.getItem(CAREER_KEY);
+    if(!raw) return;
+    Object.assign(CAREER, JSON.parse(raw), {active:false});
+  }catch(e){}
+}
+function careerSave(){
+  try{ localStorage.setItem(CAREER_KEY, JSON.stringify(CAREER)); }catch(e){}
+}
+function careerPaint(){
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  set('career-coins', CAREER.coins.toLocaleString());
+  set('career-round', CAREER.round+' / '+CAREER.rounds);
+  set('career-points', CAREER.points);
+  const t=document.getElementById('career-team');
+  if(t && !t.value) t.value=CAREER.team||'';
+}
+function careerOpen(){
+  careerLoad(); careerPaint();
+  const el=document.getElementById('career');
+  if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
+  const t=document.getElementById('career-team');
+  if(t) setTimeout(()=>t.focus(),60);
+}
+function careerClose(){
+  const el=document.getElementById('career');
+  if(el){ el.classList.remove('on'); el.setAttribute('aria-hidden','true'); }
+}
+{
+  const cl=document.getElementById('career-close');
+  if(cl) cl.onclick=careerClose;
+  const nx=document.getElementById('career-next');
+  if(nx) nx.onclick=()=>{
+    const t=document.getElementById('career-team');
+    CAREER.team=(t&&t.value.trim())||'Northgate Racing';
+    CAREER.active=true;
+    careerSave();
+    careerClose();
+    openCustomizer();               // build the car, then go racing from there
+  };
+  careerLoad();
+}
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
@@ -14611,12 +14756,27 @@ function startTrack(id, opts){
   });
 }
 
+/* RACE OPENS THE TWO MODES; the modes are what start anything.
+
+   The tile used to launch the session on its own. It now opens Quick play and
+   Career underneath it, and both of those do what the tile did -- so there is
+   exactly one path into the circuit and it has not moved. */
+const modeEl=document.getElementById('modepick');
+function goRacing(track){
+  if(booted) enterCircuit();            // already loaded: just go back in
+  else startTrack(track||'spa22',{race:true});
+}
 Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
   btn.addEventListener('click',()=>{
-    if(booted) enterCircuit();          // already loaded: just go back in
-    else startTrack(btn.dataset.track,{race:true});
+    if(modeEl) modeEl.classList.toggle('on');
   });
 });
+{
+  const q=document.getElementById('modequick');
+  if(q) q.addEventListener('click',()=>{ CAREER.active=false; goRacing('spa22'); });
+  const c=document.getElementById('modecareer');
+  if(c) c.addEventListener('click',()=>careerOpen());
+}
 qualifyingWeatherButtons.forEach(btn=>{
   btn.addEventListener('click',()=>qualifyingChooseWeather(btn.dataset.weather));
 });
