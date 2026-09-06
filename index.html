@@ -98,6 +98,28 @@
   #m2bar button:hover{background:rgba(255,255,255,.15)}
   #m2bar button.on{background:var(--amber);border-color:var(--amber);color:#111}
   #m2info{opacity:.6;padding:0 6px}
+  /* The line editor's own bar. Same shape as the wall bar so the panel does not
+     jump about, but it is about one thing and every control on it is for the
+     line. Only one of the two is ever on screen. */
+  #m2linebar{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:3;
+         display:none;gap:8px;align-items:center;font-family:var(--mono);font-size:10px;
+         letter-spacing:.14em;text-transform:uppercase;color:#dfe7f1;
+         background:rgba(10,13,19,.92);border:1px solid rgba(255,255,255,.14);
+         border-radius:11px;padding:10px 12px}
+  #m2linebar.on{display:flex}
+  #m2linebar .lbl{opacity:.5;padding-right:2px}
+  #m2linebar button{font:inherit;font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+                color:#dfe7f1;cursor:pointer;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:8px 12px;
+                display:flex;align-items:center;gap:7px}
+  #m2linebar button:hover{background:rgba(255,255,255,.15)}
+  #m2linebar button.sw i{width:11px;height:11px;border-radius:50%;display:block;
+                border:1px solid rgba(255,255,255,.5)}
+  #lnauto i{background:#ffbe3c}
+  #lnpow  i{background:#46e078}
+  #lnlift i{background:#ff4a3a}
+  #m2linebar button.sw.on{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.55)}
+  #lninfo{opacity:.62;padding:0 8px;max-width:340px}
   #m2hint{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:2;
           font-family:var(--mono);font-size:10px;letter-spacing:.1em;opacity:.45;
           color:#dfe7f1;text-transform:none}
@@ -806,6 +828,17 @@ if('serviceWorker' in navigator){
     &middot; <b style="color:#ff9628">orange</b> = standing on the road
     &middot; Enter or right-click ends the line &middot; Find walls reads them off the circuit
     &middot; arrow keys to move about (Shift for further) &middot; scroll to zoom</div>
+  <div id="m2linebar">
+    <span class="lbl">Set a point to</span>
+    <button id="lnauto" class="sw on" data-mark="0"><i></i>Automatic</button>
+    <button id="lnpow"  class="sw"    data-mark="1"><i></i>On the power</button>
+    <button id="lnlift" class="sw"    data-mark="-1"><i></i>Off the throttle</button>
+    <span id="lninfo"></span>
+    <button id="lnundo">Undo</button>
+    <button id="lnreset">Reset line</button>
+    <button id="lncopy">Copy line</button>
+    <button id="lnclose">Done</button>
+  </div>
   <div id="m2bar">
     <button id="m2wall" class="on">Draw walls</button>
     <button id="m2find">Find walls</button>
@@ -5777,6 +5810,10 @@ let m2Brush=25;
    LINE_REACH is how far that spread goes. Forty metres each side: short enough
    to place an apex, long enough that the result is a line a car could drive. */
 const LINE_STEP=20, LINE_REACH=40;
+/* Which colour the next click paints. 0 automatic, 1 on the power, -1 off the
+   throttle. Armed from the bar, so setting a point is a click rather than a
+   modifier nobody can remember. */
+let lineBrush=0;
 let lineSel=-1, lineDragY=0, lineSnap=null, lineUndo=[];
 const LINE_KEY='aiLineAdj';
 /* Stored to two decimals as a plain array. Seven thousand numbers, nearly all
@@ -6816,6 +6853,17 @@ function m2Draw(){
      is drawn on the track rather than on a diagram of it. */
   g.clearRect(0,0,c.width,c.height);
 
+  /* A dark wash under the racing line, and only there. The canvas is
+     transparent so that what shows through is the circuit itself, which is
+     right for placing a wall against a kerb -- and wrong for reading a line
+     whose whole meaning is its colour. Over a pale aerial photograph the red
+     and the green were washing out into the tarmac. Sixty per cent black puts
+     them back without hiding what they are drawn on. */
+  if(m2Tool==='line'){
+    g.fillStyle='rgba(6,9,13,.60)';
+    g.fillRect(0,0,c.width,c.height);
+  }
+
   /* No painted cells at all. The track mask and the barrier mask are both
      still on disk and the track one still decides lap legality, but neither is
      drawn and neither can be edited here any more: this panel is walls, and a
@@ -7324,13 +7372,18 @@ function m2Init(){
          again. It is a real instruction -- aiPedals reads the same array -- so
          the dot changing colour and the car changing behaviour are one thing,
          not a label. */
-      if(e.shiftKey){
+      /* With a colour armed on the bar a plain click paints the point that
+         colour instead of dragging it; with Automatic armed a click drags, as
+         it always did. Shift still cycles for anyone who would rather not go
+         to the bar. */
+      if(e.shiftKey || lineBrush!==0){
         const step2=Math.max(1,Math.round(LINE_STEP/AI.ds));
         const lo=Math.max(0,hit-((step2/2)|0)), hi=hit+((step2/2)|0);
-        const now=AI.mark[hit]||0, next = now===0?1:(now===1?-1:0);
+        const now=AI.mark[hit]||0;
+        const next = e.shiftKey ? (now===0?1:(now===1?-1:0)) : lineBrush;
         lineUndo.push({mark:Int8Array.from(AI.mark)});
         for(let q=lo;q<=hi;q++) AI.mark[((q%AI.n)+AI.n)%AI.n]=next;
-        aiPedalMap(); lineSave(); m2Draw(); m2Info();
+        aiPedalMap(); lineSave(); m2Draw(); m2Info(); lineInfo();
         m2Note(next===1?'power on from here':next===-1?'off the throttle from here'
                                                       :'back to automatic');
         return;
@@ -7467,7 +7520,7 @@ function m2Init(){
         AI.adj[q]=(base[q]||0)*(1-w) + a*w;
       }
       aiApplyAdj(i-reach-2, i+reach+2);
-      m2Draw(); m2Info();
+      m2Draw(); m2Info(); lineInfo();
       return;
     }
     if(m2Tool==='wall'){
@@ -7531,7 +7584,7 @@ function m2Init(){
         /* THE HANDLE IS LET GO HERE. It was not: lineSnap was cleared and
            lineSel was left pointing at the handle, so every mouse move after
            the button came up carried on dragging it. */
-        lineSel=-1; lineSnap=null; lineSave(); m2Draw(); m2Info();
+        lineSel=-1; lineSnap=null; lineSave(); m2Draw(); m2Info(); lineInfo();
       }
       return;
     }
@@ -8449,6 +8502,46 @@ function tlWheelOn(lx,lz){
 tlLoad(); tlSet(TL_TOL);
 document.getElementById('tlbtn').onclick=()=>m2Show(!m2On);
 document.getElementById('m2close').onclick=()=>m2Show(false);
+
+/* ---------------------------------------------------- the racing line bar */
+(function(){
+  const $=id=>document.getElementById(id);
+  const sw=[['lnauto',0],['lnpow',1],['lnlift',-1]];
+  const arm=v=>{
+    lineBrush=v;
+    for(const [id,val] of sw){ const b=$(id); if(b) b.classList.toggle('on', val===v); }
+    const c=m2El();
+    if(c) c.style.cursor = v===0 ? 'default' : 'copy';
+    lineInfo();
+  };
+  for(const [id,val] of sw){ const b=$(id); if(b) b.onclick=()=>arm(val); }
+  const u=$('lnundo');  if(u) u.onclick=()=>{ m2Note(lineUndoStep()?'put back':'nothing to undo');
+                                              m2Draw(); lineInfo(); };
+  const r=$('lnreset'); if(r) r.onclick=()=>{ lineReset(); arm(0);
+                                              m2Note('back to the generated line');
+                                              m2Draw(); lineInfo(); };
+  const cp=$('lncopy'); if(cp) cp.onclick=()=>lineCopy();
+  const cl=$('lnclose');if(cl) cl.onclick=()=>m2Show(false);
+})();
+/* The line bar's own readout. m2info lives in the wall bar, which is not on
+   screen in line mode, so writing there wrote into a hidden element. */
+function lineInfo(){
+  const el=document.getElementById('lninfo');
+  if(!el) return;
+  if(!AI.n){ el.textContent='no racing line yet'; return; }
+  let moved=0, marked=0, worst=0;
+  for(let i=0;i<AI.n;i++){
+    const a=Math.abs(AI.adj[i]||0);
+    if(a>0.05) moved++;
+    if(a>worst) worst=a;
+    if(AI.mark && AI.mark[i]) marked++;
+  }
+  el.textContent = moved+' moved'
+    + (worst>0.05?', up to '+worst.toFixed(1)+' m':'')
+    + (marked?' · '+marked+' set by hand':'')
+    + (lineBrush? ' · click a point to set it'
+                : ' · drag a point to move the line');
+}
 document.getElementById('homebtn').onclick=goHome;
 document.getElementById('netbtn').onclick=()=>controllerPanelToggle();
 document.getElementById('controller-close').onclick=()=>controllerPanelToggle(false);
@@ -8469,8 +8562,8 @@ const M2_HINT_WALL=document.getElementById('m2hint')
                  ? document.getElementById('m2hint').innerHTML : '';
 const M2_HINT_LINE=
   'Drag a handle across the circuit to move the racing line there '
- +'&middot; <b>Shift-click a handle</b> to set what the car does there: '
- +'power on, off the throttle, automatic '
+ +'&middot; pick a colour on the bar below, then click points to set what the '
+ +'car does there '
  +'&middot; <b style="color:#ff4a3a">red</b> = on the brakes '
  +'&middot; <b style="color:#46e078">green</b> = on the power '
  +'&middot; <b style="color:#ffbe3c">amber</b> = holding the corner '
@@ -8484,6 +8577,12 @@ function m2SetTool(t){
   on('m2wall', t==='wall');
   const h=document.getElementById('m2hint');
   if(h) h.innerHTML = t==='line' ? M2_HINT_LINE : M2_HINT_WALL;
+  /* One bar or the other, never both: a set of wall controls under a racing
+     line editor is a set of controls for the wrong thing. */
+  const wb=document.getElementById('m2bar'), lb=document.getElementById('m2linebar');
+  if(wb) wb.style.display = t==='line' ? 'none' : 'flex';
+  if(lb) lb.classList.toggle('on', t==='line');
+  if(t==='line') lineInfo();
   const c=m2El(); if(c) c.style.cursor=t==='wall'?'crosshair':'default';
   m2Draw(); m2Info();
 }
