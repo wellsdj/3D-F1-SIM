@@ -837,6 +837,7 @@ if('serviceWorker' in navigator){
     <button id="lnundo">Undo</button>
     <button id="lnreset">Reset line</button>
     <button id="lncopy">Copy line</button>
+    <button id="lnsave">Save line</button>
     <button id="lnclose">Done</button>
   </div>
   <div id="m2bar">
@@ -8521,6 +8522,22 @@ document.getElementById('m2close').onclick=()=>m2Show(false);
                                               m2Note('back to the generated line');
                                               m2Draw(); lineInfo(); };
   const cp=$('lncopy'); if(cp) cp.onclick=()=>lineCopy();
+  /* To a FILE, not the clipboard. A hand-off of seven thousand numbers through
+     a paste has to be read back by eye at the other end, and that is how a
+     digit gets lost. The walls already work this way. */
+  const sv=$('lnsave');
+  if(sv) sv.onclick=()=>{
+    if(!AI.n){ m2Note('no racing line yet'); return; }
+    const txt=JSON.stringify({adj:Array.from(AI.adj,v=>+v.toFixed(2)),
+                              mark:Array.from(AI.mark||[]), n:AI.n});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));
+    a.download='spa22-line.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1000);
+    let moved=0; for(let i=0;i<AI.n;i++) if(Math.abs(AI.adj[i])>0.005) moved++;
+    m2Note(moved+' stations saved to spa22-line.json');
+  };
   const cl=$('lnclose');if(cl) cl.onclick=()=>m2Show(false);
 })();
 /* The line bar's own readout. m2info lives in the wall bar, which is not on
@@ -11507,13 +11524,57 @@ function aiTraffic(d, dt){
       d.mode='hold'; d.line=youInside?'out':'in';
     }
   }
+  /* NOBODY GOES ROUND THE OUTSIDE OF A HAIRPIN.
+
+     This is what was putting them in the gravel at the first corner, and it is
+     not a braking problem. A car arriving alongside would pick the outside line
+     because that is where the space was, and the outside of a corner that tight
+     is not a place a racing car can go: the arc is longer, the exit runs out of
+     road first, and it is where all the marbles are. Real drivers do not try
+     it, and the ones who do end up exactly where these were ending up.
+
+     So at a slow corner the outside line is simply not on the menu. A car that
+     wants to pass has the middle or the inside, and if it cannot have either --
+     because somebody is already there -- it does what a driver does: lifts,
+     tucks in behind, and takes the exit instead.
+
+     "Slow" is read off the profile rather than hard-coded to a station, so it
+     is every hairpin on any circuit and no list to maintain. Sixty metres of
+     lookahead, so the decision is made on the way in rather than at the apex
+     when it is already too late to act on. */
+  if(d.field && d.v){
+    let tight=false;
+    const look=Math.max(1,Math.round(60/d.ds));
+    for(let m=0;m<look && !tight;m++) if(d.v[(d.i+m)%d.n]<32) tight=true;
+    if(tight){
+      const inDir=Math.sign(d.field.in[d.i])||1;
+      if(d.line==='out') d.line='race';       // the outside is not an option here
+      const lat=d.lat||0;
+      const outside = Math.sign(lat)===-inDir && Math.abs(lat)>1.2;
+      if(outside){
+        const blocked = rel && Math.abs(rel.gap)<18
+                            && Math.sign(rel.lat-lat)===inDir;
+        if(blocked){
+          /* Someone is already on the part of the road this car needs. Give up
+             the corner rather than the car: off the throttle, back in behind
+             them, and have the exit instead. */
+          d.mode='concede'; d.line='in';
+          d.speedK=Math.min(d.speedK, 0.86);
+          d._urgent=true;
+        } else {
+          d.line='race';                      // nobody there: just come back
+        }
+      }
+    }
+  }
+
   /* Committed to, not re-decided every frame. Sampled frame by frame the choice
      flickered -- in, out, in again inside a second -- and a car that changes its
      mind sixty times a second weaves instead of racing. A line is held for a
      second and a bit unless the situation changes category, and standing aside
      for someone far quicker is allowed to interrupt immediately. */
   if(d.line!==d._lineWas){
-    if(d.mode!=='yield' && (d._lineHeld||0)>0 && d.line!=='race'){
+    if(d.mode!=='yield' && d.mode!=='concede' && (d._lineHeld||0)>0 && d.line!=='race'){
       d.line=d._lineWas;                      // not yet: keep the one it is on
     } else { d._lineWas=d.line; d._lineHeld=AI_TRAF.hold; }
   }
