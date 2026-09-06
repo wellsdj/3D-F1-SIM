@@ -11542,12 +11542,15 @@ function aiTraffic(d, dt){
      is every hairpin on any circuit and no list to maintain. Sixty metres of
      lookahead, so the decision is made on the way in rather than at the apex
      when it is already too late to act on. */
+  let tightCorner=false, tightIn=1;
   if(d.field && d.v){
     let tight=false;
     const look=Math.max(1,Math.round(60/d.ds));
     for(let m=0;m<look && !tight;m++) if(d.v[(d.i+m)%d.n]<32) tight=true;
+    tightCorner=tight;
+    tightIn=Math.sign(d.field.in[d.i])||1;
     if(tight){
-      const inDir=Math.sign(d.field.in[d.i])||1;
+      const inDir=tightIn;
       if(d.line==='out') d.line='race';       // the outside is not an option here
       const lat=d.lat||0;
       const outside = Math.sign(lat)===-inDir && Math.abs(lat)>1.2;
@@ -11604,6 +11607,25 @@ function aiTraffic(d, dt){
     const side=Math.sign(d.lat-rel.lat) || -Math.sign(rel.lat) || 1;
     const bound=rel.lat+side*AI_TRAF.clear;
     let w = side>0 ? Math.max(want,bound) : Math.min(want,bound);
+    /* AND NOT OUTWARDS AT A HAIRPIN, WHICH IS WHERE THE LAST FIX LEAKED.
+
+       Choosing not to take the outside line was not enough, because this rule
+       runs afterwards and does not care what line was chosen: it says "you may
+       not be within a car's width of him", works out which way that is, and
+       moves the car there. At a hairpin, for the car on the outside, that
+       direction is further outside -- so the car was put exactly where it had
+       just been told not to go, and lifted six per cent while doing it.
+
+       Here the space is not available. The car keeps the line it picked and
+       gives up the corner instead: a fifth off the pace, which opens the gap
+       longitudinally rather than sideways. That is the manoeuvre -- back out,
+       slot in behind, have the exit. */
+    if(tightCorner && side===-tightIn){
+      w=want;
+      d.mode='concede';
+      d.speedK=Math.min(d.speedK, 0.80);
+      d._urgent=true;
+    }
     const lim=aiRoomNear(d, d.i, side, 30);
     if(Math.abs(w)>lim){                       // no road left on that side
       w=side*lim;
@@ -12639,10 +12661,13 @@ function raceStart(opts){
     racePlace(d, k+1);                  // slot 0 is yours, they fill 1 to 9
     d.obj.visible=true;
     d.on=true; d.hold=true; d.laps=[]; d.t=0; d.worst=0;
-    /* Nobody's foot comes off the clutch at the same instant. Two hundred to
-       two hundred and fifty milliseconds, drawn per car per start, which is
-       what separates a good getaway from a bad one. */
-    d.react=0.20+Math.random()*0.05; d._react=0;
+    /* Nobody's foot comes off the clutch at the same instant. A quarter of a
+       second to 0.35, drawn per car per start -- a hundred milliseconds of
+       spread rather than fifty, which is the difference between a grid that
+       fans out and one that moves as a block. Over the run to the first corner
+       that is several car lengths, so places change on the way there and the
+       start is worth watching. */
+    d.react=0.25+Math.random()*0.10; d._react=0;
   }
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
@@ -12738,7 +12763,14 @@ function raceStep(dt){
       setTimeout(()=>lo.classList.remove('show'),1300);
       // one release, both cars
       startPhase='go';
-      for(const d of AIS){ d.hold=false; d._react=0; }
+      /* Drawn again at the lights, not only when the grid was built. Starting
+         the same race twice used the same nine reaction times both times: the
+         grid is laid out once and re-run, so whoever got away well got away
+         well every time. Every start is its own now. */
+      for(const d of AIS){
+        d.hold=false; d._react=0;
+        d.react=0.25+Math.random()*0.10;
+      }
       document.body.classList.remove('racestart');
       TT.live=true; TT.t=0; ttReset();
     }
