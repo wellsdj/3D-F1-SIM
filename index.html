@@ -671,6 +671,16 @@
       border:0;border-radius:9px;padding:15px 24px;cursor:pointer;width:100%}
   #custom-next:hover{filter:brightness(1.08)}
   body.career-build #custom-next{display:block}
+  /* In a career the garage is one page of a season, so it gets a way back to
+     the season rather than a cross that means "close this". The cross is
+     hidden outright there: it went to the home screen, which in the middle of
+     a career is not where anybody was trying to go. */
+  #custom-back{display:none;margin-top:9px;width:100%;font-family:var(--mono);font-size:10px;
+      letter-spacing:.16em;text-transform:uppercase;color:var(--paper);background:none;
+      border:1px solid rgba(255,255,255,.2);border-radius:9px;padding:13px 20px;cursor:pointer}
+  #custom-back:hover{border-color:#ffb020;color:#ffb020}
+  body.career-build #custom-back{display:block}
+  body.career-build #customizer-close{display:none}
   #career{position:fixed;inset:0;z-index:40;display:none;padding:clamp(28px,6vw,80px);
       background:linear-gradient(120deg,rgba(3,7,12,.97),rgba(6,12,20,.92)),url('home-hero.png') center/cover;
       color:var(--paper);font-family:var(--mono)}
@@ -1280,6 +1290,7 @@ if('serviceWorker' in navigator){
     <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
     <p class="custom-note">Changes save automatically and carry into your next run.</p>
     <button id="custom-next" type="button">Next &mdash; take it to the season &nearr;</button>
+    <button id="custom-back" type="button">&larr; Back to the season</button>
   </div>
   <div class="custom-tag">McLaren MCL39 · Qualifying trim</div>
 </section>
@@ -14545,6 +14556,22 @@ function qualifyingLoadReady(){
      existing path instant with a neutral light while normal entries wait for
      the driver's choice. */
   if(!qualifyingWeatherChoice&&(window._autoReplay||pendingReplay)) qualifyingChooseWeather('midday');
+  /* THE LIGHT IS DRAWN, NOT CHOSEN.
+
+     Every race gets its own time of day at random, so a season is eight
+     different afternoons rather than the same one eight times, and a quick
+     race is never the same twice either. The row of buttons stays up and
+     still works -- pressing one overrides the draw right until the session
+     starts -- so this is a default that arrives instantly rather than a
+     choice taken away.
+
+     Drawn per race and not per career: a championship run entirely at sunset
+     would be a decision nobody made. */
+  if(!qualifyingWeatherChoice){
+    const kinds=Object.keys(TIME_OF_DAY);
+    qualifyingChooseWeather(kinds[(Math.random()*kinds.length)|0]);
+    return;
+  }
   if(qualifyingWeatherChoice) qualifyingBegin();
   else qualifyingLoadSetStatus('Choose session lighting');
 }
@@ -15051,7 +15078,19 @@ function careerClose(){
 }
 {
   const $=id=>document.getElementById(id);
-  const cl=$('career-close'); if(cl) cl.onclick=careerClose;
+  /* The cross goes back a page rather than straight out. From the shop it
+     returns to the season, from naming a team it returns to the slots, and
+     only from the slots -- where there is nothing behind it -- does it leave.
+     A single button that means "out of the whole thing" loses a season's
+     worth of context in one press. */
+  const cl=$('career-close');
+  if(cl) cl.onclick=()=>{
+    const on=id=>{ const e=$('career-'+id); return e && e.classList.contains('on'); };
+    if(on('shop')){ careerPaintHub(); careerPage('hub'); }
+    else if(on('name')){ careerPaintSlots(); careerPage('slots'); }
+    else if(on('hub')){ careerSave(); careerPaintSlots(); careerPage('slots'); }
+    else careerClose();
+  };
   const bs=$('career-backSlots'); if(bs) bs.onclick=()=>{ careerPaintSlots(); careerPage('slots'); };
   const tb=$('career-toBuild');
   if(tb) tb.onclick=()=>{
@@ -15081,16 +15120,20 @@ document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
 {
-  const n=document.getElementById('custom-next');
-  if(n) n.onclick=()=>{
+  /* Both buttons land in the same place -- the season -- because from the
+     garage there is nowhere else to be going. Next is for the first time
+     through, when the car is being built; Back is for every visit after. */
+  const toSeason=()=>{
     closeCustomizer();
     if(typeof CAREER!=='undefined' && CAREER.active){
       bootEl.classList.add('gone');
-      careerEnter();                                  // on to the season
+      careerEnter();
       const el=document.getElementById('career');
       if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
     }
   };
+  const n=document.getElementById('custom-next'); if(n) n.onclick=toSeason;
+  const b=document.getElementById('custom-back'); if(b) b.onclick=toSeason;
 }
 /* Dragging the stage. The overlay's own panels keep their clicks -- only a
    drag that starts on the empty part of the screen turns the car. */
