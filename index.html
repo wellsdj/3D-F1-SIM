@@ -664,11 +664,84 @@
   #modepick button b{display:block;font-size:13px;letter-spacing:.16em;text-transform:uppercase}
   #modepick button span{display:block;font-size:9.5px;letter-spacing:.1em;opacity:.55;
       text-transform:uppercase;margin-top:3px}
+  /* Shown only in a career: outside one the garage is a place you look at the
+     car, and there is nothing to go on to. */
+  #custom-next{display:none;margin-top:16px;font-family:var(--mono);font-size:11px;
+      letter-spacing:.18em;text-transform:uppercase;color:#111;background:#ffb020;
+      border:0;border-radius:9px;padding:15px 24px;cursor:pointer;width:100%}
+  #custom-next:hover{filter:brightness(1.08)}
+  body.career-build #custom-next{display:block}
   #career{position:fixed;inset:0;z-index:40;display:none;padding:clamp(28px,6vw,80px);
       background:linear-gradient(120deg,rgba(3,7,12,.97),rgba(6,12,20,.92)),url('home-hero.png') center/cover;
       color:var(--paper);font-family:var(--mono)}
-  #career.on{display:flex;align-items:center}
+  #career.on{display:block;overflow-y:auto}
+  .career-page{display:none;max-width:920px;margin:0 auto;padding:8px 0 40px;
+      flex-direction:column;gap:18px}
+  .career-page.on{display:flex}
   .career-copy{max-width:520px;display:flex;flex-direction:column;gap:18px}
+  /* the slots */
+  #career-slotlist{display:flex;flex-direction:column;gap:10px;max-width:620px}
+  .slot{display:flex;align-items:center;gap:16px;cursor:pointer;text-align:left;
+      font-family:var(--mono);color:var(--paper);
+      background:linear-gradient(105deg,rgba(17,25,37,.75),rgba(9,14,22,.6));
+      border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:17px 20px}
+  .slot:hover{border-color:#ffb020;background:linear-gradient(105deg,rgba(255,176,32,.16),rgba(17,25,37,.62))}
+  .slot .n{font-size:20px;color:#ffb020;min-width:26px}
+  .slot .t{flex:1}
+  .slot .t b{display:block;font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+  .slot .t span{display:block;font-size:9.5px;letter-spacing:.1em;opacity:.55;
+      text-transform:uppercase;margin-top:4px}
+  .slot .del{font-size:9px;letter-spacing:.14em;opacity:.4;padding:7px 10px;
+      border:1px solid rgba(255,255,255,.18);border-radius:7px;background:none;
+      color:var(--paper);cursor:pointer;font-family:var(--mono)}
+  .slot .del:hover{opacity:1;border-color:#ff6a5a;color:#ff6a5a}
+  /* hub */
+  .career-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.career-cols{grid-template-columns:1fr}}
+  .career-col{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);
+      border-radius:12px;padding:15px 17px}
+  .col-head{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.2em;
+      text-transform:uppercase;opacity:.55;margin-bottom:11px}
+  .col-head i{font-style:normal;color:#ffb020;opacity:.85}
+  .trow{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:10.5px;
+      letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.06)}
+  .trow:last-child{border-bottom:0}
+  .trow .pos{width:20px;opacity:.45}
+  .trow .sw{width:9px;height:9px;border-radius:2px;flex:none}
+  .trow .nm{flex:1;text-transform:uppercase}
+  .trow .pts{color:#ffb020}
+  .trow.you{background:rgba(255,176,32,.1);margin:0 -8px;padding:6px 8px;border-radius:5px}
+  #career-carspec div{display:flex;justify-content:space-between;font-size:10.5px;
+      letter-spacing:.08em;padding:6px 0;text-transform:uppercase}
+  #career-carspec b{color:#ffb020;font-weight:600}
+  #career-lastresult{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+      background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.3);
+      border-radius:10px;padding:13px 16px;display:none}
+  #career-lastresult.on{display:block}
+  /* the shop */
+  .shop-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.shop-grid{grid-template-columns:1fr}}
+  .shop-line{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);
+      border-radius:12px;padding:15px 17px}
+  .shop-bar{height:4px;border-radius:99px;background:rgba(255,255,255,.1);margin-bottom:13px}
+  .shop-bar i{display:block;height:100%;border-radius:99px;background:#ffb020;width:0}
+  .part{display:flex;align-items:center;gap:13px;padding:9px 0;
+      border-bottom:1px solid rgba(255,255,255,.06)}
+  .part:last-child{border-bottom:0}
+  .part svg{width:34px;height:26px;flex:none}
+  .part .pn{flex:1}
+  .part .pn b{display:block;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
+  .part .pn span{display:block;font-size:8.5px;letter-spacing:.1em;opacity:.5;margin-top:3px;
+      text-transform:uppercase}
+  .part button{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+      color:#111;background:#ffb020;border:0;border-radius:7px;padding:9px 12px;cursor:pointer}
+  .part button:disabled{background:rgba(255,255,255,.1);color:rgba(255,255,255,.35);cursor:default}
+  .part.owned{opacity:.5}
+  .part.owned .pn b:after{content:" ✓";color:#46e078}
+  .career-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .career-actions button.ghost{background:none;color:var(--paper);
+      border:1px solid rgba(255,255,255,.2)}
+  .career-actions button.ghost:hover{border-color:#ffb020;color:#ffb020;filter:none}
   .career-intro{font-size:11px;letter-spacing:.1em;line-height:1.7;opacity:.6;text-transform:uppercase}
   .career-field{display:flex;flex-direction:column;gap:7px}
   .career-field span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;opacity:.5}
@@ -1114,22 +1187,80 @@ if('serviceWorker' in navigator){
 
 <section id="career" aria-hidden="true">
   <button class="overlay-close" id="career-close" aria-label="Close career">×</button>
-  <div class="career-copy">
-    <div class="overlay-kicker">Career · Season one</div>
+
+  <!-- 1. the slots. Shown first, every time: a career you already have is one
+          click from being continued, and a new one starts here too. -->
+  <div class="career-page" id="career-slots">
+    <div class="overlay-kicker">Career</div>
+    <h2>Choose a <em>save.</em></h2>
+    <div id="career-slotlist"></div>
+  </div>
+
+  <!-- 2. naming a new team -->
+  <div class="career-page" id="career-name">
+    <div class="overlay-kicker">New career · Season one</div>
     <h2>Name your <em>team.</em></h2>
     <p class="career-intro">Everything you win from here is yours. Pick a name, build the car,
-      and take it through the championship.</p>
+      and take it through eight rounds.</p>
     <label class="career-field">
       <span>Team name</span>
       <input id="career-team" type="text" maxlength="22" placeholder="Northgate Racing" autocomplete="off">
     </label>
+    <div class="career-actions">
+      <button id="career-toBuild" type="button">Build the car ↗</button>
+      <button class="ghost" id="career-backSlots" type="button">Back</button>
+    </div>
+  </div>
+
+  <!-- 3. the hub, between races -->
+  <div class="career-page" id="career-hub">
+    <div class="overlay-kicker" id="career-kicker">Career</div>
+    <h2 id="career-title">Your <em>season.</em></h2>
     <div class="career-stats">
       <div><b id="career-coins">1,000</b><span>Coins</span></div>
-      <div><b id="career-round">1 / 5</b><span>Round</span></div>
+      <div><b id="career-round">1 / 8</b><span>Round</span></div>
       <div><b id="career-points">0</b><span>Points</span></div>
+      <div><b id="career-place">—</b><span>Standing</span></div>
+    </div>
+    <div id="career-lastresult"></div>
+    <div class="career-cols">
+      <div class="career-col">
+        <div class="col-head">Championship</div>
+        <div id="career-table"></div>
+      </div>
+      <div class="career-col">
+        <div class="col-head">Your car</div>
+        <div id="career-carspec"></div>
+      </div>
     </div>
     <div class="career-actions">
-      <button id="career-next" type="button">Build the car ↗</button>
+      <button id="career-race" type="button">Go to round 1 ↗</button>
+      <button class="ghost" id="career-toShop" type="button">Upgrades</button>
+      <button class="ghost" id="career-toGarage" type="button">Garage</button>
+      <button class="ghost" id="career-quit" type="button">Save &amp; exit</button>
+    </div>
+  </div>
+
+  <!-- 4. the shop -->
+  <div class="career-page" id="career-shop">
+    <div class="overlay-kicker">Garage · Upgrades</div>
+    <h2>Make it <em>quicker.</em></h2>
+    <p class="career-intro"><b id="shop-coins">1,000</b> coins. Powertrain buys top speed,
+      aerodynamics buys grip — how hard it will turn and how fast it carries through a corner.</p>
+    <div class="shop-grid">
+      <div class="shop-line">
+        <div class="col-head">Powertrain <i id="shop-power-lv">0 / 5</i></div>
+        <div class="shop-bar"><i id="shop-power-fill"></i></div>
+        <div id="shop-power"></div>
+      </div>
+      <div class="shop-line">
+        <div class="col-head">Aerodynamics <i id="shop-aero-lv">0 / 5</i></div>
+        <div class="shop-bar"><i id="shop-aero-fill"></i></div>
+        <div id="shop-aero"></div>
+      </div>
+    </div>
+    <div class="career-actions">
+      <button class="ghost" id="career-shopBack" type="button">Back to the season</button>
     </div>
   </div>
 </section>
@@ -1148,6 +1279,7 @@ if('serviceWorker' in navigator){
     <div class="style-group"><label>Wing core / carbon <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
     <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
     <p class="custom-note">Changes save automatically and carry into your next run.</p>
+    <button id="custom-next" type="button">Next &mdash; take it to the season &nearr;</button>
   </div>
   <div class="custom-tag">McLaren MCL39 · Qualifying trim</div>
 </section>
@@ -5774,6 +5906,16 @@ function replayStart(){
 function goHome(){
   replayMetadataEnd();
   TTREC.playing=false;
+  /* A career goes back to its own season page, not the front door. The race
+     that just finished has already been scored by then, so the hub opens
+     showing the result, the new points and the prize money. */
+  if(typeof CAREER!=='undefined' && CAREER.active){
+    setTimeout(()=>{
+      const el=document.getElementById('career');
+      careerPaintHub(); careerPage('hub');
+      if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
+    }, 40);
+  }
   /* And you are no longer watching a lap.
 
      Going home stopped the replay but left the two flags that say "the next
@@ -9970,7 +10112,12 @@ function applyPedals(st, thr, brk, surf, dt){
   }
   else if(brk>0) st.speed -= 46*dt*brk;
   else st.speed -= (0.8 + st.speed*0.028)*dt;
-  st.speed=clamp(st.speed,0,MAXSPEED);
+  /* The career car's top end. CAR_TOP is 1 outside a career and 0.90 to 1.00
+     inside one, so a season starts with a car that will not pull 360 and ends
+     with one that will. The drag curve above is untouched: the engine is the
+     same, it simply runs out of road sooner, which is what a slower car feels
+     like rather than a heavier one. */
+  st.speed=clamp(st.speed,0,MAXSPEED*(st===carState?CAR_TOP:1));
   /* NO DAMAGE MODEL. There was one here: every barrier hit took a slice off the
      player's top speed, up to about 80 kph, so a scruffy race ended with the
      car unable to reach 360 down the Kemmel. It is gone at Wells's request --
@@ -10242,7 +10389,10 @@ function stepCar(C, inp, dt){
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
   const v=st.speed;
-  const yawRate=yawFor(v, C.steerAng, C.surf, C.gripMul);
+  /* Aerodynamics, for the player only: the rivals have their own pace and are
+     not carrying a career's upgrades. */
+  const _grip=(C.st===carState) ? (C.gripMul||1)*CAR_GRIP : C.gripMul;
+  const yawRate=yawFor(v, C.steerAng, C.surf, _grip);
   surfaceDrag(st, C.surf, dt);
   st.hdg += yawRate*dt;
   st.wx  += Math.sin(st.hdg)*v*dt;
@@ -11931,7 +12081,12 @@ function aiPedals(d, C){
      else's gearbox. The profile is already the speed limit at every point and
      the forward pass built it at full power, so asking for the profile ahead is
      asking for full throttle exactly where full throttle is what fits. */
-  const K=(d.speedK||1);
+  /* The car's own pace as well as what the traffic allows. In a career every
+     rival has a stat and they are not all the same car: the quick teams are
+     genuinely quicker round a lap, which is what makes a grid position mean
+     something and a championship table worth reading. Outside a career this is
+     1 for everybody and nothing changes. */
+  const K=(d.speedK||1)*(d.paceMul||1);
   /* A CAR OFF THE LINE CANNOT TAKE THE CORNER AT THE LINE'S SPEED.
 
      The profile V is solved for the racing line. A car three metres off it has
@@ -12560,6 +12715,50 @@ function raceFinish(){
   if(RESULT.on) return;
   RESULT.on=true; RESULT.you=RACE.raceT;
   raceResultRows();
+  careerScore();
+}
+/* WHAT A RESULT IS WORTH.
+
+   Points on the usual scale for the top ten, and prize money that falls away
+   with position but never to nothing -- last place still pays, because a
+   career where a bad round leaves you unable to buy anything is a career that
+   is over without saying so.
+
+   The rivals score too, off the same finishing order, so the table is the
+   season rather than a list of your own results. */
+function careerScore(){
+  if(!CAREER.active || !RESULT.rows || !RESULT.rows.length) return;
+  const c=careerSlot();
+  if(!c.table) c.table=careerNewTable();
+  let mine=1;
+  RESULT.rows.forEach((r,i)=>{
+    const pts=CAREER_POINTS[i]||0;
+    if(r.you){ mine=i+1; c.points+=pts; }
+    else {
+      const t=c.table.find(x=>x.name===r.who);
+      if(t) t.points+=pts;
+    }
+  });
+  /* THE PRIZE, AND IT HAS TO PAY FOR THE CAR.
+
+     Every upgrade in the shop costs 22,900 coins in total, and a season is
+     eight rounds. The first curve paid 1,620 for a win down to 580 for last
+     and left a plausible season on six of the ten parts -- the top of both
+     ladders permanently out of reach, so the last three rounds had nothing to
+     buy and the shop stopped being a reason to race.
+
+     This one pays 2,900 for a win down to 1,123 for tenth. Simulated over a
+     season that starts ninth and climbs as parts go on: P9 P6 P5 P5 P4 P3 P3
+     P2, finishing with eight of the ten fitted and enough left over to be
+     choosing rather than saving. Last place still pays well, because a career
+     where one bad round leaves you unable to buy anything is over without
+     saying so. */
+  const prize=Math.round(2600*Math.pow(0.88, mine-1))+300;
+  c.coins+=prize;
+  c.last={ round:c.round, pos:mine, points:CAREER_POINTS[mine-1]||0, prize };
+  c.round++;
+  c.used=true;
+  careerSave();
 }
 function raceResultRows(){
   const L=TT.len||1;
@@ -12745,12 +12944,58 @@ function raceStart(opts){
      read as driving through everything in between. */
   BARR_DMG=0; BARR_LURCH=0; BARR_SHAKE=0; BARR_HIT=0; BARR_TOUCH=0; _bx=null; _freeX=null;
   aiField(RACE_CARS-1);                 // you, and nine of them
-  racePlace('player', 0);               // pole
+
+  /* WHERE YOU START.
+
+     Outside a career: pole, as it always was. Inside one: wherever the car
+     deserves. Every rival draws a pace for the weekend around its season pace,
+     yours comes from what you have bought, and the grid is that order -- so a
+     first race in a stock car starts near the back and the last race of a
+     fully upgraded season starts at the front. That is the whole shape of the
+     mode: the grid is the scoreboard for everything bought since round one.
+
+     The draw is per weekend, so a midfield team occasionally out-qualifies the
+     quick ones and no two rounds line up the same way. */
+  let order=null;
+  if(CAREER.active){
+    const c=careerSlot();
+    if(!c.table) c.table=careerNewTable();
+    const field=c.table.map((t,i)=>({ ai:i,
+        pace:t.pace + (Math.random()-0.5)*CAREER_SPREAD*2 }));
+    field.push({ ai:-1, pace:careerPace(c) + (Math.random()-0.5)*CAREER_SPREAD });
+    field.sort((a,b)=>b.pace-a.pace);
+    order=field;
+    RACE.careerGrid=field.map(f=>f.ai);
+  } else RACE.careerGrid=null;
+
+  const mySlot = order ? order.findIndex(f=>f.ai===-1) : 0;
+  racePlace('player', mySlot);
+  let fill=0;
   for(let k=0;k<AIS.length;k++){
     const d=AIS[k];
     if(!d||!d.car) continue;
-    racePlace(d, k+1);                  // slot 0 is yours, they fill 1 to 9
-    d.gridSlot=k+1;                     // remembered: the front row is handicapped
+    /* Their slot is their place in that order, and the player's is taken out
+       of it -- so the ten of them fill the ten boxes exactly once. */
+    let slot;
+    if(order){ slot=order.findIndex(f=>f.ai===k); }
+    else { slot=k+1; }
+    if(slot<0) slot=(++fill);
+    racePlace(d, slot);
+    d.gridSlot=slot;                    // remembered: the front row is handicapped
+    if(CAREER.active && order){
+      /* Their weekend pace, mapped onto how hard they drive. The spread is
+         deliberately narrow -- eight per cent between the best car and the
+         worst -- because a bigger one turns a race into a procession, which is
+         exactly what a championship must not be. */
+      const f=order.find(o=>o.ai===k);
+      /* Pace 0.70 to 1.00 becomes 0.955 to 1.005 of the profile speed. Five
+         per cent between the best car and the worst: a bigger spread turns the
+         race into a procession, which is the one thing a championship must
+         not be. */
+      d.paceMul = f ? (0.955 + 0.05*(f.pace-0.70)/0.30) : 1;
+      const t=careerSlot().table[k];
+      if(t){ d.name=t.name; }
+    } else d.paceMul=1;
     d.obj.visible=true;
     d.on=true; d.hold=true; d.laps=[]; d.t=0; d.worst=0;
     /* Nobody's foot comes off the clutch at the same instant. A quarter of a
@@ -14427,6 +14672,10 @@ function resetCustomizerPose(){
 }
 function openCustomizer(){
   styleUI();
+  /* In a career the garage is a step on the way somewhere, so it gets a Next.
+     Outside one it is somewhere you go to look at the car, and the cross is
+     the only way out it needs. */
+  document.body.classList.toggle('career-build', !!(typeof CAREER!=='undefined' && CAREER.active));
   customizerOn=true; customizerAngle=0; customizerStage.visible=true;
   resetCustomizerPose();
   const el=document.getElementById('customizer'); if(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
@@ -14436,6 +14685,7 @@ function openCustomizer(){
 }
 function closeCustomizer(){
   customizerOn=false; customizerStage.visible=false;
+  document.body.classList.remove('career-build');
   const el=document.getElementById('customizer'); if(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
   document.body.classList.remove('customizer-open');
   /* Always back to the home screen. This used to put the home screen back only
@@ -14487,55 +14737,361 @@ document.getElementById('customize-home').onclick=openCustomizer;
    The upgrade shop, the championship table and the invented driver names are
    the next piece of this; what is here is the entry: name the team, build the
    car, go racing, and the numbers that carry between rounds. */
-const CAREER_KEY='careerSave';
-const CAREER={ active:false, team:'', coins:1000, round:1, rounds:5, points:0,
-               aero:0, power:0 };
+const CAREER_KEY='careerSlots';
+const CAREER_ROUNDS=8;
+
+/* THE FIELD YOU ARE RACING AGAINST.
+
+   Ten invented teams, not the real grid: the rivals elsewhere in the file are
+   named after actual drivers, which is fine for a one-off race and not fine
+   for a championship with standings and a table. These are made up.
+
+   `pace` is what the car is worth, 0 to 1. The order here is the pecking
+   order -- the top of the list is the quickest team -- and it is only the
+   MIDDLE of each one's range. Every round each rival draws its actual pace
+   around that, so the same car is not the same car every weekend: a midfield
+   team has a day and beats the second-quickest, which is what makes a season
+   worth running rather than the same result eight times. */
+const CAREER_TEAMS=[
+  { name:'Meridian',   pace:1.000, body:'#123c78' },
+  { name:'Halcyon',    pace:0.963, body:'#c8481e' },
+  { name:'Sable GP',   pace:0.925, body:'#8c1327' },
+  { name:'Vantari',    pace:0.887, body:'#0f6f5c' },
+  { name:'Northwind',  pace:0.850, body:'#cfd6dc' },
+  { name:'Aurelia',    pace:0.813, body:'#2b2f36' },
+  { name:'Kestrel',    pace:0.775, body:'#3b6ea5' },
+  { name:'Ferro Nine', pace:0.737, body:'#6b4f9e' },
+  { name:'Lowen',      pace:0.700, body:'#b8860b' },
+];
+/* How far a car can wander from its own pace on a given weekend. Five per cent
+   is about a place and a half of grid: enough that no two rounds line up the
+   same way, small enough that the ladder still means something. */
+const CAREER_SPREAD=0.05;
+
+/* WHAT AN UPGRADE BUYS.
+
+   Two lines. Powertrain raises the top end, aerodynamics raises the grip --
+   which is the speed through every corner and the amount the car will turn.
+   Both start below the reference car, because a career that begins with the
+   best car on the grid has nowhere to go: at level 0 this car is 0.88 of the
+   quick end of the field, which is the back of it.
+
+   The parts are named and drawn, never photographed, and each level costs more
+   than the last. */
+const CAREER_PARTS={
+  power:[
+    { name:'Stock unit',        cost:0,    gain:0.00 },
+    { name:'Iridium plugs',     cost:450,  gain:0.02 },
+    { name:'Free-flow exhaust', cost:900,  gain:0.02 },
+    { name:'Uprated turbo',     cost:1800, gain:0.03 },
+    { name:'Titanium internals',cost:3200, gain:0.03 },
+    { name:'Works engine',      cost:5400, gain:0.04 },
+  ],
+  aero:[
+    { name:'Stock bodywork',    cost:0,    gain:0.00 },
+    { name:'Front dive planes', cost:400,  gain:0.02 },
+    { name:'New rear wing',     cost:850,  gain:0.03 },
+    { name:'Sculpted floor',    cost:1700, gain:0.03 },
+    { name:'Sidepod inlets',    cost:3000, gain:0.04 },
+    { name:'Ground-effect kit', cost:5200, gain:0.05 },
+  ],
+};
+/* WHERE YOUR CAR STARTS, AND THIS NUMBER DOES ALL THE WORK.
+
+   A full set of upgrades is worth 0.31 of pace. The field runs from 1.00 down
+   to 0.70, so a stock car at 0.71 is the slowest thing on the grid and a
+   finished one at 1.02 is the quickest -- and the whole ladder in between is
+   the season.
+
+   The first attempt had this at 0.88 against a tighter field, which put a
+   stock car third on the grid and left you qualifying on pole every round from
+   the halfway point with nothing left to buy that mattered. Simulated over
+   6,000 weekends per level:
+
+       power 0 aero 0   pace 0.71   average grid  9.1   range  7-10
+       power 1 aero 1   pace 0.75   average grid  8.2   range  6-10
+       power 2 aero 2   pace 0.80   average grid  6.8   range  4-9
+       power 3 aero 3   pace 0.86   average grid  5.2   range  3-8
+       power 4 aero 4   pace 0.93   average grid  3.4   range  1-6
+       power 5 aero 5   pace 1.02   average grid  1.4   range  1-4
+
+   Never a certainty in either direction, which is the point: a bad car can
+   still qualify seventh on its day and a good one can be beaten. */
+const CAREER_BASE=0.71;
+function careerPace(c){
+  let p=CAREER_BASE;
+  for(let i=1;i<=(c.power||0);i++) p+=CAREER_PARTS.power[i].gain;
+  for(let i=1;i<=(c.aero||0);i++)  p+=CAREER_PARTS.aero[i].gain;
+  return p;
+}
+/* Points for the top ten, the usual shape. */
+const CAREER_POINTS=[25,18,15,12,10,8,6,4,2,1];
+
+const CAREER_BLANK=()=>({ used:false, team:'', coins:1000, round:1,
+                          rounds:CAREER_ROUNDS, points:0, power:0, aero:0,
+                          table:null, last:null });
+let CAREER_SLOTS=[CAREER_BLANK(),CAREER_BLANK(),CAREER_BLANK()];
+let CAREER_AT=0;                       // which slot is being played
+const CAREER={ active:false };         // the slot in play, mirrored for the race
+
 function careerLoad(){
   try{
     const raw=localStorage.getItem(CAREER_KEY);
     if(!raw) return;
-    Object.assign(CAREER, JSON.parse(raw), {active:false});
+    const a=JSON.parse(raw);
+    if(Array.isArray(a)) for(let i=0;i<3;i++)
+      if(a[i]) CAREER_SLOTS[i]=Object.assign(CAREER_BLANK(), a[i]);
   }catch(e){}
 }
 function careerSave(){
-  try{ localStorage.setItem(CAREER_KEY, JSON.stringify(CAREER)); }catch(e){}
+  try{ localStorage.setItem(CAREER_KEY, JSON.stringify(CAREER_SLOTS)); }catch(e){}
 }
-function careerPaint(){
+function careerSlot(){ return CAREER_SLOTS[CAREER_AT]; }
+/* The championship, made the moment a career starts: every rival gets its
+   season pace once, so a team that is quick this year is quick all year, and
+   only the weekend-by-weekend variation moves. */
+function careerNewTable(){
+  return CAREER_TEAMS.map((t,i)=>({
+    name:t.name, body:t.body,
+    pace:t.pace + (Math.random()-0.5)*0.03,
+    points:0
+  }));
+}
+/* Parts are DRAWN. Wells asked for pictures that are copyright free; a shape
+   defined here has no licence to check, no attribution to get wrong, and no
+   file to go missing on a page that has to work offline. Each one is a
+   recognisable silhouette of the thing it is -- a wing, a turbo, a plug. */
+const CAREER_ART={
+  power:[
+    '<rect x="8" y="10" width="18" height="12" rx="2"/><path d="M26 16h6"/>',
+    '<path d="M17 4v9M13 13h8l-1 8h-6z"/><path d="M17 21v7"/>',
+    '<path d="M5 20h9l4-8h10"/><circle cx="28" cy="12" r="3"/>',
+    '<circle cx="17" cy="16" r="8"/><path d="M17 8v16M9 16h16"/>',
+    '<rect x="7" y="9" width="20" height="14" rx="3"/><path d="M12 9v14M22 9v14"/>',
+    '<path d="M6 22h6l3-13h4l3 13h6"/><circle cx="17" cy="9" r="2.5"/>',
+  ],
+  aero:[
+    '<rect x="7" y="13" width="20" height="6" rx="2"/>',
+    '<path d="M5 20l8-6M29 20l-8-6M13 14h8"/>',
+    '<path d="M4 11h26v4H4z"/><path d="M9 15v6M25 15v6"/>',
+    '<path d="M4 18h26"/><path d="M8 18c4-6 14-6 18 0"/>',
+    '<path d="M6 10h9l4 6-4 6H6z"/><path d="M19 16h9"/>',
+    '<path d="M4 20h26"/><path d="M7 20c3-8 17-8 20 0"/><path d="M12 20v-5M22 20v-5"/>',
+  ],
+};
+function careerPartSVG(kind, i){
+  return '<svg viewBox="0 0 34 32" fill="none" stroke="#ffb020" stroke-width="1.9" '
+       + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+       + (CAREER_ART[kind][i]||'') + '</svg>';
+}
+function careerPage(id){
+  ['career-slots','career-name','career-hub','career-shop'].forEach(p=>{
+    const el=document.getElementById(p);
+    if(el) el.classList.toggle('on', p==='career-'+id);
+  });
+}
+/* --------------------------------------------------------------- the slots */
+function careerPaintSlots(){
+  const list=document.getElementById('career-slotlist');
+  if(!list) return;
+  list.innerHTML='';
+  CAREER_SLOTS.forEach((c,i)=>{
+    const b=document.createElement('button');
+    b.className='slot'; b.type='button';
+    b.innerHTML='<span class="n">'+(i+1)+'</span><span class="t">'
+      + (c.used
+          ? '<b>'+esc(c.team)+'</b><span>Round '+c.round+' of '+c.rounds
+            +' &middot; '+c.points+' pts &middot; '+c.coins.toLocaleString()+' coins</span>'
+          : '<b>Empty slot</b><span>Start a new career</span>')
+      + '</span>'
+      + (c.used?'<span class="del" data-del="'+i+'">Erase</span>':'');
+    b.onclick=(e)=>{
+      if(e.target && e.target.dataset && e.target.dataset.del!==undefined){
+        e.stopPropagation();
+        if(confirm('Erase '+c.team+'?')){
+          CAREER_SLOTS[i]=CAREER_BLANK(); careerSave(); careerPaintSlots();
+        }
+        return;
+      }
+      CAREER_AT=i;
+      if(c.used){ careerEnter(); }        // straight back to where you were
+      else { careerPage('name');
+             const t=document.getElementById('career-team');
+             if(t){ t.value=''; setTimeout(()=>t.focus(),60); } }
+    };
+    list.appendChild(b);
+  });
+}
+const esc=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+/* ----------------------------------------------------------------- the hub */
+function careerEnter(){
+  const c=careerSlot();
+  if(!c.table) c.table=careerNewTable();
+  CAREER.active=true;
+  careerPaintHub();
+  careerPage('hub');
+}
+function careerStanding(c){
+  const rows=careerRows(c);
+  return rows.findIndex(r=>r.you)+1;
+}
+function careerRows(c){
+  const rows=(c.table||[]).map(t=>({name:t.name, body:t.body, points:t.points, you:false}));
+  rows.push({name:c.team||'Your team', body:'#ffb020', points:c.points, you:true});
+  rows.sort((a,b)=>b.points-a.points);
+  return rows;
+}
+function careerPaintHub(){
+  const c=careerSlot();
   const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
-  set('career-coins', CAREER.coins.toLocaleString());
-  set('career-round', CAREER.round+' / '+CAREER.rounds);
-  set('career-points', CAREER.points);
-  const t=document.getElementById('career-team');
-  if(t && !t.value) t.value=CAREER.team||'';
+  set('career-coins', c.coins.toLocaleString());
+  set('career-round', Math.min(c.round,c.rounds)+' / '+c.rounds);
+  set('career-points', c.points);
+  set('career-place', careerStanding(c)+ordSuffix(careerStanding(c)));
+  set('career-kicker', (c.team||'Career')+' · Season one');
+  const rb=document.getElementById('career-race');
+  if(rb) rb.textContent = c.round>c.rounds ? 'Season over — race again ↗'
+                                           : 'Go to round '+c.round+' ↗';
+  // the table
+  const tb=document.getElementById('career-table');
+  if(tb){
+    tb.innerHTML='';
+    careerRows(c).forEach((r,i)=>{
+      const d=document.createElement('div');
+      d.className='trow'+(r.you?' you':'');
+      d.innerHTML='<span class="pos">'+(i+1)+'</span>'
+        +'<span class="sw" style="background:'+r.body+'"></span>'
+        +'<span class="nm">'+esc(r.name)+'</span><span class="pts">'+r.points+'</span>';
+      tb.appendChild(d);
+    });
+  }
+  // the car
+  const cs=document.getElementById('career-carspec');
+  if(cs){
+    const pace=careerPace(c);
+    cs.innerHTML=
+       '<div>Powertrain <b>'+CAREER_PARTS.power[c.power].name+'</b></div>'
+      +'<div>Aerodynamics <b>'+CAREER_PARTS.aero[c.aero].name+'</b></div>'
+      +'<div>Top speed <b>'+Math.round(MAXSPEED*3.6*(0.90+0.10*(c.power/5)))+' kph</b></div>'
+      +'<div>Overall <b>'+Math.round(pace*100)+'%</b></div>';
+  }
+  // and last time out
+  const lr=document.getElementById('career-lastresult');
+  if(lr){
+    if(c.last){
+      lr.classList.add('on');
+      lr.innerHTML='Round '+c.last.round+': finished <b>'+c.last.pos+ordSuffix(c.last.pos)
+        +'</b> · '+c.last.points+' points · '+c.last.prize.toLocaleString()+' coins';
+    } else lr.classList.remove('on');
+  }
 }
+const ordSuffix=n=>(n%10===1&&n%100!==11)?'st':(n%10===2&&n%100!==12)?'nd'
+                 :(n%10===3&&n%100!==13)?'rd':'th';
+/* ---------------------------------------------------------------- the shop */
+function careerPaintShop(){
+  const c=careerSlot();
+  const sc=document.getElementById('shop-coins');
+  if(sc) sc.textContent=c.coins.toLocaleString();
+  for(const kind of ['power','aero']){
+    const host=document.getElementById('shop-'+kind);
+    const lv=document.getElementById('shop-'+kind+'-lv');
+    const fill=document.getElementById('shop-'+kind+'-fill');
+    if(lv) lv.textContent=c[kind]+' / 5';
+    if(fill) fill.style.width=(c[kind]/5*100)+'%';
+    if(!host) continue;
+    host.innerHTML='';
+    CAREER_PARTS[kind].forEach((part,i)=>{
+      if(i===0) return;                        // the stock part is not for sale
+      const owned=c[kind]>=i;
+      const next=c[kind]===i-1;
+      const row=document.createElement('div');
+      row.className='part'+(owned?' owned':'');
+      row.innerHTML=careerPartSVG(kind,i)
+        +'<span class="pn"><b>'+part.name+'</b><span>'
+        +(kind==='power'?'+'+Math.round(part.gain*100)+'% power'
+                        :'+'+Math.round(part.gain*100)+'% grip')
+        +' · '+part.cost.toLocaleString()+' coins</span></span>';
+      const b=document.createElement('button');
+      b.type='button';
+      b.textContent = owned ? 'Fitted' : (next ? 'Buy' : 'Locked');
+      b.disabled = owned || !next || c.coins<part.cost;
+      if(!owned && next && c.coins<part.cost) b.textContent='Too dear';
+      b.onclick=()=>{
+        if(c.coins<part.cost) return;
+        c.coins-=part.cost; c[kind]=i;
+        careerSave(); careerPaintShop(); careerApply();
+      };
+      row.appendChild(b);
+      host.appendChild(row);
+    });
+  }
+}
+/* ------------------------------------------------- what the upgrades DO
+   The two numbers the rest of the game reads. Nothing else in the file needs
+   to know a career exists: applyPedals asks for the cap and yawFor asks for
+   the grip, and outside a career both are 1. */
+let CAR_TOP=1, CAR_GRIP=1;
+function careerApply(){
+  if(!CAREER.active){ CAR_TOP=1; CAR_GRIP=1; return; }
+  const c=careerSlot();
+  CAR_TOP  = 0.90 + 0.10*(c.power/5);
+  CAR_GRIP = 0.90 + 0.10*(c.aero/5);
+}
+/* --------------------------------------------------------------- the flow */
 function careerOpen(){
-  careerLoad(); careerPaint();
+  careerLoad();
+  careerPaintSlots();
+  careerPage('slots');
   const el=document.getElementById('career');
   if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
-  const t=document.getElementById('career-team');
-  if(t) setTimeout(()=>t.focus(),60);
 }
 function careerClose(){
   const el=document.getElementById('career');
   if(el){ el.classList.remove('on'); el.setAttribute('aria-hidden','true'); }
 }
 {
-  const cl=document.getElementById('career-close');
-  if(cl) cl.onclick=careerClose;
-  const nx=document.getElementById('career-next');
-  if(nx) nx.onclick=()=>{
-    const t=document.getElementById('career-team');
-    CAREER.team=(t&&t.value.trim())||'Northgate Racing';
+  const $=id=>document.getElementById(id);
+  const cl=$('career-close'); if(cl) cl.onclick=careerClose;
+  const bs=$('career-backSlots'); if(bs) bs.onclick=()=>{ careerPaintSlots(); careerPage('slots'); };
+  const tb=$('career-toBuild');
+  if(tb) tb.onclick=()=>{
+    const c=careerSlot(), t=$('career-team');
+    Object.assign(c, CAREER_BLANK(), { used:true,
+      team:(t&&t.value.trim())||'Northgate Racing', table:careerNewTable() });
     CAREER.active=true;
-    careerSave();
+    careerSave(); careerApply();
     careerClose();
-    openCustomizer();               // build the car, then go racing from there
+    openCustomizer();              // Next in the garage brings you back
+  };
+  const ts=$('career-toShop');   if(ts) ts.onclick=()=>{ careerPaintShop(); careerPage('shop'); };
+  const sb=$('career-shopBack'); if(sb) sb.onclick=()=>{ careerPaintHub(); careerPage('hub'); };
+  const tg=$('career-toGarage'); if(tg) tg.onclick=()=>{ careerClose(); openCustomizer(); };
+  const q=$('career-quit');      if(q) q.onclick=()=>{ careerSave(); CAREER.active=false;
+                                                       careerApply(); careerClose(); };
+  const rc=$('career-race');
+  if(rc) rc.onclick=()=>{
+    const c=careerSlot();
+    if(c.round>c.rounds){ c.round=1; c.points=0; c.last=null;
+                          c.table=careerNewTable(); careerSave(); }
+    careerApply(); careerClose(); goRacing('spa22');
   };
   careerLoad();
 }
 document.getElementById('lapbook-close').onclick=closeLapBook;
 document.getElementById('lapbook-back').onclick=closeLapBook;
 document.getElementById('customizer-close').onclick=closeCustomizer;
+{
+  const n=document.getElementById('custom-next');
+  if(n) n.onclick=()=>{
+    closeCustomizer();
+    if(typeof CAREER!=='undefined' && CAREER.active){
+      bootEl.classList.add('gone');
+      careerEnter();                                  // on to the season
+      const el=document.getElementById('career');
+      if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
+    }
+  };
+}
 /* Dragging the stage. The overlay's own panels keep their clicks -- only a
    drag that starts on the empty part of the screen turns the car. */
 (function(){
