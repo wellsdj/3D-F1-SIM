@@ -8198,7 +8198,7 @@ function tvPick(t){
 function tvCarS(){
   if(!tlSt.length) return 0;
   const st=tlStation(carState.wx, carState.wz);
-  return st ? (tlSt.indexOf(st)/tlSt.length)*TT.len : 0;
+  return st ? (tlLastIdx/tlSt.length)*TT.len : 0;
 }
 
 /* The tag in the corner: which of the twenty you are watching, or the name of
@@ -8684,11 +8684,34 @@ function tlTouch(x,z){
 function ttRemeasure(){
   if(TT.curve && TT.len) tlMeasure(TT.curve,TT.len);
 }
-function tlStation(x,z){
+/* WHERE ON THE CIRCUIT A POINT IS.
+
+   Searched near a cursor rather than over the whole lap, because at a station
+   a metre this is 7,400 of them and it is asked several times a frame.
+
+   THE CURSOR MUST NOT BE SHARED, and it was. There was one tlIdx for the whole
+   game, and the AI step asks this question about all nine rivals every frame,
+   so by the time the player's own position was looked up the cursor was
+   wherever the last rival happened to be. The search window is twenty stations
+   and it accepts anything within ninety metres -- so if the player was within
+   ninety metres of that rival's stretch of road, the player was ASSIGNED THE
+   RIVAL'S STATION. Progress round the lap is measured from it, the race order
+   is that progress sorted, and the position on screen stuck at whatever the
+   mix-up produced. That is the P6 that would not move.
+
+   The cursor is per caller now: the player has one, and each rival gets its
+   own kept on its own object. Nobody drags anybody else's. */
+let tlHintPlayer=0;
+/* The index tlStation last returned. Reading it saves an indexOf over 7,400
+   objects, which tvCarS was doing every frame to turn a station back into a
+   distance round the lap. */
+let tlLastIdx=0;
+function tlStation(x,z,hint){
   const n=tlSt.length; if(!n) return null;
-  let bi=tlIdx, bd=Infinity;
+  const start=(hint===undefined||hint===null) ? tlHintPlayer : hint;
+  let bi=start, bd=Infinity;
   for(let k=-6;k<=14;k++){
-    const i=((tlIdx+k)%n+n)%n, s=tlSt[i];
+    const i=((start+k)%n+n)%n, s=tlSt[i];
     const d=(s.x-x)**2+(s.z-z)**2;
     if(d<bd){ bd=d; bi=i; }
   }
@@ -8696,8 +8719,11 @@ function tlStation(x,z){
     for(let i=0;i<n;i++){ const s=tlSt[i], d=(s.x-x)**2+(s.z-z)**2;
       if(d<bd){ bd=d; bi=i; } }
   }
-  tlIdx=bi; return tlSt[bi];
+  if(hint===undefined||hint===null) tlHintPlayer=bi;
+  tlLastIdx=bi;
+  return tlSt[bi];
 }
+
 /* Is this wheel still on the track, allowing the tolerance? */
 document.querySelectorAll('#tlpick button').forEach(b=>{
   b.addEventListener('click',()=>tlSet(parseFloat(b.dataset.tol)));
@@ -9672,6 +9698,7 @@ function tlCheck(dt){
   let on=0;
   for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
   if(on>0){ _tlOff=0; _tlCounted=false; return; }
+  if(_tlOff===0) _tlPosWas=RACE.pos||0;      // the order on the way off
   _tlOff+=(dt||STEP);
   if(_tlOff<TL_GRACE || _tlCounted || _tlLock>0) return;
   _tlCounted=true;
@@ -9695,21 +9722,70 @@ function tlCheck(dt){
    The five seconds land on your race time when you cross the line, so a lead
    smaller than five seconds is a lead you lose, exactly as it works on a
    Sunday. */
-const LIMITS={ count:0, flag:false, pen:0, msg:'', msgT:0 };
+const LIMITS={ count:0, flag:false, pen:0, msg:'', msgT:0, after:0, dsq:false };
 const LIMITS_PEN=5.0;
+/* THE LADDER. Three warnings, then the flag, and then it costs.
+
+     warning 1, 2, 3     nothing but a message
+     4th                 black and white flag
+     5th                 five seconds
+     6th                 ten seconds
+     7th                 disqualified
+
+   The seconds are added to the race time at the line, so a penalty is a
+   penalty rather than something that happens to the car mid-corner. */
+const LIMITS_AFTER=[5, 10];
 function limitsReset(){
   LIMITS.count=0; LIMITS.flag=false; LIMITS.pen=0; LIMITS.msg=''; LIMITS.msgT=0;
+  LIMITS.after=0; LIMITS.dsq=false;
   _tlOff=0; _tlCounted=false; _tlLock=0;
   limitsPaint();
 }
+/* WAS THERE ANYTHING TO GAIN?
+
+   Going off is only worth punishing if it helped. Three cases where it plainly
+   did not, and none of them count:
+
+     - the car was in the gravel or on the grass. That is a mistake that has
+       already cost more time than any penalty would;
+     - the car hit a barrier. Same, and worse;
+     - the car came out of it further down the order than it went in. Losing a
+       place is the punishment; adding five seconds to it is punishing the same
+       mistake twice.
+
+   The position is sampled when the car first leaves the road and compared when
+   the offence would be recorded, which is a moment later -- so "did you come
+   out behind somebody you were in front of" is a real question with a real
+   answer rather than a guess. */
+let _tlPosWas=0;
+function limitsGained(){
+  if(PLAYER && PLAYER.surf && (PLAYER.surf.loose || PLAYER.surf.grass)) return false;
+  if(typeof BARR_HIT!=='undefined' && BARR_HIT>0) return false;
+  if(_tlPosWas && RACE.pos > _tlPosWas) return false;
+  return true;
+}
 function limitsHit(){
-  if(LIMITS.flag) return;          // the flag is the state; nothing further to say
+  if(LIMITS.dsq) return;
+  if(!limitsGained()){
+    limitsSay('OFF THE TRACK','no lasting advantage — not counted');
+    return;
+  }
   LIMITS.count++;
-  if(LIMITS.count>=3){
+  if(LIMITS.count<=3){
+    limitsSay('TRACK LIMITS', 'all four wheels off — warning '+LIMITS.count+' of 3');
+  } else if(LIMITS.count===4){
     LIMITS.flag=true;
-    limitsSay('BLACK AND WHITE FLAG','all four wheels off, three times \u2014 five seconds at the flag');
+    limitsSay('BLACK AND WHITE FLAG','three warnings used — the next one costs time');
   } else {
-    limitsSay('TRACK LIMITS', 'all four wheels off \u2014 warning '+LIMITS.count+' of 3');
+    const step=LIMITS.count-5;                  // 0 -> five seconds, 1 -> ten
+    if(step<LIMITS_AFTER.length){
+      LIMITS.after+=LIMITS_AFTER[step];
+      limitsSay((LIMITS_AFTER[step])+' SECOND PENALTY',
+                'off the track under the black and white flag');
+    } else {
+      LIMITS.dsq=true;
+      limitsSay('DISQUALIFIED','off the track once too often');
+    }
   }
   limitsPaint();
 }
@@ -9735,15 +9811,16 @@ function limitsPaint(){
   if(!f) return;
   f.classList.toggle('show', LIMITS.flag);
   const p=document.getElementById('bwpen');
-  if(p) p.textContent=LIMITS.pen?('+'+LIMITS.pen.toFixed(1)+'s'):'+5.0s at the flag';
+  if(p) p.textContent = LIMITS.dsq ? 'DISQUALIFIED'
+                      : LIMITS.after ? ('+'+LIMITS.after.toFixed(0)+'s')
+                      : 'next one costs 5s';
 }
 /* Crossing the line with the flag is where it is paid. */
 function limitsAtLine(){
-  if(LIMITS.flag && !LIMITS.pen){
-    LIMITS.pen=LIMITS_PEN;
-    limitsSay('FIVE SECOND PENALTY','black and white flag \u2014 added to your race time');
-    limitsPaint();
-  }
+  /* The flag on its own no longer costs five seconds. It is the warning that
+     the next one will, which is what a black and white flag actually is. */
+  LIMITS.pen=LIMITS.after;
+  limitsPaint();
   return LIMITS.pen;
 }
 
@@ -11841,6 +11918,20 @@ function aiTraffic(d, dt){
      0.82 pace with nobody anywhere near. */
   if(rel && Math.abs(rel.gap)<AI_TRAF.overlap
          && Math.abs(rel.lat-want)<AI_TRAF.clear+1.5){
+    /* WHO GIVES WAY. The car behind does.
+
+       Both cars were solving this at once -- each saw the other inside a car's
+       width and each moved -- so a pair of them would drift across the road
+       together, still overlapping, neither able to complete anything. On a
+       circuit the car in front holds its line and the one trying to get past
+       goes round it. That is also the rule that makes a pass finish: somebody
+       has to be the fixed object.
+
+       The exception is a genuine side-by-side, where neither is behind in any
+       meaningful sense and both leaving a little room is what keeps it clean. */
+    const behindHere = rel.gap<0 && Math.abs(rel.gap)>3;
+    const sideBySide = Math.abs(rel.gap)<=3;
+    const mustMove = behindHere || sideBySide;
     const side=Math.sign(d.lat-rel.lat) || -Math.sign(rel.lat) || 1;
     const bound=rel.lat+side*AI_TRAF.clear;
     let w = side>0 ? Math.max(want,bound) : Math.min(want,bound);
@@ -11864,14 +11955,32 @@ function aiTraffic(d, dt){
       d._urgent=true;
     }
     const lim=aiRoomNear(d, d.i, side, 30);
-    if(Math.abs(w)>lim){                       // no road left on that side
+    /* And the car in front simply keeps its line: it is the one being passed,
+       not the one passing. Everything above is still computed, so the state
+       the rest of the step reads is the same shape either way. */
+    if(!mustMove){ w=want; d.pinned=false; }
+    else if(Math.abs(w)>lim){                  // no road left on that side
       w=side*lim;
       d.pinned=true;
       d.speedK=Math.min(d.speedK, AI_TRAF.pinK);
     } else d.pinned=false;
-    if(Math.abs(w-want)>0.5){                  // shoved off its line: ease off
-      d.speedK=Math.min(d.speedK, AI_TRAF.giveK);
-      d._urgent=true;                         // and move over like it means it
+    if(Math.abs(w-want)>0.5){
+      /* MOVE OVER, DO NOT LIFT -- unless there is a corner to lift for.
+
+         Being asked to give a car room used to cost speed everywhere, and on a
+         straight that is exactly wrong: there is a whole road to move into and
+         no reason on earth to slow down. A car that lifts on the Kemmel to
+         avoid somebody it could simply drive around is a car that will never
+         overtake anything.
+
+         So the lift is kept for where the road is genuinely narrow in the sense
+         that matters -- a corner, where moving off the line costs entry speed
+         anyway -- and on a straight the answer is the steering wheel. The move
+         is made at the urgent rate either way. */
+      const straight=!tightCorner && d.v && d.v[d.i]>60;
+      const launch=RACE.on && RACE.phase==='racing' && (RACE.raceT||0)<6.5;
+      if(!straight && !launch) d.speedK=Math.min(d.speedK, AI_TRAF.giveK);
+      d._urgent=true;
     }
     want=w;
   } else d.pinned=false;
@@ -12144,8 +12253,22 @@ function aiPedals(d, C){
     const k=Math.abs((d.ks&&d.ks[q2])||0);
     return Math.sqrt(Math.max(0.5, 1-_off*k));
   };
+  /* OFF THE LINE, EVERYBODY GOES.
+
+     For the first few seconds nothing lifts for anybody. A standing start is
+     the one moment on the circuit where the car ahead is guaranteed to be
+     moving away from you rather than towards you, so following-distance caps
+     and give-way lifts are all answering a danger that is not there -- and a
+     grid that lifts for the car in front is a grid that never fans out and
+     never changes order, which is what was happening.
+
+     The corner speeds still apply, so this is throttle rather than a licence
+     to arrive at turn one too fast. It lasts until the field is properly
+     strung out, which the run to the first corner is. */
+  const launching = RACE.on && RACE.phase==='racing' && (RACE.raceT||0)<6.5;
   /* The corner's speed, or what the traffic allows, whichever is less. */
-  let tgt=Math.min(V[j]*K*offAt(j), d.capV===undefined?Infinity:d.capV);
+  let tgt=Math.min(V[j]*K*offAt(j),
+                   launching ? Infinity : (d.capV===undefined?Infinity:d.capV));
   if(_mk>0) tgt=Math.max(tgt, Math.min(V[(d.i+Math.round(100/d.ds))%d.n]*K,
                                        d.capV===undefined?Infinity:d.capV));
   if(_mk<0) tgt=Math.min(tgt, v);
@@ -12194,7 +12317,8 @@ function aiPedals(d, C){
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
-    const there=Math.min(V[q]*K*offAt(q), d.capV===undefined?Infinity:d.capV);
+    const there=Math.min(V[q]*K*offAt(q),
+                         launching ? Infinity : (d.capV===undefined?Infinity:d.capV));
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
     if(cap<capMin) capMin=cap;
     if(v>cap){
@@ -12656,7 +12780,7 @@ function aiPlace(d, i, flying){
    it steps, so there is one release and both of them answer to it. */
 const RACE={ on:false, phase:'', t:0, hold:0, ready:false };
 const RACE_CARS=10;   // you and nine others, on the ten painted slots
-const RACE_LAPS=5;    // the distance
+const RACE_LAPS=3;    // the distance
 /* One lap, so the line is the finish. Everyone's race time runs from lights out
    and stops when they cross it; the penalty is added to yours afterwards, which
    is the whole point of it -- five seconds is only a punishment if somebody is
@@ -12773,7 +12897,10 @@ function careerScore(){
 }
 function raceResultRows(){
   const L=TT.len||1;
-  const rows=[{who:'You', t:RESULT.you, pen:LIMITS.pen, you:true}];
+  /* Disqualified is last, behind everyone still running, rather than a time
+     with seconds added to it. */
+  const rows=[{who:'You', t:LIMITS.dsq?null:RESULT.you, pen:LIMITS.pen,
+               you:true, dsq:LIMITS.dsq, run:LIMITS.dsq?-1:0}];
   AIS.forEach((d,k)=>{ if(d.car&&d.on)
     rows.push({who:d.name||GRID_NAMES[k%GRID_NAMES.length], t:d.finish||null, pen:0,
                run:(d.lapN||0)*L+(d.i||0)*d.ds}); });
@@ -13162,7 +13289,9 @@ function aiStep(d, dt, t){
   { const i=loc.i, j=(i+1)%d.n;
     const tx=d.x[j]-d.x[i], tz=d.z[j]-d.z[i], tl=Math.hypot(tx,tz)||1;
     d.off=((st.wx-d.x[i])*(tz/tl) - (st.wz-d.z[i])*(tx/tl));  // +ve = right
-    const stn=tlStation(st.wx,st.wz);
+    /* Its own cursor, not the shared one -- see tlStation. */
+    const stn=tlStation(st.wx, st.wz, d._tlHint);
+    if(stn) d._tlHint=tlLastIdx;
     d.room = stn ? (d.off>0 ? stn.dR : stn.dL) : 99;
     d.outside = Math.abs(d.off) - d.room; }
   if(d._gridT!==undefined) d._gridT+=dt;
