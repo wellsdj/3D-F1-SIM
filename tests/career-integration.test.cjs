@@ -6,3 +6,6 @@ test('classification waits for trailing AI and scores exactly once',()=>{const {
 test('classification timeout records unfinished AI as DNF',()=>{const {ctx,c}=setup();ctx.RACE.raceT=391;ctx.careerScore();assert.equal(c.table[0].points,0);assert.equal(c.last.rows[1].dnf,true);});
 test('practice uses solo timer, race uses existing start sequence',()=>{assert.match(source,/if\(!careerTimedSession\(\)\) raceStart\(\{keepIntro:true\}\)/);assert.match(source,/careerRecordLap\(TT.t\)/);assert.match(source,/order=\(c.weekend && c.weekend.grid\) \|\| field/);});
 test('menu CSS does not override race grid slot appearance',()=>{const css=fs.readFileSync(require('node:path').join(__dirname,'../career-menu.css'),'utf8');assert.equal(/(^|})\s*\.slot[:\s{]/.test(css),false);});
+test('TV director remains available for replay and spectator presentation',()=>{
+  assert.match(source,/C\.tv && !orbit && !freeLook && \(FREEROAM \|\| TTREC\.playing \|\| NET\.watching\) && tvUpdate\(t,dt\)/);
+});

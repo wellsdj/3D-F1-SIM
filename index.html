@@ -14343,7 +14343,11 @@ function frame(now){
      On flat ground base is 0 and the framing is exactly what it was. */
   const camBase=FREEROAM?vGroup.position.y-RIDE:0;
 
-  if(C.tv && !orbit && !freeLook && FREEROAM && tvUpdate(t,dt)){
+  /* Replays and spectators move the same presentation car as a live lap.
+     Limiting the director to FREEROAM left either of those sessions to fall
+     through to TV's chase fallback, so "TV" looked exactly like another
+     chase camera rather than a broadcast cut. */
+  if(C.tv && !orbit && !freeLook && (FREEROAM || TTREC.playing || NET.watching) && tvUpdate(t,dt)){
     camera.updateProjectionMatrix();
   }
   else if(orbit){
