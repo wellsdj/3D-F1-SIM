@@ -1,16 +1,18 @@
 # APEX / 26 career
 
-The new home and career menus wrap the existing 3D F1 SIM race engine. Track geometry, car models, shaders, cameras, race-start presentation, audio and handling implementation are preserved. Career upgrades still use the game's existing top-speed and grip modifiers.
+The new home and career menus wrap the existing 3D F1 SIM race engine. Track geometry, car models, shaders, cameras, race-start presentation and handling implementation are preserved. Engine audio now stops on session-end and menu screens. Career upgrades still use the game's existing top-speed and grip modifiers.
 
 ## Play
 
 Choose **Start your career**, select one of three slots, enter a driver/team/number, pick a four- or eight-weekend season and AI difficulty, and sign an Academy contract. Use the existing garage to finish the car and choose Next.
 
-Each weekend follows briefing → practice → qualifying → race → debrief. Practice and qualifying use the existing valid-lap timer and gates. A valid lap returns to the hub. The first valid practice lap awards 250 credits. Qualifying can be repeated; the fastest valid lap determines the grid against deterministic simulated rival times. Skipping qualifying starts the player last. A race uses the existing three-lap, ten-car simulation.
+Each weekend follows briefing → practice → qualifying → race → debrief. Practice and qualifying use the existing valid-lap timer and gates. A valid lap returns to the hub. The first valid practice lap awards 250 development credits and 50 upgrade points. Careers start with 500 upgrade points; stronger race finishes earn more. The development shop spends upgrade points, with both balances displayed above the career pages. Qualifying can be repeated; the fastest valid lap determines the grid against deterministic simulated rival times. Skipping qualifying starts the player last. Leaving the relaxed track boundary in qualifying deletes the lap and offers a retry or simulated qualifying to set the grid. A race uses the existing three-lap, ten-car simulation.
 
 Race classification waits for rivals to finish, up to 90 simulation seconds after the player's finish. Remaining rivals are DNF. Penalties affect classification. Disqualified/non-finishing entries receive no championship points. Rewards and points are applied once; Continue season advances the round. The next contract keeps the car, credits and career history, resets championship points, and records the previous season.
 
-Calendar, standings, development, and career record are available from the hub. Contracts unlock at 25 and 55 recognition. Their top-five/top-three objectives pay larger bonuses. Livery choices are stored per career. Saves use localStorage on the current browser/origin; they are not cloud saves. Leaving an unfinished session allows a retry; a reload restarts that session from the hub rather than restoring a car mid-lap.
+Track limits are always relaxed; the setting is no longer adjustable. Disqualification hands steering and pedals to an AI retirement driver, which follows a forward racing-line route into reachable gravel and parks. If no clear gravel route exists, it brakes safely in place. Once stopped, restart the race or continue with a simulated remaining classification. Race rewards use an animated credits/upgrade-points panel.
+
+Calendar, standings, development, and career record are available from the hub. Career records now retain each completed practice, qualifying and race lap, plus deleted qualifying attempts and disqualification laps, across seasons. Laps driven before this update cannot be reconstructed. Contracts unlock at 25 and 55 recognition. Their top-five/top-three objectives pay larger bonuses. Livery choices are stored per career. Saves use localStorage on the current browser/origin; they are not cloud saves. Leaving an unfinished session allows a retry; a reload restarts that session from the hub rather than restoring a car mid-lap.
 
 ## Adaptation limits
 
