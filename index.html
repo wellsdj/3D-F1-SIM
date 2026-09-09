@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Circuit 01 — Pinewood</title>
+<title>APEX / 26 — 3D F1 SIM</title>
+<script src="career-season.js"></script>
 <style>
   :root{
     --ink:#0b0c0d;
@@ -919,6 +920,7 @@ if('serviceWorker' in navigator){
     .catch(e=>console.warn('offline: not available', e)));
 }
 </script>
+<link rel="stylesheet" href="career-menu.css">
 </head>
 <body>
 <div id="perf"></div>
@@ -1255,7 +1257,7 @@ if('serviceWorker' in navigator){
   <div class="career-page" id="career-shop">
     <div class="overlay-kicker">Garage · Upgrades</div>
     <h2>Make it <em>quicker.</em></h2>
-    <p class="career-intro"><b id="shop-coins">1,000</b> coins. Powertrain buys top speed,
+    <p class="career-intro"><b id="shop-coins">1,000</b> credits. Powertrain buys top speed,
       aerodynamics buys grip — how hard it will turn and how fast it carries through a corner.</p>
     <div class="shop-grid">
       <div class="shop-line">
@@ -5704,6 +5706,7 @@ function ttLine(){
     return;
   }
   TT.last=TT.t;
+  careerRecordLap(TT.t);
   const lapMeta=lapSnapshot();
   recHistory(TT.t,lapMeta);
   const rec = TT.best===null || TT.t<TT.best;
@@ -5915,6 +5918,10 @@ function replayStart(){
    and the entry button -- which startTrack hides on the way in -- comes back,
    or the home screen would have no way off it. */
 function goHome(){
+  if(CAREER.active && RESULT.on && careerSlot().weekend.stage==='race'){careerScore();if(careerSlot().weekend.stage==='race')return;}
+  careerSessionRunning=false;
+  if(CAREER.active && RACE.on)raceEnd();
+
   replayMetadataEnd();
   TTREC.playing=false;
   /* A career goes back to its own season page, not the front door. The race
@@ -12862,39 +12869,14 @@ function raceFinish(){
    The rivals score too, off the same finishing order, so the table is the
    season rather than a list of your own results. */
 function careerScore(){
-  if(!CAREER.active || !RESULT.rows || !RESULT.rows.length) return;
-  const c=careerSlot();
-  if(!c.table) c.table=careerNewTable();
-  let mine=1;
-  RESULT.rows.forEach((r,i)=>{
-    const pts=CAREER_POINTS[i]||0;
-    if(r.you){ mine=i+1; c.points+=pts; }
-    else {
-      const t=c.table.find(x=>x.name===r.who);
-      if(t) t.points+=pts;
-    }
-  });
-  /* THE PRIZE, AND IT HAS TO PAY FOR THE CAR.
-
-     Every upgrade in the shop costs 22,900 coins in total, and a season is
-     eight rounds. The first curve paid 1,620 for a win down to 580 for last
-     and left a plausible season on six of the ten parts -- the top of both
-     ladders permanently out of reach, so the last three rounds had nothing to
-     buy and the shop stopped being a reason to race.
-
-     This one pays 2,900 for a win down to 1,123 for tenth. Simulated over a
-     season that starts ninth and climbs as parts go on: P9 P6 P5 P5 P4 P3 P3
-     P2, finishing with eight of the ten fitted and enough left over to be
-     choosing rather than saving. Last place still pays well, because a career
-     where one bad round leaves you unable to buy anything is over without
-     saying so. */
-  const prize=Math.round(2600*Math.pow(0.88, mine-1))+300;
-  c.coins+=prize;
-  c.last={ round:c.round, pos:mine, points:CAREER_POINTS[mine-1]||0, prize };
-  c.round++;
-  c.used=true;
-  careerSave();
+  if(!CAREER.active || !RESULT.on || !RESULT.rows.length) return;
+  const left=AIS.filter(d=>d.car&&d.on&&!d.finish);
+  if(left.length && RACE.raceT-RESULT.you<90) return;
+  const rows=RESULT.rows.map(r=>({...r,dnf:!r.you&&!r.t}));
+  RESULT.rows=rows;
+  if(CareerSeason.score(careerSlot(),rows)){careerSave();raceResultUI();}
 }
+
 function raceResultRows(){
   const L=TT.len||1;
   /* Disqualified is last, behind everyone still running, rather than a time
@@ -12914,15 +12896,17 @@ function raceResultRows(){
 /* Keeps filling in until the last of them is home. */
 function raceResultTick(){
   if(!RESULT.on) return;
+  if(CAREER.active && careerSlot().weekend.scored)return;
   const left=AIS.filter(d=>d.car&&d.on&&!d.finish).length;
   if(left!==RESULT._left){ RESULT._left=left; raceResultRows(); }
+  careerScore();
 }
 function raceResultUI(){
   const box=raceEl('result'); if(!box) return;
   const lead=RESULT.rows[0];
   let html='<div class="head"><b>Result</b><span>Spa 2022 &middot; '+RACE_LAPS+' laps</span></div><div class="rows">';
   RESULT.rows.forEach((r,i)=>{
-    const gap = r.total==null ? 'still racing'
+    const gap = r.dsq ? 'DSQ' : r.dnf ? 'DNF' : r.total==null ? 'still racing'
               : i===0 ? fmtTime(r.total)
               : '+'+(r.total-lead.total).toFixed(3);
     html+='<div class="slot'+(r.you?' you':'')+'"><div class="pos">P'+(i+1)+'</div>'+
@@ -12930,9 +12914,10 @@ function raceResultUI(){
           (r.pen?'<span class="pen">+'+r.pen.toFixed(1)+'s track limits</span>':'')+
           '</div><div class="tag">'+gap+'</div></div>';
   });
-  html+='</div><button id="resultclose">Done</button>';
+  const pending=CAREER.active && careerSlot().weekend.stage==='race';
+  html+='</div><button id="resultclose" '+(pending?'disabled':'')+'>'+(pending?'Waiting for classification…':'Done')+'</button>';
   box.innerHTML=html; box.classList.add('show');
-  document.getElementById('resultclose').onclick=()=>{ box.classList.remove('show'); raceEnd(); };
+  document.getElementById('resultclose').onclick=()=>{ box.classList.remove('show'); raceEnd(); if(CAREER.active)goHome(); };
 }
 function fmtTime(t){
   const m=Math.floor(t/60), s=t-m*60;
@@ -13070,6 +13055,7 @@ function racePlace(car, slot){
   }
 }
 function raceStart(opts){
+  if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
   if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
   if(RACE.on){ raceEnd(); return false; }
@@ -13102,8 +13088,8 @@ function raceStart(opts){
         pace:t.pace + (Math.random()-0.5)*CAREER_SPREAD*2 }));
     field.push({ ai:-1, pace:careerPace(c) + (Math.random()-0.5)*CAREER_SPREAD });
     field.sort((a,b)=>b.pace-a.pace);
-    order=field;
-    RACE.careerGrid=field.map(f=>f.ai);
+    order=(c.weekend && c.weekend.grid) || field;
+    RACE.careerGrid=order.map(f=>f.ai);
   } else RACE.careerGrid=null;
 
   const mySlot = order ? order.findIndex(f=>f.ai===-1) : 0;
@@ -13187,10 +13173,17 @@ const GRID_NAMES=LIVERIES.map(l=>l.name);
 function raceGridList(){
   const box=raceEl('racegrid');
   if(!box) return;
+  const caption=raceEl('gridcard').querySelector('.head span');if(caption)caption.textContent='Spa 2022 · '+RACE_LAPS+' laps';
   const row=(pos,name,sub,tag,you)=>
     '<div class="slot'+(you?' you':'')+'"><div class="pos">P'+pos+'</div>'+
     '<div class="who"><b>'+name+'</b><span>'+sub+'</span></div>'+
     '<div class="tag">'+tag+'</div></div>';
+  if(CAREER.active && RACE.careerGrid){
+    const c=careerSlot();
+    box.innerHTML=RACE.careerGrid.map((ai,i)=>row(i+1,ai===-1?esc(c.driver):esc(c.table[ai].name),ai===-1?esc(c.team):'McLaren MCL39',i===0?'Pole':'Row '+Math.ceil((i+1)/2),ai===-1)).join('');
+    const sl=raceEl('paceslider');sl.value=c.difficulty;raceEl('pacenum').textContent=c.difficulty;raceEl('pacename').textContent=AI_LEVEL_NAME[c.difficulty];
+    return;
+  }
   let html=row(1,'You','McLaren MCL39','Pole',true);
   for(let k=2;k<=RACE_CARS;k++)
     html+=row(k, GRID_NAMES[(k-2)%GRID_NAMES.length], 'McLaren MCL39',
@@ -14640,7 +14633,7 @@ function qualifyingBegin(){
      the idea: you come out of the loading screen into the drone shot with both
      cars already on the grid and the pace card up, and the lights go when you
      say so. */
-  raceStart({keepIntro:true});
+  if(!careerTimedSession()) raceStart({keepIntro:true});
 }
 function qualifyingChooseWeather(kind){
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
@@ -15057,7 +15050,7 @@ function careerPaintSlots(){
     b.innerHTML='<span class="n">'+(i+1)+'</span><span class="t">'
       + (c.used
           ? '<b>'+esc(c.team)+'</b><span>Round '+c.round+' of '+c.rounds
-            +' &middot; '+c.points+' pts &middot; '+c.coins.toLocaleString()+' coins</span>'
+            +' &middot; '+c.points+' pts &middot; '+c.coins.toLocaleString()+' credits</span>'
           : '<b>Empty slot</b><span>Start a new career</span>')
       + '</span>'
       + (c.used?'<span class="del" data-del="'+i+'">Erase</span>':'');
@@ -15137,7 +15130,7 @@ function careerPaintHub(){
     if(c.last){
       lr.classList.add('on');
       lr.innerHTML='Round '+c.last.round+': finished <b>'+c.last.pos+ordSuffix(c.last.pos)
-        +'</b> · '+c.last.points+' points · '+c.last.prize.toLocaleString()+' coins';
+        +'</b> · '+c.last.points+' points · '+c.last.prize.toLocaleString()+' credits';
     } else lr.classList.remove('on');
   }
 }
@@ -15166,7 +15159,7 @@ function careerPaintShop(){
         +'<span class="pn"><b>'+part.name+'</b><span>'
         +(kind==='power'?'+'+Math.round(part.gain*100)+'% power'
                         :'+'+Math.round(part.gain*100)+'% grip')
-        +' · '+part.cost.toLocaleString()+' coins</span></span>';
+        +' · '+part.cost.toLocaleString()+' credits</span></span>';
       const b=document.createElement('button');
       b.type='button';
       b.textContent = owned ? 'Fitted' : (next ? 'Buy' : 'Locked');
@@ -15218,7 +15211,7 @@ function careerClose(){
     if(on('shop')){ careerPaintHub(); careerPage('hub'); }
     else if(on('name')){ careerPaintSlots(); careerPage('slots'); }
     else if(on('hub')){ careerSave(); careerPaintSlots(); careerPage('slots'); }
-    else careerClose();
+    else { CAREER.active=false; careerApply(); careerClose(); bootEl.classList.remove('gone'); }
   };
   const bs=$('career-backSlots'); if(bs) bs.onclick=()=>{ careerPaintSlots(); careerPage('slots'); };
   const tb=$('career-toBuild');
@@ -15501,7 +15494,7 @@ Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
 });
 {
   const q=document.getElementById('modequick');
-  if(q) q.addEventListener('click',()=>{ CAREER.active=false; goRacing('spa22'); });
+  if(q) q.addEventListener('click',()=>{ CAREER.active=false; careerApply(); goRacing('spa22'); });
   const c=document.getElementById('modecareer');
   if(c) c.addEventListener('click',()=>careerOpen());
 }
@@ -15510,6 +15503,125 @@ qualifyingWeatherButtons.forEach(btn=>{
 });
 
 
+
+/* Career presentation. The on-track renderer, cameras and models stay untouched. */
+let careerSessionRunning=false;
+function careerTimedSession(){return CAREER.active && ['practice','qualifying'].includes(CareerSeason.migrate(careerSlot()).weekend.stage);}
+function careerRecordLap(time){if(!careerSessionRunning||!careerTimedSession())return; if(CareerSeason.lap(careerSlot(),time)){careerSave();goHome();}}
+const careerStyleSave=styleSave;
+styleSave=function(){careerStyleSave();if(CAREER.active){careerSlot().livery={...carStyle};careerSave();}};
+careerSave=function(){
+ try{if(CAREER.active)careerSlot().livery={...carStyle};localStorage.setItem(CAREER_KEY,JSON.stringify(CAREER_SLOTS));const e=document.getElementById('career-save-status');if(e)e.textContent='Progress saved on this device';}
+ catch(e){const el=document.getElementById('career-save-status');if(el)el.textContent='Storage is full or unavailable. Keep this tab open to retain progress.';}
+};
+const careerLegacyEnter=careerEnter;
+careerEnter=function(){CareerSeason.migrate(careerSlot());if(careerSlot().livery){for(const k of ['body','ring','wing','rims'])if(/^#[0-9a-f]{6}$/i.test(careerSlot().livery[k]))styleApply(k,careerSlot().livery[k],false);}careerLegacyEnter();careerApply();};
+careerRows=function(c){return CareerSeason.standings(c).map(r=>({...r,body:r.body||'#ff8049'}));};
+const careerContracts=[{name:'Academy',target:8,bonus:500,required:0},{name:'Challenger',target:5,bonus:900,required:25},{name:'Works',target:3,bonus:1500,required:55}];
+const menuEl=document.getElementById('career');
+menuEl.insertAdjacentHTML('afterbegin','<div class="career-brand">APEX <i>/</i> 26 <span>DRIVER CAREER</span></div>');
+menuEl.insertAdjacentHTML('beforeend','<p id="career-save-status" role="status">Progress saved on this device</p>');
+const namePage=document.getElementById('career-name');
+namePage.innerHTML=`<div class="overlay-kicker">New career / 01 — Driver profile</div><h2>Your name.<br><em>Your legacy.</em></h2><p class="career-intro">Create your driver, choose a contract and build your car. Your story starts at Spa.</p>
+<div class="setup-fields"><label class="career-field"><span>Driver name</span><input id="career-driver" maxlength="24" placeholder="Alex Morgan" autocomplete="off"></label><label class="career-field"><span>Race number</span><input id="career-number" type="number" min="1" max="99" value="27"></label><label class="career-field"><span>Team name</span><input id="career-team" maxlength="22" placeholder="Northgate Racing" autocomplete="off"></label><label class="career-field"><span>Season length</span><select id="career-length"><option value="8">Full season · 8 weekends</option><option value="4">Short season · 4 weekends</option></select></label><label class="career-field"><span>AI difficulty</span><select id="career-difficulty"><option value="3">Club · 3 / 10</option><option value="5" selected>Balanced · 5 / 10</option><option value="7">Quick · 7 / 10</option><option value="9">Expert · 9 / 10</option></select></label></div>
+<div class="career-actions"><button id="career-contract-next">Choose contract →</button><button class="ghost" id="career-backSlots">Back</button></div><p id="setup-error" role="alert"></p>`;
+const contractPage=document.createElement('div');contractPage.id='career-contract';contractPage.className='career-page';menuEl.appendChild(contractPage);
+const legacyPage=careerPage;
+careerPage=function(id){contractPage.classList.toggle('on',id==='contract');legacyPage(id);const panel=document.getElementById('career-'+id);if(panel){menuEl.scrollTop=0;const h=panel.querySelector('h2');if(h){h.tabIndex=-1;h.focus({preventScroll:true});}}};
+let careerDraft=null;
+document.getElementById('career-backSlots').onclick=()=>{careerPaintSlots();careerPage('slots');};
+document.getElementById('career-contract-next').onclick=()=>{
+ const driver=document.getElementById('career-driver').value.trim(),team=document.getElementById('career-team').value.trim(),number=+document.getElementById('career-number').value;
+ if(!driver||!team||!Number.isInteger(number)||number<1||number>99){document.getElementById('setup-error').textContent='Enter your driver name, team name and a race number from 1 to 99.';return;}
+ careerDraft={driver,team,number,rounds:+document.getElementById('career-length').value,difficulty:+document.getElementById('career-difficulty').value};careerPaintContracts(false);
+};
+function careerPaintContracts(renew){
+ const c=careerSlot(),rep=renew?c.reputation:0;
+ contractPage.innerHTML='<div class="overlay-kicker">'+(renew?'Season '+(c.season+1)+' / Team negotiations':'New career / 02 — Your first contract')+'</div><h2>Earn your <em>seat.</em></h2><p class="career-intro">Your contract sets the race objective and bonus. Earn recognition to unlock more demanding offers. Your team and car development carry forward.</p><div class="contract-grid">'+careerContracts.map((t,i)=>'<article><span class="contract-index">0'+(i+1)+'</span><h3>'+t.name+'</h3><p>Finish in the top '+t.target+'</p><strong>+'+t.bonus+' credits</strong><p>'+(rep<t.required?'Requires '+t.required+' recognition':'Available to sign')+'</p><button data-contract="'+i+'" '+(rep<t.required?'disabled':'')+'>'+(rep<t.required?'Locked':'Sign contract →')+'</button></article>').join('')+'</div><div class="career-actions"><button class="ghost" id="contract-back">Back</button></div>';
+ contractPage.querySelectorAll('[data-contract]').forEach(b=>b.onclick=()=>{
+  const contract={...careerContracts[+b.dataset.contract]};
+  if(renew){CareerSeason.nextSeason(c,contract,careerNewTable());careerSave();careerPaintHub();careerPage('hub');}
+  else{Object.assign(c,CAREER_BLANK(),careerDraft,{used:true,contract,table:careerNewTable()});CareerSeason.migrate(c);CAREER.active=true;careerSave();careerApply();careerClose();openCustomizer();}
+ });
+ document.getElementById('contract-back').onclick=()=>{if(renew){careerPaintHub();careerPage('hub');}else careerPage('name');};careerPage('contract');
+}
+const closeCareerOriginal=document.getElementById('career-close').onclick;
+document.getElementById('career-close').onclick=()=>{if(contractPage.classList.contains('on')){document.getElementById('contract-back').click();return;}closeCareerOriginal();};
+const hub=document.getElementById('career-hub');
+hub.innerHTML=`<div class="hub-heading"><div><div class="overlay-kicker" id="career-kicker"></div><h2 id="career-title">The next <em>chapter.</em></h2></div><div class="driver-badge" id="driver-badge"></div></div>
+<nav class="career-tabs" aria-label="Career sections"><button data-career-tab="overview" class="selected">Overview</button><button data-career-tab="calendar">Calendar</button><button data-career-tab="standings">Standings</button><button data-career-tab="development">Development</button><button data-career-tab="history">Career record</button></nav>
+<div id="career-content"></div><div class="career-actions hub-footer"><button class="ghost" id="career-toGarage">Car &amp; livery</button><button class="ghost" id="career-quit">Save &amp; exit</button></div>`;
+let careerTab='overview';
+hub.querySelectorAll('[data-career-tab]').forEach(b=>b.onclick=()=>{careerTab=b.dataset.careerTab;careerPaintHub();});
+document.getElementById('career-toGarage').onclick=()=>{careerClose();openCustomizer();};
+document.getElementById('career-quit').onclick=()=>{careerSave();CAREER.active=false;careerApply();careerClose();bootEl.classList.remove('gone');careerHomeRefresh();};
+const cFmt=t=>Number.isFinite(t)?fmtTime(t):'No time';
+function careerPaintHub(){
+ const c=CareerSeason.migrate(careerSlot()),w=c.weekend,ev=CareerSeason.event(c),complete=c.round>c.rounds;
+ document.getElementById('career-kicker').textContent=(c.team||'Your team')+' / Season '+c.season;
+ document.getElementById('career-title').innerHTML=complete?'Season <em>complete.</em>':'Make every <em>lap count.</em>';
+ document.getElementById('driver-badge').innerHTML='<strong>'+c.number+'</strong><span>'+esc(c.driver)+'<small>'+c.reputation+' / 100 recognition</small></span>';
+ hub.querySelectorAll('[data-career-tab]').forEach(b=>{b.classList.toggle('selected',b.dataset.careerTab===careerTab);b.setAttribute('aria-current',b.dataset.careerTab===careerTab?'page':'false');});
+ const stats='<div class="season-stats"><div><b>'+c.points+'</b><span>Championship points</span></div><div><b>P'+careerStanding(c)+'</b><span>Championship position</span></div><div><b>'+c.coins.toLocaleString()+'</b><span>Development credits</span></div><div><b>'+Math.min(c.round,c.rounds)+' <small>/ '+c.rounds+'</small></b><span>Race weekend</span></div></div>';
+ let body='';
+ if(careerTab==='overview'){
+  const labels={briefing:'Weekend briefing',practice:'Free practice',qualifying:'Qualifying',race:'Grand Prix',debrief:'Weekend debrief'};
+  const stage=w.stage;
+  const descriptions={briefing:'Meet your race engineer, review your objectives and prepare for the weekend.',practice:'Complete a clean lap to earn 250 development credits. Return to the hub after each valid lap.',qualifying:'Your fastest valid lap determines your grid position against simulated rival times. Leave without a time to start last.',race:'Three laps. Ten cars. Your qualifying result sets the grid. Race results count toward the championship.',debrief:'Review the classification and rewards, develop your car, then move to the next weekend.'};
+  body=stats+'<div class="weekend-layout"><article class="weekend-feature"><span class="overlay-kicker">'+(complete?'The chequered flag':'Round '+c.round+' / Belgium')+'</span><h3>'+(complete?'Season '+c.season+' complete':ev.name)+'</h3><p>Spa-Francorchamps · '+(complete?'Championship classification':ev.lighting+' · 3 lap race')+'</p><div class="weekend-steps">'+['briefing','practice','qualifying','race','debrief'].map((s,i)=>'<span class="'+(s===stage?'current':'')+'">0'+(i+1)+' '+s+'</span>').join('')+'</div><h4>'+(complete?'Your next season awaits':labels[stage])+'</h4><p>'+(complete?'Choose your next contract. Keep your upgrades, credits and career record as the championship begins again.':descriptions[stage])+'</p><div class="career-actions"><button id="career-primary">'+(complete?'Negotiate next season →':stage==='briefing'?'Begin weekend →':stage==='debrief'?'Continue season →':stage==='race'?'Go to race →':'Drive '+stage+' →')+'</button>'+(!complete&&['practice','qualifying'].includes(stage)?'<button class="ghost" id="career-advance">'+(stage==='practice'?'Finish practice':w.qualifying.length?'Confirm grid':'Start last without a time')+' →</button>':'')+'</div>'+(stage==='qualifying'||stage==='practice'?'<p class="session-best">'+w[stage].length+' valid laps · Best '+cFmt(Math.min(...w[stage]))+'</p>':'')+(stage==='race'?'<p class="session-best">Starting position P'+w.gridPosition+' · '+(w.qualifying.length?'Best lap '+cFmt(Math.min(...w.qualifying)):'No qualifying time')+'</p>':'')+'</article><aside class="engineer-card"><span class="overlay-kicker">Race engineer / Briefing</span><h3>Aim for the<br>top '+c.contract.target+'.</h3><p>'+esc(c.contract.name)+' contract</p><div class="engineer-line"><span>Race objective bonus</span><b>+'+c.contract.bonus+'</b></div><div class="engineer-line"><span>Clean practice lap</span><b>+250</b></div><p>Keep it clean through Eau Rouge. Build confidence, find your braking points, then commit to a qualifying lap.</p><small>All weekends use the existing Spa circuit. Rival qualifying times are simulated; race positions are earned on track.</small></aside></div>';
+  if(c.last)body+='<article class="debrief-card"><span class="overlay-kicker">Last result / Round '+c.last.round+'</span><h3>'+(c.last.dsq?'Disqualified':c.last.dnf?'Did not finish':'P'+c.last.pos)+' <small>'+c.last.points+' points · +'+(c.last.prize+(c.last.bonus||0)).toLocaleString()+' credits</small></h3><p>'+(c.last.objective?'Contract objective achieved.':'Keep pushing toward your contract objective.')+'</p></article>';
+ }else if(careerTab==='calendar'){
+  body='<h3 class="section-title">Your season at Spa</h3><p class="section-note">'+c.rounds+' weekends on the existing circuit, with different lighting across the season.</p><div class="calendar-grid">'+Array.from({length:c.rounds},(_,i)=>{const e=CareerSeason.event({...c,round:i+1}),h=c.history.find(r=>r.season===c.season&&r.round===i+1);return '<article class="calendar-card '+(c.round===i+1?'current':'')+'"><span>ROUND '+String(i+1).padStart(2,'0')+'</span><h3>'+e.name+'</h3><p>Spa-Francorchamps</p><small>'+e.lighting+' / '+(h?'P'+h.pos+' · '+h.points+' pts':i+1===c.round?'Current weekend':'Upcoming')+'</small></article>';}).join('')+'</div>';
+ }else if(careerTab==='standings'){
+  body=stats+'<h3 class="section-title">Championship standings</h3><p class="section-note">One entry per team · ties use race finishing positions.</p><div class="champ-table">'+careerRows(c).map((r,i)=>'<div class="champ-row '+(r.you?'you':'')+'"><b>'+String(i+1).padStart(2,'0')+'</b><span>'+esc(r.name)+(r.you?' <small>YOU</small>':'')+'</span><strong>'+r.points+' <small>PTS</small></strong></div>').join('')+'</div>';
+ }else if(careerTab==='development'){
+  body=stats+'<div class="development-banner"><span class="overlay-kicker">Research & development</span><h3>Find the next tenth.</h3><p>Powertrain improves top speed. Aerodynamics improves cornering grip. Every upgrade affects your career car on track.</p><div class="development-bars">'+['power','aero'].map(k=>'<div><span>'+(k==='power'?'Powertrain':'Aerodynamics')+'</span><b>'+c[k]+' / 5</b><progress max="5" value="'+c[k]+'"></progress></div>').join('')+'</div><div class="career-actions"><button id="open-career-shop">Develop the car →</button></div></div>';
+ }else{
+  body='<h3 class="section-title">Your racing story</h3><p class="section-note">'+c.history.length+' completed races · '+c.history.filter(h=>h.pos===1&&!h.dsq).length+' wins · '+c.history.filter(h=>h.pos<=3&&!h.dsq).length+' podiums</p>'+c.archive.map(a=>'<article class="debrief-card"><h3>Season '+a.season+' · P'+a.rank+'</h3><p>'+a.points+' points · '+esc(a.team)+'</p></article>').join('')+(c.history.length?'<div class="champ-table">'+c.history.slice().reverse().map(h=>'<div class="champ-row"><b>S'+h.season+'</b><span>Round '+h.round+' · '+(h.dsq?'DSQ':h.dnf?'DNF':'P'+h.pos)+'</span><strong>'+h.points+' PTS</strong></div>').join('')+'</div>':'<div class="empty-career">Your first chapter is unwritten.<br>Complete a race weekend to start your record.</div>');
+ }
+ document.getElementById('career-content').innerHTML=body;
+ const primary=document.getElementById('career-primary');if(primary)primary.onclick=()=>{
+  if(complete){careerPaintContracts(true);return;}
+  if(w.stage==='briefing'){CareerSeason.begin(c);careerSave();careerPaintHub();return;}
+  if(w.stage==='debrief'){CareerSeason.advance(c);careerSave();careerPaintHub();return;}
+  careerSessionRunning=true;RESULT.on=false;RESULT.rows=[];careerApply();aiSetLevel(c.difficulty);careerClose();goRacing('spa22');
+ };
+ const advance=document.getElementById('career-advance');if(advance)advance.onclick=()=>{CareerSeason.advance(c);careerSave();careerPaintHub();};
+ const shop=document.getElementById('open-career-shop');if(shop)shop.onclick=()=>{careerPaintShop();careerPage('shop');};
+}
+// Keep a weekend's lighting consistent through its practice, qualifying and race.
+const careerOriginalLoadReady=qualifyingLoadReady;
+qualifyingLoadReady=function(){if(CAREER.active&&!pendingReplay&&!window._autoReplay&&!qualifyingWeatherChoice){qualifyingWeatherChoice=CareerSeason.event(careerSlot()).lighting;}careerOriginalLoadReady();};
+// The home screen uses existing launch, garage, replay and controller actions.
+const home=document.getElementById('boot');
+home.insertAdjacentHTML('afterbegin','<header class="apex-header"><div class="apex-wordmark">APEX <i>/</i> 26</div><nav aria-label="Main menu"><span class="active">Home</span><button id="home-career-nav">Career</button><button id="home-garage-nav">Garage</button></nav><span class="edition-label">3D F1 SIM / SEASON 2026</span></header>');
+document.getElementById('homecopy').innerHTML='<div class="eyebrow">THE NEXT CHAPTER IS YOURS</div><h1>Built to race.<br><em>Born to win.</em></h1><p>From your first contract to the final chequered flag. Make your mark on the grid.</p><div class="spec"><span>SPA-FRANCORCHAMPS</span><span>10 CAR GRID</span><span>YOUR CAREER</span></div><button id="home-career-hero">Start your career <span>↗</span></button>';
+document.getElementById('home-career-hero').onclick=careerOpen;document.getElementById('home-career-nav').onclick=careerOpen;document.getElementById('home-garage-nav').onclick=openCustomizer;
+document.getElementById('racepick').innerHTML='<small>01 / ON TRACK</small><b>Grand Prix <i>↗</i></b><span>Jump into a three-lap race at Spa.</span>';
+document.getElementById('bestlapsbtn').innerHTML='<small>02 / YOUR RECORDS</small><b>Time archive ↗</b><span>Your fastest laps. Every angle.</span>';
+document.getElementById('netbtn').innerHTML='<small>03 / GET CONNECTED</small><b>Controller ↗</b><span>PS5 & Xbox · ready when you are.</span>';
+document.getElementById('customize-home').innerHTML='<small>04 / THE GARAGE</small><b>Your car ↗</b><span>A livery that is unmistakably yours.</span>';
+home.appendChild(document.getElementById('customize-home'));
+home.insertAdjacentHTML('beforeend','<footer class="apex-footer"><span><i></i> READY TO RACE</span><span>SPA, BELGIUM <b>50.4372° N / 5.9714° E</b></span><span>PRECISION. COMMITMENT. LEGACY.</span></footer>');
+function careerHomeRefresh(){const btn=document.getElementById('home-career-hero');btn.innerHTML=(CAREER_SLOTS.some(c=>c.used)?'Continue your career':'Start your career')+' <span>↗</span>';}
+try{
+ const legacy=localStorage.getItem(CAREER_KEY);
+ if(legacy&&JSON.parse(legacy).some(c=>c&&c.used&&c.version!==2)&&!localStorage.getItem('careerSlotsBeforeV2'))localStorage.setItem('careerSlotsBeforeV2',legacy);
+}catch(e){}
+CAREER_SLOTS.forEach(CareerSeason.migrate);careerHomeRefresh();
+menuEl.appendChild(document.getElementById('career-save-status'));
+new MutationObserver(()=>{home.inert=menuEl.classList.contains('on');}).observe(menuEl,{attributes:true,attributeFilter:['class']});
+// Avoid driving shortcuts while entering a name or navigating the new menus.
+window.addEventListener('keydown',e=>{
+ const panel=menuEl.classList.contains('on')?menuEl:!home.classList.contains('gone')?home:null;
+ if(!panel)return;
+ if(e.code==='Escape'&&panel===menuEl){e.preventDefault();document.getElementById('career-close').click();}
+ if(e.code==='Tab'){
+  const items=Array.from(panel.querySelectorAll('button,input,select')).filter(el=>!el.disabled&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
+  const i=items.indexOf(document.activeElement);if(items.length&&(i<0||(e.shiftKey?i===0:i===items.length-1))){e.preventDefault();items[e.shiftKey?items.length-1:0].focus();}
+ }
+ e.stopImmediatePropagation();
+},true);
 
 addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;

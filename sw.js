@@ -11,8 +11,9 @@
    Nothing is precached on install beyond the shell. The circuit is cached the
    first time it is actually fetched, which means the first load costs what it
    always did and every load after it costs nothing. */
-const CACHE='f1sim-v1';
+const CACHE='f1sim-career-v3';
 const SHELL=[
+  './career-menu.css','./career-season.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
   './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
@@ -42,7 +43,7 @@ self.addEventListener('fetch', e=>{
   const url=new URL(req.url);
   if(url.origin!==location.origin) return;          // peer signalling and the like
   const isPage = req.mode==='navigate' || url.pathname.endsWith('/') ||
-                 url.pathname.endsWith('index.html');
+                 url.pathname.endsWith('index.html') || /\.(css|js)$/.test(url.pathname);
   if(isPage){
     e.respondWith((async()=>{
       try{
@@ -50,7 +51,7 @@ self.addEventListener('fetch', e=>{
         const c=await caches.open(CACHE); c.put(req, fresh.clone());
         return fresh;
       }catch(err){
-        return (await caches.match(req)) || (await caches.match('./index.html'));
+        return (await caches.match(req)) || (req.mode==='navigate' ? await caches.match('./index.html') : Response.error());
       }
     })());
     return;
