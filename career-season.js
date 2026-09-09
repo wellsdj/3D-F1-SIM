@@ -6,10 +6,13 @@ const EVENTS=['Opening Grand Prix','Ardennes Trophy','Forest Challenge','Summer 
 const CONDITIONS=['midday','sunset','midday','night','sunset','night','midday','sunset'];
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,Number(n)||0));
 function migrate(c){
- c.version=2;c.season=Math.max(1,Number(c.season)||1);c.driver=String(c.driver||'Your driver').slice(0,24);c.number=clamp(c.number||27,1,99);
+ const oldVersion=c.version||0;
+ c.version=3;c.season=Math.max(1,Number(c.season)||1);c.driver=String(c.driver||'Your driver').slice(0,24);c.number=clamp(c.number||27,1,99);
  c.rounds=[4,8].includes(c.rounds)?c.rounds:8;c.round=clamp(c.round||1,1,c.rounds+1);
  c.power=clamp(c.power,0,5);c.aero=clamp(c.aero,0,5);c.points=Math.max(0,Number(c.points)||0);c.coins=Math.max(0,Number(c.coins)||0);
- c.reputation=clamp(c.reputation,0,100);c.difficulty=clamp(c.difficulty===undefined?5:c.difficulty,0,10);
+ c.reputation=clamp(c.reputation,0,100);
+ if(oldVersion<3&&c.difficulty!==undefined)c.difficulty=c.difficulty<=5?1:c.difficulty<=7?2:c.difficulty-5;
+ c.difficulty=Math.round(clamp(c.difficulty===undefined?2:c.difficulty,1,5));
  c.upgradePoints=c.upgradePoints===undefined?500:Math.max(0,Number(c.upgradePoints)||0);c.laps=Array.isArray(c.laps)?c.laps:[];c.history=Array.isArray(c.history)?c.history:[];c.archive=Array.isArray(c.archive)?c.archive:[];
  c.contract=c.contract||{name:'Academy',target:8,bonus:500};
  c.weekend=c.weekend&&c.weekend.round===c.round?c.weekend:{round:c.round,stage:'briefing',practice:[],qualifying:[],grid:null};
@@ -28,8 +31,8 @@ function qualify(c){const w=c.weekend;const best=Math.min(...w.qualifying);const
  w.grid=field;w.gridPosition=field.findIndex(x=>x.ai===-1)+1;return field;
 }
 function advance(c){migrate(c);const w=c.weekend;
- if(w.stage==='practice'){w.stage='qualifying';return true;}
- if(w.stage==='qualifying'){qualify(c);w.stage='race';return true;}
+ if(w.stage==='practice'){w.stage='qualifying';return simulateQualifying(c);}
+ if(w.stage==='qualifying')return simulateQualifying(c);
  if(w.stage==='debrief'){c.round++;c.weekend={round:c.round,stage:'briefing',practice:[],qualifying:[],grid:null};return true;}return false;
 }
 function score(c,rows){migrate(c);const w=c.weekend;if(w.stage!=='race'||w.scored||!rows.some(r=>r.you))return false;
@@ -47,7 +50,16 @@ function nextSeason(c,contract,newTable){if(c.round<=c.rounds)return false;const
  c.archive.push({season:c.season,points:c.points,rank,team:c.team});c.season++;c.round=1;c.points=0;c.last=null;c.table=newTable;c.contract=contract;
  c.weekend={round:1,stage:'briefing',practice:[],qualifying:[],grid:null};return true;}
 function recordLap(c,time,valid,reason,session){migrate(c);if(!Number.isFinite(time)||time<=0)return false;c.laps.push({season:c.season,round:c.round,session:session||c.weekend.stage,time,valid:!!valid,reason:reason||'',at:Date.now()});return true;}
-function simulateQualifying(c){migrate(c);if(c.weekend.stage!=='qualifying')return false;const rivals=qualify(c).filter(r=>r.ai!==-1);const pace=.71+(c.power+c.aero)*.031;const time=126*(1+(1-pace)*.16)+(c.difficulty-5)*-.6+((c.season*13+c.round*7)%17)/10;c.weekend.grid=[...rivals,{ai:-1,pace,time}].sort((a,b)=>a.time-b.time||a.ai-b.ai);c.weekend.gridPosition=c.weekend.grid.findIndex(r=>r.ai===-1)+1;c.weekend.simulated=true;c.weekend.stage='race';return true;}
+function simulateQualifying(c,random=Math.random){
+ migrate(c);const w=c.weekend;if(w.stage!=='qualifying')return false;
+ const power=[0,.02,.04,.07,.10,.14],aero=[0,.02,.05,.08,.12,.17];
+ const pace=.78+power[c.power]+aero[c.aero];
+ const draw=()=>clamp(random(),0,1)-.5;
+ const field=(c.table||[]).map((t,i)=>({ai:i,pace:t.pace,time:126+(1-t.pace)*18+(c.difficulty-1)*-.7+draw()*5}));
+ field.push({ai:-1,pace,time:126+(1-pace)*18+draw()*6});
+ w.grid=field.sort((a,b)=>a.time-b.time||a.ai-b.ai);w.gridPosition=w.grid.findIndex(r=>r.ai===-1)+1;
+ w.simulated=true;w.stage='race';return true;
+}
 function buyUpgrade(c,kind,level,cost){migrate(c);if(!['power','aero'].includes(kind)||level!==c[kind]+1||level>5||!Number.isFinite(cost)||cost<=0||c.upgradePoints<cost)return false;c.upgradePoints-=cost;c[kind]=level;return true;}
 return {migrate,event,begin,lap,advance,qualify,score,standings,nextSeason,recordLap,simulateQualifying,buyUpgrade,POINTS};
 });

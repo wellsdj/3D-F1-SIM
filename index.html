@@ -1063,9 +1063,9 @@ if('serviceWorker' in navigator){
   <div class="head"><b>Starting grid</b><span>Spa 2022 &middot; 5 laps</span></div>
   <div id="racegrid"></div>
   <div class="pace">
-    <div class="paceline"><span>AI pace</span><b id="pacenum">7</b><em id="pacename">Quick</em></div>
-    <input id="paceslider" type="range" min="0" max="10" step="1" value="7">
-    <div class="scale"><span>0 &middot; crawling</span><span>10 &middot; on the limit</span></div>
+    <div class="paceline"><span>AI pace</span><b id="pacenum">2</b><em id="pacename">Quick</em></div>
+    <input id="paceslider" type="range" min="1" max="5" step="1" value="2">
+    <div class="scale"><span>1 &middot; brisk</span><span>5 &middot; on the limit</span></div>
     <button id="racego">Start the lights</button>
     <div class="hint">Set the pace, then start. Nothing happens until you do.</div>
   </div>
@@ -5893,6 +5893,10 @@ function replayBtn(){
 }
 function replayStart(){
   if(!TTREC.best||!TTREC.best.f.length) return;
+  ttBuild();
+  if(!tvCams.length&&TT.curve)tvBuild(TT.curve,TT.len);
+  tvShot=null;tvSeq=0;tvFov=0;
+  camMode=CAMS.findIndex(c=>c.tv);orbit=false;freeLook=false;updateStatus();
   netLabel();
   /* Immediate, not held: the loading screen's ten-second minimum is there so
      the walk out to the car has room to breathe, and there is no walk out to a
@@ -11074,7 +11078,7 @@ const AI_WIN=6;                    // metres either side, for measuring curvatur
    at La Source by 0.25 m, and 1.30 goes off there and at Stavelot. This is the
    last clean one. */
 const AI_MARGIN=1.20;
-const AI={ level:7, lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
+const AI={ level:2, lat:0, want:0, speedK:1, mode:'clear', line:'race', n:0, x:null, y:null, z:null, k:null, v:null, len:0, i:0,
            car:null, obj:null, on:false, t:0, lap:0, laps:[], worst:0 };
 
 /* THE LINE, AND THE HAND-MADE ADJUSTMENT TO IT.
@@ -11182,6 +11186,13 @@ function aiApplyAdj(lo, hi){
   }
   AI.k=aiCurvature(AI_WIN);
   AI.ks=aiSigned(AI_WIN);
+  AI.firstApex=null;
+  if(TRACK&&/spa/i.test(TRACK.glb||'')&&TT.gates.length){
+    const gate=TT.gates[0];let start=0,best=Infinity;
+    for(let i=0;i<n;i++){const dist=(AI.x[i]-gate.x)**2+(AI.z[i]-gate.z)**2;if(dist<best){best=dist;start=i;}}
+    let peak=0;
+    for(let m=Math.round(80/AI.ds);m<Math.round(650/AI.ds);m++){const i=(start+m)%n,k=Math.abs(AI.ks[i]);if(k>peak){peak=k;AI.firstApex=i;}}
+  }
   AI.v=aiProfile(AI.k, AI._margin||AI_MARGIN);
   aiBuildLines(AI._margin||AI_MARGIN);
   aiPedalMap();
@@ -11695,9 +11706,9 @@ function aiRelTo(d, px, pz, kph, who){
      it somewhere else and the next call would start from the wrong place and
      fall through to sweeping all seven thousand points. Anyone worth knowing
      about is within a couple of hundred metres anyway. */
-  let bi=d.i|0, bd=Infinity;
+  const origin=d.i|0;let bi=origin, bd=Infinity;
   for(let o=-200;o<=200;o++){
-    const i=((bi+o)%n+n)%n;
+    const i=((origin+o)%n+n)%n;
     const q=(d.x[i]-px)**2+(d.z[i]-pz)**2;
     if(q<bd){ bd=q; bi=i; }
   }
@@ -11897,6 +11908,8 @@ function aiTraffic(d, dt){
   }
   d._lineHeld=Math.max(0,(d._lineHeld||0)-dt);
   if(d.forced){ d.line=d.forced; d.mode='forced'; d.speedK=1; }
+  const firstCorner=aiFirstProgress(d);
+  if(firstCorner>-150&&firstCorner<35&&!d.forced){d.line='race';d._lineWas='race';}
   let want=d.field?d.field[d.line][d.i]:0;
   /* And then the part that overrides all of it: if you are actually there, that
      is not a place it may drive.
@@ -11929,7 +11942,7 @@ function aiTraffic(d, dt){
 
        The exception is a genuine side-by-side, where neither is behind in any
        meaningful sense and both leaving a little room is what keeps it clean. */
-    const behindHere = rel.gap<0 && Math.abs(rel.gap)>3;
+    const behindHere = rel.gap>3;
     const sideBySide = Math.abs(rel.gap)<=3;
     const mustMove = behindHere || sideBySide;
     const side=Math.sign(d.lat-rel.lat) || -Math.sign(rel.lat) || 1;
@@ -11984,6 +11997,11 @@ function aiTraffic(d, dt){
     }
     want=w;
   } else d.pinned=false;
+  if(firstCorner>-180&&firstCorner<100&&!d.forced){
+    // Commit to the safe exit line before the road narrows. Open room by
+    // following the car ahead, instead of forcing a second lane into gravel.
+    d.line='race';want=d.field?d.field.race[d.i]:0;d.speedK=1;d.pinned=false;
+  }
   d.want=want;
   d.vAct=(d.vline&&d.vline[d.line])||d.v;
 
@@ -12047,6 +12065,14 @@ function aiTraffic(d, dt){
     if(o===d||!o.car||!o.on) continue;
     look(o.car.st.wx, o.car.st.wz, o.car.st.speed);
   }
+  if(firstCorner>-180&&firstCorner<65){
+    for(const o of AIS){
+      if(o===d||!o.car||!o.on)continue;
+      let gap=(o.i-d.i)*d.ds;if(gap>d.len/2)gap-=d.len;if(gap<-d.len/2)gap+=d.len;
+      if(Math.abs(gap)<.5&&AIS.indexOf(o)<AIS.indexOf(d))gap=.5;
+      if(gap>0&&gap<45)cap=Math.min(cap,Math.max(0,o.car.st.speed+(gap-8)*1.6));
+    }
+  }
   /* RUNNING OUT OF ROAD.
 
      This asked how far the car had been shoved off the line, and only at slow
@@ -12096,8 +12122,7 @@ function aiTraffic(d, dt){
   /* And whatever it is doing, it is pulled back inside the white line here --
      the offset is eased, so a road that narrows faster than the ease can answer
      would otherwise carry it out. */
-  const lim=aiRoom(d.i, d.lat>0?1:-1);
-  d.lat=clamp(d.lat, -lim, lim);
+  d.lat=clamp(d.lat, -aiRoom(d.i,-1), aiRoom(d.i,1));
   if(Math.abs(d.lat)<0.02) d.lat=0;
 }
 /* Pure pursuit for the steering: aim at a point down the line and turn along
@@ -12185,6 +12210,16 @@ function aiSteer(d, C, dt){
    profile already knows where the braking points are, so the car brakes on
    arrival at one rather than on noticing it is too fast. */
 let AI_LATE_BRAKE=true;      // measured both ways
+function aiFirstProgress(d,q=d.i){
+  if(AI.firstApex===null||AI.firstApex===undefined)return Infinity;
+  let p=(q-AI.firstApex)*d.ds;if(p>d.len/2)p-=d.len;if(p<-d.len/2)p+=d.len;return p;
+}
+function aiFirstLimit(d,q){
+  const p=aiFirstProgress(d,q);
+  if(p < -160 || p > 120)return Infinity;
+  // Reserve braking distance for the hairpin; release the cap on its exit.
+  return p<0?Math.sqrt(22*22+2*5*Math.max(0,-p-22)):Math.sqrt(22*22+2*12*Math.max(0,p-12));
+}
 function aiPedals(d, C){
   const v=C.st.speed;
   const la=Math.max(3, v*0.35);                 // metres ahead to aim the speed at
@@ -12265,10 +12300,15 @@ function aiPedals(d, C){
      The corner speeds still apply, so this is throttle rather than a licence
      to arrive at turn one too fast. It lasts until the field is properly
      strung out, which the run to the first corner is. */
-  const launching = RACE.on && RACE.phase==='racing' && (RACE.raceT||0)<6.5;
+  const launching = RACE.on && RACE.phase==='racing' && (RACE.raceT||0)<6.5 && !(aiFirstProgress(d)>-180&&aiFirstProgress(d)<65);
   /* The corner's speed, or what the traffic allows, whichever is less. */
-  let tgt=Math.min(V[j]*K*offAt(j),
+  let tgt=Math.min(Math.min(V[j],aiFirstLimit(d,j))*K*offAt(j),
                    launching ? Infinity : (d.capV===undefined?Infinity:d.capV));
+  const first=aiFirstProgress(d);
+  if(first>20&&first<120&&!C.surf.loose&&!C.surf.grass&&Math.abs((d.off||0)-(d.lat||0))<1.2){
+    const ahead=(d.i+Math.round(35/d.ds))%d.n;
+    tgt=Math.min(Math.max(tgt,V[ahead]*K),aiFirstLimit(d,d.i)*K,d.capV===undefined?Infinity:d.capV);
+  }
   if(_mk>0) tgt=Math.max(tgt, Math.min(V[(d.i+Math.round(100/d.ds))%d.n]*K,
                                        d.capV===undefined?Infinity:d.capV));
   if(_mk<0) tgt=Math.min(tgt, v);
@@ -12311,13 +12351,14 @@ function aiPedals(d, C){
      can brake at, which is not always what it can. The car itself is unchanged
      -- 46 is still the real number everywhere else -- so believing 6% too much
      really does cost it the corner. */
-  const BRAKE=46*(d.brakeJit||1);
+  const firstEntry=first>-220&&first<15;
+  const BRAKE=46*(firstEntry?Math.min(.92,d.brakeJit||1):(d.brakeJit||1));
   if(!AI_LATE_BRAKE) return {thr:0, brk:clamp(-a/BRAKE,0,1)};
   let need=0, capMin=Infinity;
   const N=Math.min(d.n-1, Math.round(200/d.ds));
   for(let m=1;m<=N;m++){
     const q=(d.i+m)%d.n, dist=m*d.ds;
-    const there=Math.min(V[q]*K*offAt(q),
+    const there=Math.min(Math.min(V[q],aiFirstLimit(d,q))*K*offAt(q),
                          launching ? Infinity : (d.capV===undefined?Infinity:d.capV));
     const cap=Math.sqrt(there*there + 2*BRAKE*dist);
     if(cap<capMin) capMin=cap;
@@ -12935,12 +12976,10 @@ function fmtTime(t){
    anywhere near the top of the car anywhere. */
 const AI_LEVELS=[
   // pace, brake, spread, top speed (kph)
-  [0.30,0.25,0.15,150],[0.34,0.32,0.14,185],[0.39,0.40,0.13,220],
-  [0.44,0.48,0.12,255],[0.49,0.56,0.11,290],[0.53,0.63,0.10,320],
-  [0.545,0.60,0.09,345],[0.565,0.65,0.08,360],
+  null,[0.53,0.63,0.10,320],[0.565,0.65,0.08,360],
   [0.67,0.75,0.06,360],[0.82,0.85,0.045,360],[1.00,1.00,0.03,360]];
 function aiSetLevel(n){
-  const L=Math.round(clamp(n,0,10));
+  const L=Math.round(clamp(n,1,5));
   const [pace,brake,spread,cap]=AI_LEVELS[L];
   AI.level=L;
   Object.assign(AI_PACE,{pace,brake,spread,cap:cap/3.6,
@@ -12948,8 +12987,7 @@ function aiSetLevel(n){
   aiRepace();
   return L;
 }
-const AI_LEVEL_NAME=['Crawling','Cruising','Steady','Careful','Club','Brisk',
-                     'Rapid','Quick','Sharp','Ruthless','On the limit'];
+const AI_LEVEL_NAME=['','Brisk','Quick','Sharp','Ruthless','On the limit'];
 /* Only the speeds are rebuilt. The lines themselves do not depend on how hard
    the car is being driven round them, and re-sampling the circuit every time a
    slider moves would take a second each nudge. */
@@ -13056,6 +13094,7 @@ function raceStart(opts){
   if(RACE.on){ raceEnd(); return false; }
   if(!AI.car && !aiSpawn()) return false;
   if(!AI.n) aiBuild();
+  aiSetLevel(CAREER.active?careerSlot().difficulty:+raceEl('paceslider').value);
   /* A fresh car on the grid. Barrier damage is meant to cost you the rest of
      the race, not the rest of the afternoon, so the bill is torn up here and
      the collision's memory of where the car was is dropped -- it is about to
@@ -13168,6 +13207,10 @@ const GRID_NAMES=LIVERIES.map(l=>l.name);
 function raceGridList(){
   const box=raceEl('racegrid');
   if(!box) return;
+  const card=raceEl('gridcard');
+  raceEl('paceslider').style.display=CAREER.active?'none':'';
+  card.querySelector('.scale').style.display=CAREER.active?'none':'';
+  card.querySelector('.hint').textContent=CAREER.active?'Difficulty is fixed for this career. Start when you are ready.':'Set the pace, then start. Nothing happens until you do.';
   const caption=raceEl('gridcard').querySelector('.head span');if(caption)caption.textContent='Spa 2022 · '+RACE_LAPS+' laps';
   const row=(pos,name,sub,tag,you)=>
     '<div class="slot'+(you?' you':'')+'"><div class="pos">P'+pos+'</div>'+
@@ -13176,9 +13219,10 @@ function raceGridList(){
   if(CAREER.active && RACE.careerGrid){
     const c=careerSlot();
     box.innerHTML=RACE.careerGrid.map((ai,i)=>row(i+1,ai===-1?esc(c.driver):esc(c.table[ai].name),ai===-1?esc(c.team):'McLaren MCL39',i===0?'Pole':'Row '+Math.ceil((i+1)/2),ai===-1)).join('');
-    const sl=raceEl('paceslider');sl.value=c.difficulty;raceEl('pacenum').textContent=c.difficulty;raceEl('pacename').textContent=AI_LEVEL_NAME[c.difficulty];
+    const sl=raceEl('paceslider');sl.disabled=true;sl.value=c.difficulty;raceEl('pacenum').textContent=c.difficulty;raceEl('pacename').textContent=AI_LEVEL_NAME[c.difficulty];
     return;
   }
+  raceEl('paceslider').disabled=false;
   let html=row(1,'You','McLaren MCL39','Pole',true);
   for(let k=2;k<=RACE_CARS;k++)
     html+=row(k, GRID_NAMES[(k-2)%GRID_NAMES.length], 'McLaren MCL39',
@@ -13189,7 +13233,7 @@ function raceUI(){
   const sl=raceEl('paceslider'), num=raceEl('pacenum'), nm=raceEl('pacename');
   if(!sl) return;
   const show=()=>{ const L=+sl.value; num.textContent=L; nm.textContent=AI_LEVEL_NAME[L]; };
-  sl.addEventListener('input',()=>{ show(); aiSetLevel(+sl.value); });
+  sl.addEventListener('input',()=>{if(CAREER.active){sl.value=careerSlot().difficulty;return;}show();aiSetLevel(+sl.value);});
   sl.addEventListener('keydown',e=>e.stopPropagation());
   raceEl('racego').onclick=()=>{ RACE.ready=true; RACE.t=0; };
   show();
@@ -14635,6 +14679,7 @@ function qualifyingBegin(){
   if(!careerTimedSession()) raceStart({keepIntro:true});
 }
 function qualifyingChooseWeather(kind){
+  if(CAREER.active&&!pendingReplay&&!window._autoReplay)return;
   if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
   /* The answer is taken the moment you give it, and it can be given again.
 
@@ -14703,8 +14748,9 @@ function qualifyingLoadShow(text,allowWeather=true){
   qualifyingTrackReady=false;
   qualifyingWeatherReset();
   if(qualifyingWeatherEl){
-    qualifyingWeatherEl.style.display=allowWeather?'':'none';
-    qualifyingWeatherEl.setAttribute('aria-hidden',allowWeather?'false':'true');
+    const visible=allowWeather&&!CAREER.active;
+    qualifyingWeatherEl.style.display=visible?'':'none';
+    qualifyingWeatherEl.setAttribute('aria-hidden',visible?'false':'true');
   }
   qualifyingLoadSince=performance.now();
   qualifyingLoadSetStatus(text||'Choose session lighting');
@@ -15561,7 +15607,7 @@ menuEl.insertAdjacentHTML('afterbegin','<div class="career-brand">APEX <i>/</i> 
 menuEl.insertAdjacentHTML('beforeend','<p id="career-save-status" role="status">Progress saved on this device</p>');
 const namePage=document.getElementById('career-name');
 namePage.innerHTML=`<div class="overlay-kicker">New career / 01 — Driver profile</div><h2>Your name.<br><em>Your legacy.</em></h2><p class="career-intro">Create your driver, choose a contract and build your car. Your story starts at Spa.</p>
-<div class="setup-fields"><label class="career-field"><span>Driver name</span><input id="career-driver" maxlength="24" placeholder="Alex Morgan" autocomplete="off"></label><label class="career-field"><span>Race number</span><input id="career-number" type="number" min="1" max="99" value="27"></label><label class="career-field"><span>Team name</span><input id="career-team" maxlength="22" placeholder="Northgate Racing" autocomplete="off"></label><label class="career-field"><span>Season length</span><select id="career-length"><option value="8">Full season · 8 weekends</option><option value="4">Short season · 4 weekends</option></select></label><label class="career-field"><span>AI difficulty</span><select id="career-difficulty"><option value="3">Club · 3 / 10</option><option value="5" selected>Balanced · 5 / 10</option><option value="7">Quick · 7 / 10</option><option value="9">Expert · 9 / 10</option></select></label></div>
+<div class="setup-fields"><label class="career-field"><span>Driver name</span><input id="career-driver" maxlength="24" placeholder="Alex Morgan" autocomplete="off"></label><label class="career-field"><span>Race number</span><input id="career-number" type="number" min="1" max="99" value="27"></label><label class="career-field"><span>Team name</span><input id="career-team" maxlength="22" placeholder="Northgate Racing" autocomplete="off"></label><label class="career-field"><span>Season length</span><select id="career-length"><option value="8">Full season · 8 weekends</option><option value="4">Short season · 4 weekends</option></select></label><label class="career-field"><span>AI difficulty · fixed for this career</span><select id="career-difficulty"><option value="1">1 · Brisk</option><option value="2" selected>2 · Quick</option><option value="3">3 · Sharp</option><option value="4">4 · Ruthless</option><option value="5">5 · On the limit</option></select></label></div>
 <div class="career-actions"><button id="career-contract-next">Choose contract →</button><button class="ghost" id="career-backSlots">Back</button></div><p id="setup-error" role="alert"></p>`;
 const contractPage=document.createElement('div');contractPage.id='career-contract';contractPage.className='career-page';menuEl.appendChild(contractPage);
 const legacyPage=careerPage;
@@ -15571,7 +15617,7 @@ document.getElementById('career-backSlots').onclick=()=>{careerPaintSlots();care
 document.getElementById('career-contract-next').onclick=()=>{
  const driver=document.getElementById('career-driver').value.trim(),team=document.getElementById('career-team').value.trim(),number=+document.getElementById('career-number').value;
  if(!driver||!team||!Number.isInteger(number)||number<1||number>99){document.getElementById('setup-error').textContent='Enter your driver name, team name and a race number from 1 to 99.';return;}
- careerDraft={driver,team,number,rounds:+document.getElementById('career-length').value,difficulty:+document.getElementById('career-difficulty').value};careerPaintContracts(false);
+ careerDraft={version:3,driver,team,number,rounds:+document.getElementById('career-length').value,difficulty:+document.getElementById('career-difficulty').value};careerPaintContracts(false);
 };
 function careerPaintContracts(renew){
  const c=careerSlot(),rep=renew?c.reputation:0;
@@ -15605,8 +15651,8 @@ function careerPaintHub(){
  if(careerTab==='overview'){
   const labels={briefing:'Weekend briefing',practice:'Free practice',qualifying:'Qualifying',race:'Grand Prix',debrief:'Weekend debrief'};
   const stage=w.stage;
-  const descriptions={briefing:'Meet your race engineer, review your objectives and prepare for the weekend.',practice:'Complete your first clean lap to earn 250 development credits and 50 upgrade points. Return to the hub after each valid lap.',qualifying:'Your fastest valid lap determines your grid position against simulated rival times. Leave without a time to start last.',race:'Three laps. Ten cars. Your qualifying result sets the grid. Race results count toward the championship.',debrief:'Review the classification and rewards, develop your car, then move to the next weekend.'};
-  body=stats+'<div class="weekend-layout"><article class="weekend-feature"><span class="overlay-kicker">'+(complete?'The chequered flag':'Round '+c.round+' / Belgium')+'</span><h3>'+(complete?'Season '+c.season+' complete':ev.name)+'</h3><p>Spa-Francorchamps · '+(complete?'Championship classification':ev.lighting+' · 3 lap race')+'</p><div class="weekend-steps">'+['briefing','practice','qualifying','race','debrief'].map((s,i)=>'<span class="'+(s===stage?'current':'')+'">0'+(i+1)+' '+s+'</span>').join('')+'</div><h4>'+(complete?'Your next season awaits':labels[stage])+'</h4><p>'+(complete?'Choose your next contract. Keep your upgrades, credits and career record as the championship begins again.':descriptions[stage])+'</p><div class="career-actions"><button id="career-primary">'+(complete?'Negotiate next season →':stage==='briefing'?'Begin weekend →':stage==='debrief'?'Continue season →':stage==='race'?'Go to race →':'Drive '+stage+' →')+'</button>'+(!complete&&['practice','qualifying'].includes(stage)?'<button class="ghost" id="career-advance">'+(stage==='practice'?'Finish practice':w.qualifying.length?'Confirm grid':'Start last without a time')+' →</button>':'')+'</div>'+(stage==='qualifying'||stage==='practice'?'<p class="session-best">'+w[stage].length+' valid laps · Best '+cFmt(Math.min(...w[stage]))+'</p>':'')+(stage==='race'?'<p class="session-best">Starting position P'+w.gridPosition+' · '+(w.qualifying.length?'Best lap '+cFmt(Math.min(...w.qualifying)):w.simulated?'Simulated qualifying':'No qualifying time')+'</p>':'')+'</article><aside class="engineer-card"><span class="overlay-kicker">Race engineer / Briefing</span><h3>Aim for the<br>top '+c.contract.target+'.</h3><p>'+esc(c.contract.name)+' contract</p><div class="engineer-line"><span>Race objective bonus</span><b>+'+c.contract.bonus+'</b></div><div class="engineer-line"><span>Clean practice lap</span><b>+250</b></div><p>Keep it clean through Eau Rouge. Build confidence, find your braking points, then commit to a qualifying lap.</p><small>All weekends use the existing Spa circuit. Rival qualifying times are simulated; race positions are earned on track.</small></aside></div>';
+  const descriptions={briefing:'Meet your race engineer, review your objectives and prepare for the weekend.',practice:'Complete your first clean lap to earn 250 development credits and 50 upgrade points. Return to the hub after each valid lap.',qualifying:'Qualifying is simulated from your car performance and a fresh variation for each driver.',race:'Three laps. Ten cars. Your qualifying result sets the grid. Race results count toward the championship.',debrief:'Review the classification and rewards, develop your car, then move to the next weekend.'};
+  body=stats+'<div class="weekend-layout"><article class="weekend-feature"><span class="overlay-kicker">'+(complete?'The chequered flag':'Round '+c.round+' / Belgium')+'</span><h3>'+(complete?'Season '+c.season+' complete':ev.name)+'</h3><p>Spa-Francorchamps · '+(complete?'Championship classification':ev.lighting+' · 3 lap race')+'</p><div class="weekend-steps">'+['briefing','practice','qualifying','race','debrief'].map((s,i)=>'<span class="'+(s===stage?'current':'')+'">0'+(i+1)+' '+s+'</span>').join('')+'</div><h4>'+(complete?'Your next season awaits':labels[stage])+'</h4><p>'+(complete?'Choose your next contract. Keep your upgrades, credits and career record as the championship begins again.':descriptions[stage])+'</p><div class="career-actions"><button id="career-primary">'+(complete?'Negotiate next season →':stage==='briefing'?'Begin weekend →':stage==='debrief'?'Continue season →':stage==='race'?'Go to race →':stage==='qualifying'?'Simulate qualifying →':'Drive '+stage+' →')+'</button>'+(!complete&&stage==='practice'?'<button class="ghost" id="career-advance">'+(stage==='practice'?'Finish practice':w.qualifying.length?'Confirm grid':'Start last without a time')+' →</button>':'')+'</div>'+(stage==='practice'?'<p class="session-best">'+w[stage].length+' valid laps · Best '+cFmt(Math.min(...w[stage]))+'</p>':'')+(stage==='race'?'<p class="session-best">Starting position P'+w.gridPosition+' · '+(w.qualifying.length?'Best lap '+cFmt(Math.min(...w.qualifying)):w.simulated?'Simulated qualifying':'No qualifying time')+'</p>':'')+'</article><aside class="engineer-card"><span class="overlay-kicker">Race engineer / Briefing</span><h3>Aim for the<br>top '+c.contract.target+'.</h3><p>'+esc(c.contract.name)+' contract</p><div class="engineer-line"><span>Race objective bonus</span><b>+'+c.contract.bonus+'</b></div><div class="engineer-line"><span>Clean practice lap</span><b>+250</b></div><p>Build confidence in practice. Your car development and qualifying form set the grid automatically.</p><small>All weekends use the existing Spa circuit. Rival qualifying times are simulated; race positions are earned on track.</small></aside></div>';
   if(c.last)body+='<article class="debrief-card"><span class="overlay-kicker">Last result / Round '+c.last.round+'</span><h3>'+(c.last.dsq?'Disqualified':c.last.dnf?'Did not finish':'P'+c.last.pos)+' <small>'+c.last.points+' points · +'+(c.last.prize+(c.last.bonus||0)).toLocaleString()+' credits</small></h3><p>'+(c.last.simulatedFinish?'Disqualified. Remaining field finish simulated.':c.last.objective?'Contract objective achieved.':'Keep pushing toward your contract objective.')+'</p></article>';
  }else if(careerTab==='calendar'){
   body='<h3 class="section-title">Your season at Spa</h3><p class="section-note">'+c.rounds+' weekends on the existing circuit, with different lighting across the season.</p><div class="calendar-grid">'+Array.from({length:c.rounds},(_,i)=>{const e=CareerSeason.event({...c,round:i+1}),h=c.history.find(r=>r.season===c.season&&r.round===i+1);return '<article class="calendar-card '+(c.round===i+1?'current':'')+'"><span>ROUND '+String(i+1).padStart(2,'0')+'</span><h3>'+e.name+'</h3><p>Spa-Francorchamps</p><small>'+e.lighting+' / '+(h?'P'+h.pos+' · '+h.points+' pts':i+1===c.round?'Current weekend':'Upcoming')+'</small></article>';}).join('')+'</div>';
@@ -15623,6 +15669,7 @@ function careerPaintHub(){
  const primary=document.getElementById('career-primary');if(primary)primary.onclick=()=>{
   if(complete){careerPaintContracts(true);return;}
   if(w.stage==='briefing'){CareerSeason.begin(c);careerSave();careerPaintHub();return;}
+  if(w.stage==='qualifying'){CareerSeason.simulateQualifying(c);careerSave();careerPaintHub();return;}
   if(w.stage==='debrief'){if(!c.last.rewardSeen){careerShowRewards();return;}CareerSeason.advance(c);careerSave();careerPaintHub();return;}
   careerSessionRunning=true;if(w.stage==='race')raceRestartSave=JSON.stringify(c);RESULT.on=false;RESULT.rows=[];careerApply();aiSetLevel(c.difficulty);careerClose();goRacing('spa22');
  };

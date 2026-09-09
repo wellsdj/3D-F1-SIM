@@ -7,7 +7,11 @@ test('classification timeout records unfinished AI as DNF',()=>{const {ctx,c}=se
 test('practice uses solo timer, race uses existing start sequence',()=>{assert.match(source,/if\(!careerTimedSession\(\)\) raceStart\(\{keepIntro:true\}\)/);assert.match(source,/careerRecordLap\(TT.t\)/);assert.match(source,/order=\(c.weekend && c.weekend.grid\) \|\| field/);});
 test('menu CSS does not override race grid slot appearance',()=>{const css=fs.readFileSync(require('node:path').join(__dirname,'../career-menu.css'),'utf8');assert.equal(/(^|})\s*\.slot[:\s{]/.test(css),false);});
 test('TV director remains available for replay and spectator presentation',()=>{
-  assert.match(source,/C\.tv && !orbit && !freeLook && \(FREEROAM \|\| TTREC\.playing \|\| NET\.watching\) && tvUpdate\(t,dt\)/);
+  const el={classList:{add(){},remove(){}}};let builds=0;
+  const ctx={TTREC:{best:{f:[[0],[10]]}},TT:{live:false},tvCams:[],tvShot:{},tvSeq:7,tvFov:0,CAMS:[{}, {tv:true}],camMode:0,orbit:true,freeLook:true,
+    ttBuild(){builds++;ctx.TT.curve={};ctx.TT.len=7000;},tvBuild(){ctx.tvCams=[{}];},updateStatus(){},netLabel(){},replayMetadataBegin(){},replayBtn(){},qualifyingLoadHide(){},document:{body:el,getElementById(){return el;}}};
+  vm.createContext(ctx);vm.runInContext(fn('function replayStart(){','/* Stopping a replay'),ctx);ctx.replayStart();
+  assert.equal(builds,1);assert.equal(ctx.tvCams.length,1);assert.equal(ctx.camMode,1);assert.equal(ctx.TTREC.playing,true);assert.equal(ctx.tvShot,null);assert.equal(ctx.orbit,false);
 });
 test('loading screen has no missing video or protected-preview manifest request',()=>{
   assert.doesNotMatch(source,/qualifying-intro\.mp4/);
