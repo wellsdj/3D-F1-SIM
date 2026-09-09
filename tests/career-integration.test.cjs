@@ -9,3 +9,7 @@ test('menu CSS does not override race grid slot appearance',()=>{const css=fs.re
 test('TV director remains available for replay and spectator presentation',()=>{
   assert.match(source,/C\.tv && !orbit && !freeLook && \(FREEROAM \|\| TTREC\.playing \|\| NET\.watching\) && tvUpdate\(t,dt\)/);
 });
+test('loading screen has no missing video or protected-preview manifest request',()=>{
+  assert.doesNotMatch(source,/qualifying-intro\.mp4/);
+  assert.doesNotMatch(source,/<link rel="manifest"/);
+});

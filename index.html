@@ -911,7 +911,6 @@
                             #cmap{width:120px;height:138px;top:204px} }
   @media (max-height:620px){ #cmap{display:none} }
 </style>
-<link rel="manifest" href="manifest.webmanifest">
 <script>
 /* Registered after load so it never competes with the circuit for bandwidth on
    the first run. Once it is in, the game opens with no connection at all. */
@@ -1158,7 +1157,7 @@ if('serviceWorker' in navigator){
 </div>
 
 <div id="qualifying-load" aria-hidden="true">
-  <video id="qualifying-load-video" data-video-src="qualifying-intro.mp4" muted loop playsinline preload="metadata" poster="home-hero.png" aria-hidden="true"></video>
+  <video id="qualifying-load-video" muted loop playsinline preload="none" poster="home-hero.png" aria-hidden="true"></video>
   <div class="load-shade"></div>
   <div class="load-content">
     <div class="load-kicker">Qualifying · Spa 2022</div>
@@ -14600,7 +14599,7 @@ const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-ch
    that lingers after the thing it was waiting for is just a slower game. The
    moment the circuit is ready, it goes. */
 const QUALIFYING_LOAD_MIN_MS=0;
-let qualifyingLoadSince=0, qualifyingLoadTimer=0, qualifyingVideoChecked=false;
+let qualifyingLoadSince=0, qualifyingLoadTimer=0;
 let qualifyingTrackReady=false, qualifyingWeatherChoice='', qualifyingStartQueued=false, qualifyingAllowsWeather=true;
 function qualifyingLoadSetStatus(text){
   if(qualifyingLoadStatusEl) qualifyingLoadStatusEl.textContent=text;
@@ -14713,17 +14712,10 @@ function qualifyingLoadShow(text,allowWeather=true){
   qualifyingLoadEl.setAttribute('aria-hidden','false');
   document.body.classList.add('qualifying-loading');
   bootEl.classList.add('gone');
-  /* The supplied intro clip can be dropped in as qualifying-intro.mp4. A
-     quiet HEAD check keeps the poster fallback clean until that asset exists. */
-  if(qualifyingLoadVideo&&!qualifyingVideoChecked){
-    qualifyingVideoChecked=true;
-    const src=qualifyingLoadVideo.dataset.videoSrc;
-    if(src) fetch(src,{method:'HEAD',cache:'no-store'}).then(r=>{
-      if(!r.ok) return;
-      qualifyingLoadVideo.src=src; qualifyingLoadVideo.load();
-      if(qualifyingLoadEl.classList.contains('active')) qualifyingLoadVideo.play().catch(()=>{});
-    }).catch(()=>{});
-  }else if(qualifyingLoadVideo&&qualifyingLoadVideo.src){
+  /* The loading scene uses its poster until a real clip is added to the
+     project. Asking the browser for a non-existent placeholder produced a
+     noisy 404 on every session start. */
+  if(qualifyingLoadVideo&&qualifyingLoadVideo.currentSrc){
     qualifyingLoadVideo.play().catch(()=>{});
   }
 }
