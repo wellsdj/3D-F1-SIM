@@ -501,6 +501,10 @@
   #qualifying-load{position:fixed;inset:0;z-index:20;display:grid;place-items:center;overflow:hidden;
                    visibility:hidden;opacity:0;pointer-events:none;background:#050a10;transition:opacity .5s ease,visibility .5s ease}
   #qualifying-load.active{visibility:visible;opacity:1;pointer-events:auto}
+  #qualifying-cancel{padding:12px 24px;border:1px solid #ffffff70;border-radius:5px;background:#101a28;color:#fff;font:inherit;cursor:pointer}
+  #qualifying-cancel:hover:not(:disabled){background:#26394f}
+  #qualifying-cancel:focus-visible{outline:3px solid #ffb020;outline-offset:4px}
+  #qualifying-cancel:disabled{opacity:.4;cursor:not-allowed}
   #qualifying-load-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
                          background:url('home-hero.png') center/cover no-repeat;filter:brightness(.42) saturate(.78);transform:scale(1.03)}
   #qualifying-load .load-shade{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,rgba(10,19,29,.12),rgba(3,7,12,.78) 72%),linear-gradient(180deg,rgba(3,7,12,.16),rgba(3,7,12,.55))}
@@ -1000,6 +1004,7 @@ if('serviceWorker' in navigator){
     <div class="load-ring" aria-hidden="true"></div>
     <div class="load-word">Loading</div>
     <div class="load-status" id="qualifying-load-status">Preparing the circuit</div>
+    <button id="qualifying-cancel" type="button">Cancel</button>
     <div class="load-weather" id="qualifying-weather" aria-label="Choose session lighting">
       <div class="weather-kicker">Choose session light</div>
       <div class="weather-options">
@@ -14020,7 +14025,7 @@ function maybeStart(){
   document.getElementById('tag').firstChild.textContent=TRACK.name;
   document.getElementById('tagsub').textContent =
     (TRACK.id==='spa22'?'Fast laps':(LAP/1000).toFixed(3)+' km')+' · McLaren MCL39';
-  document.getElementById('boot').classList.add('gone');
+  if(qualifyingLoadEl.classList.contains('active')) document.getElementById('boot').classList.add('gone');
   runFrame();
   qualifyingLoadReady();
 }
@@ -14032,6 +14037,22 @@ const bootMsg=document.getElementById('bootmsg');
 const qualifyingLoadEl=document.getElementById('qualifying-load');
 const qualifyingLoadVideo=document.getElementById('qualifying-load-video');
 const qualifyingLoadStatusEl=document.getElementById('qualifying-load-status');
+const qualifyingCancelEl=document.getElementById('qualifying-cancel');
+let qualifyingLoadGeneration=0;
+let qualifyingCancelPending=null;
+function qualifyingLoadCancel(){
+  if(CAREER.active||!qualifyingLoadEl.classList.contains('active'))return;
+  qualifyingLoadGeneration++;
+  if(qualifyingCancelPending){qualifyingCancelPending();qualifyingCancelPending=null;}
+  qualifyingTrackReady=false;
+  qualifyingStartQueued=false;
+  qualifyingWeatherReset();
+  qualifyingLoadHide(true);
+  goHome();
+  bootMsg.textContent='System ready // Spa 2022';
+  document.getElementById('racepick').focus();
+}
+qualifyingCancelEl.onclick=qualifyingLoadCancel;
 const qualifyingWeatherEl=document.getElementById('qualifying-weather');
 const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
 /* Nothing. This was ten seconds, held so an intro clip had room to play, then
@@ -14139,6 +14160,10 @@ function qualifyingLoadReady(){
 }
 function qualifyingLoadShow(text,allowWeather=true){
   if(!qualifyingLoadEl) return;
+  qualifyingLoadGeneration++;
+  if(qualifyingCancelPending){qualifyingCancelPending();qualifyingCancelPending=null;}
+  qualifyingCancelEl.disabled=!!CAREER.active;
+  qualifyingCancelEl.title=CAREER.active?'Career loading cannot be cancelled':'Return to home';
   clearTimeout(qualifyingLoadTimer);
   qualifyingAllowsWeather=allowWeather;
   qualifyingTrackReady=false;
@@ -14174,10 +14199,12 @@ function qualifyingLoadHide(immediate=false){
   if(wait) qualifyingLoadTimer=setTimeout(finish,wait); else finish();
 }
 function qualifyingLoadFail(text){
+  const generation=qualifyingLoadGeneration;
   qualifyingTrackReady=false;
   qualifyingStartQueued=false;
   qualifyingLoadSetStatus(text||'Track failed to load');
   setTimeout(()=>{
+    if(generation!==qualifyingLoadGeneration)return;
     qualifyingLoadHide(true);
     pickEl.style.display='';
     bootEl.classList.remove('gone');
@@ -14698,6 +14725,7 @@ function startTrack(id, opts){
   const replayMode=!!(pendingReplay||window._autoReplay);
   qualifyingLoadShow(replayMode
     ? 'Loading your best lap' : 'Preparing '+(t&&t.name||'the circuit'),!replayMode);
+  const generation=qualifyingLoadGeneration;
   pickEl.style.display='none';
   applyTrackConstants(t);
   if(t.procedural){
@@ -14720,6 +14748,7 @@ function startTrack(id, opts){
   let gotBytes=0, done=false;
   loadTick('Loading '+t.name);
   const watchdog=setInterval(()=>{
+    if(generation!==qualifyingLoadGeneration){clearInterval(watchdog);return;}
     if(booted){ clearInterval(watchdog); return; }
     if(performance.now()-loadLast < LOAD_STALL_MS) return;
     clearInterval(watchdog);
@@ -14727,8 +14756,11 @@ function startTrack(id, opts){
     qualifyingLoadFail('Stuck on "'+loadWhat+'" — nothing arrived for '
                        +Math.round(LOAD_STALL_MS/1000)+'s');
   }, 2000);
+  qualifyingCancelPending=()=>clearInterval(watchdog);
   loader.load(t.glb, gltf=>{
     done=true; clearInterval(watchdog);
+    if(generation!==qualifyingLoadGeneration)return;
+    qualifyingCancelPending=null;
     const root=gltf.scene;
     bootMsg.textContent='Reading the circuit';
     loadTick('Reading the circuit');
@@ -14856,6 +14888,7 @@ function startTrack(id, opts){
 
     buildWorld();
   }, ev=>{
+    if(generation!==qualifyingLoadGeneration)return;
     gotBytes=ev.loaded||0;
     if(ev.lengthComputable){
       const pct=Math.round(ev.loaded/ev.total*100);
@@ -14863,6 +14896,9 @@ function startTrack(id, opts){
       loadTick('Loading '+t.name+' '+pct+'%');
     } else loadTick('Loading '+t.name+' '+(gotBytes/1048576).toFixed(1)+' MB');
   }, err=>{
+    clearInterval(watchdog);
+    if(generation!==qualifyingLoadGeneration)return;
+    qualifyingCancelPending=null;
     console.error('track load failed',err);
     bootMsg.textContent='Track failed to load';
     qualifyingLoadFail('Track failed to load');
