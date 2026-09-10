@@ -1,18 +1,16 @@
 # APEX / 26 career
 
-The home screen is now a minimal starting point for a complete redesign. Its former hero imagery, marketing copy, cards and injected navigation have been removed; `home-menu.css` owns the replacement entry screen. Career, race, garage, replay and controller actions remain connected. Existing career screens and saves are retained. Track geometry, car models, shaders and race-start presentation are preserved. Career upgrades still use the game's existing top-speed and grip modifiers.
-
-The ideas and preservation requirements are recorded in [GitHub issues #5–#13](https://github.com/wellsdj/3D-F1-SIM/issues?q=is%3Aissue+is%3Aopen). Artwork files remain available for reuse. The separate in-progress AI rewrite is preserved, but its first-corner and full-grid behaviour still needs validation in [#10](https://github.com/wellsdj/3D-F1-SIM/issues/10).
+The new home and career menus wrap the existing 3D F1 SIM race engine. Track geometry, car models, shaders, cameras, race-start presentation and handling implementation are preserved. Engine audio now stops on session-end and menu screens. Career upgrades still use the game's existing top-speed and grip modifiers.
 
 ## Play
 
-Choose **Start career** (or **Continue career**), select one of three slots, enter a driver/team/number, pick a four- or eight-weekend season and AI difficulty, and sign an Academy contract. Use the existing garage to finish the car and choose Next.
+Choose **Start your career**, select one of three slots, enter a driver/team/number, pick a four- or eight-weekend season and AI difficulty, and sign an Academy contract. Use the existing garage to finish the car and choose Next.
 
 Each weekend follows briefing → practice → simulated qualifying → race → debrief. Practice uses the existing valid-lap timer and gates. A valid lap returns to the hub. The first valid practice lap awards 250 development credits and 50 upgrade points. Careers start with 500 upgrade points; stronger race finishes earn more. The development shop spends upgrade points, with both balances displayed above the career pages. Finishing practice automatically simulates qualifying from car development, opponent difficulty and a random performance variation for each driver. The grid is saved once per weekend; restarting cannot redraw it. A race uses the existing three-lap, ten-car simulation.
 
 Difficulty now has five levels, corresponding to the former 5, 7, 8, 9 and 10. Choose it at career setup; it is fixed for that career. Existing saves migrate to the nearest supported level without changing their progress. Career session weather is fixed by the calendar, with no weather-choice buttons. Replays initialise their trackside cameras even when opened directly from the home screen and start in TV mode; C still cycles views.
 
-The in-progress AI changes use a later braking envelope and lateral overtaking choices without traffic-driven pedal reductions. These changes are not yet verified as an improvement; first-corner braking, gravel avoidance, exit speed and full-grid interactions need testing before calling the tuning complete.
+La Source has a dedicated braking envelope, a committed exit line and traffic spacing before the hairpin. Cars accelerate more decisively on its exit once aligned and back on tarmac. Other corners retain their existing speed targets.
 
 Race classification waits for rivals to finish, up to 90 simulation seconds after the player's finish. Remaining rivals are DNF. Penalties affect classification. Disqualified/non-finishing entries receive no championship points. Rewards and points are applied once; Continue season advances the round. The next contract keeps the car, credits and career history, resets championship points, and records the previous season.
 
