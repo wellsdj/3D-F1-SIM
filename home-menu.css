@@ -1,0 +1,25 @@
+/* Minimal entry screen. The full home redesign is tracked in GitHub issue #5. */
+#boot{position:fixed;inset:0;z-index:9;overflow:auto;display:grid;align-content:center;justify-items:center;gap:20px;padding:80px 24px 40px;background:#11151b;color:#edf0f5;font:16px/1.5 Arial,sans-serif}
+#boot.gone{display:none}
+#bootmsg{margin:0;color:#a4adba;font-size:13px;text-align:center}
+.home-menu{width:min(420px,100%)}
+.home-menu h1{margin:0 0 28px;font-size:32px;letter-spacing:-1px}
+.home-menu nav{display:grid;gap:10px}
+#boot button{display:block;width:100%;padding:14px 18px;border:1px solid #414c5c;border-radius:6px;background:#1c2531;color:inherit;font:inherit;text-align:left;cursor:pointer}
+#boot button:hover{background:#29384b}
+#boot button:focus-visible{outline:3px solid #9ecbff;outline-offset:3px}
+#boot button:disabled{opacity:.5;cursor:wait}
+#modepick{display:none;padding:0 0 6px 20px;gap:8px}
+#modepick.on{display:grid}
+#controller-panel{display:none;margin-top:20px;padding:18px;border:1px solid #414c5c;border-radius:6px;gap:14px}
+#controller-panel.on{display:grid}
+#controller-map{display:grid;gap:8px;font-size:13px;color:#a4adba}
+#home-settings{position:absolute;right:24px;top:20px;z-index:2}
+#home-settings .settings-menu{display:none;width:min(330px,calc(100vw - 48px));margin-top:10px;padding:14px;background:#19212d;border:1px solid #414c5c;border-radius:6px}
+#home-settings.open .settings-menu{display:block}
+#home-settings .menu-kicker{font-size:12px;margin-bottom:10px;color:#a4adba}
+#home-settings .limit-dropdown{display:none;margin-top:12px}
+#home-settings .settings-item.open .limit-dropdown{display:grid;gap:8px}
+#boot #bar{width:100%;height:2px;margin-top:24px;background:#293342;overflow:hidden}
+#boot #bar i{display:block;width:0;height:100%;background:#9ecbff}
+@media(max-height:650px){#boot{align-content:start}}

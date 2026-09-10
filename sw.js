@@ -11,9 +11,9 @@
    Nothing is precached on install beyond the shell. The circuit is cached the
    first time it is actually fetched, which means the first load costs what it
    always did and every load after it costs nothing. */
-const CACHE='f1sim-career-v6';
+const CACHE='f1sim-home-reset-v7';
 const SHELL=[
-  './career-menu.css','./career-season.js','./retirement-route.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
+  './home-menu.css','./career-menu.css','./career-season.js','./retirement-route.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
   './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
