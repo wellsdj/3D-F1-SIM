@@ -926,6 +926,7 @@ if('serviceWorker' in navigator){
 }
 </script>
 <link rel="stylesheet" href="career-menu.css">
+<link rel="stylesheet" href="home-apex.css">
 </head>
 <body>
 <div id="perf"></div>
@@ -1098,67 +1099,147 @@ if('serviceWorker' in navigator){
 <div id="ttflash"><div class="big" id="ttflashbig"></div><div class="sub" id="ttflashsub"></div></div>
 
 <div id="boot">
+  <div class="apex-sweep" aria-hidden="true"></div>
+
+  <header class="apex-header">
+    <div class="apex-wordmark">APEX <i>/</i> 26<small>Drive beyond limits</small></div>
+    <nav id="apexnav" aria-label="Main menu">
+      <button type="button" data-sec="home" class="on">Home</button>
+      <button type="button" data-sec="career">Career</button>
+      <button type="button" data-sec="race">Race</button>
+      <button type="button" data-sec="garage">Garage</button>
+      <button type="button" data-sec="replays">Replays</button>
+    </nav>
+    <span class="edition-label">3D F1 SIM &middot; Spa 2022</span>
+  </header>
+
   <div id="home-settings">
-    <button class="cog" id="home-settings-toggle" aria-label="Open settings" aria-expanded="false">⚙</button>
+    <button class="cog" id="home-settings-toggle" aria-label="Open settings" aria-expanded="false">Settings</button>
     <div class="settings-menu">
       <div class="menu-kicker">Session settings</div>
       <div class="settings-item" id="home-controls-item">
-        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="false">Controls <i>&rsaquo;</i></button>
+        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="false">Controls &rsaquo;</button>
         <div class="limit-dropdown" id="home-controls-dropdown">
           <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
           <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
-          <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV director</span></div>
+          <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV</span></div>
           <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
           <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
           <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
-          <div class="ctrl-row"><kbd>J</kbd><span>Start a race &mdash; grid, five lights, go</span></div>
-          <div class="ctrl-row"><kbd>G</kbd><span>Paint where the track is &mdash; sets the limits</span></div>
-          <div class="ctrl-row"><kbd>K</kbd><span>Draw the AI's lines from above</span></div>
+          <div class="ctrl-row"><kbd>J</kbd><span>Start a race</span></div>
+          <div class="ctrl-row"><kbd>G</kbd><span>Barrier editor</span></div>
+          <div class="ctrl-row"><kbd>L</kbd><span>Racing line editor</span></div>
           <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
         </div>
       </div>
     </div>
   </div>
-  <p id="bootmsg">System ready // Spa 2022</p>
-  <div id="homecopy">
-    <div class="eyebrow">Circuit 01 · Night run</div>
-    <h1>Own the <em>apex.</em></h1>
-    <p>High-speed qualifying on a living circuit. Hit the lights, chase the apex, and find the last tenth.</p>
-    <div class="spec"><span>01 / 01 circuit</span><span>7.00 km live route</span><span>solo qualifying</span></div>
-  </div>
+
+  <main class="apex-stage">
+    <section class="apex-panel on" data-sec="home">
+      <div class="apex-kicker">The next chapter is yours</div>
+      <h1 class="apex-title" data-glitch="Built to race.">Built to race.<em>Born to win.</em></h1>
+      <p class="apex-sub">From your first contract to the final chequered flag.</p>
+      <div class="apex-cards">
+        <button type="button" class="apex-card" data-go="career">
+          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
+          <span class="slot">01</span><span class="name" id="apex-careername">Career</span>
+          <span class="meta" id="apex-careermeta">Your team, your car, a championship</span>
+          <span class="go">Enter &rarr;</span>
+        </button>
+        <button type="button" class="apex-card" data-go="quick">
+          <span class="art" style="background-image:url('assets/career/pitlane-hero.png')"></span>
+          <span class="slot">02</span><span class="name">Quick race</span>
+          <span class="meta">Straight onto the circuit &middot; ten cars &middot; three laps</span>
+          <span class="go">Drive &rarr;</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="apex-panel" data-sec="career">
+      <div class="apex-kicker">Your journey starts here</div>
+      <h1 class="apex-title" data-glitch="Career"><em>Career</em></h1>
+      <p class="apex-sub">Three saves. Pick up where you left off, or start again.</p>
+      <div class="apex-cards" id="apex-slots"></div>
+    </section>
+
+    <section class="apex-panel" data-sec="race">
+      <div class="apex-kicker">One race, ten cars</div>
+      <h1 class="apex-title" data-glitch="Race"><em>Race</em></h1>
+      <p class="apex-sub">Spa-Francorchamps &middot; 7.00 km &middot; three laps.</p>
+      <div class="apex-cards">
+        <button type="button" class="apex-card" data-go="quick">
+          <span class="art" style="background-image:url('assets/career/pitlane-hero.png')"></span>
+          <span class="slot">Quick</span><span class="name">Quick race</span>
+          <span class="meta">No season, no consequences. Just the lap.</span>
+          <span class="go">Drive &rarr;</span>
+        </button>
+        <button type="button" class="apex-card" data-go="career">
+          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
+          <span class="slot">Season</span><span class="name">Career race</span>
+          <span class="meta">Counts for points, prize money and the table.</span>
+          <span class="go">Season &rarr;</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="apex-panel" data-sec="garage">
+      <div class="apex-kicker">Build your line</div>
+      <h1 class="apex-title" data-glitch="Garage"><em>Garage</em></h1>
+      <p class="apex-sub">Body, halo, wing and rims. It carries into every session.</p>
+      <div class="apex-cards">
+        <button type="button" class="apex-card" data-go="garage">
+          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
+          <span class="slot">Livery</span><span class="name">Open the garage</span>
+          <span class="meta">Turn the car and set the colours</span>
+          <span class="go">Open &rarr;</span>
+        </button>
+        <button type="button" class="apex-card" data-go="controller">
+          <span class="slot">Input</span><span class="name">Controller</span>
+          <span class="meta">PS5 / Xbox &middot; shoulder controls</span>
+          <span class="go">Connect &rarr;</span>
+        </button>
+      </div>
+      <div id="controller-panel" aria-hidden="true">
+        <div class="controller-kicker">Controller link</div>
+        <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
+        <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick &larr;</b> steer left</span><span><b>Left stick &rarr;</b> steer right</span></div>
+        <button id="controller-close" type="button">Close</button>
+      </div>
+    </section>
+
+    <section class="apex-panel" data-sec="replays">
+      <div class="apex-kicker">Driver archive</div>
+      <h1 class="apex-title" data-glitch="Replays"><em>Replays</em></h1>
+      <p class="apex-sub">Your quickest runs, from every camera.</p>
+      <div class="apex-cards">
+        <button type="button" class="apex-card" data-go="replays">
+          <span class="slot">Best</span><span class="name">Watch a lap</span>
+          <span class="meta">Nose, chase and the TV director</span>
+          <span class="go">Open &rarr;</span>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="apex-footer">
+    <p id="bootmsg">System ready // Spa 2022</p>
+    <div class="keys"><span><b>Enter</b> select</span><span><b>&larr; &rarr;</b> move</span></div>
+    <div id="bar"><i></i></div>
+  </footer>
+
+  <!-- Kept because scripts elsewhere still reach for these by id. Hidden. -->
+  <div id="homecopy"></div>
   <div id="home-actions">
-    <div id="pick">
-      <button id="racepick" data-track="spa22"><b>Race <i>01</i></b><span>Spa 2022 // fast laps // 102 m elevation</span><small>Choose a mode <strong>↗</strong></small></button>
-    </div>
+    <div id="pick"><button id="racepick" data-track="spa22">Race</button></div>
     <div id="modepick">
-      <button id="modequick" type="button">
-        <!-- Drawn here rather than fetched. An inline SVG has no licence to
-             check and no file to go missing, and this page has to work with no
-             network at all. -->
-        <svg viewBox="0 0 44 44" aria-hidden="true">
-          <path d="M24 4 L11 25 h9 l-3 15 13-21 h-9 z" fill="#ffb020"/>
-        </svg>
-        <b>Quick play</b><span>Straight onto the circuit. One race, ten cars.</span>
-      </button>
-      <button id="modecareer" type="button">
-        <svg viewBox="0 0 44 44" aria-hidden="true">
-          <path d="M22 5 l4.6 9.6 10.4 1.5 -7.6 7.4 1.9 10.5 -9.3 -5 -9.3 5 1.9 -10.5 -7.6 -7.4 10.4 -1.5 z"
-                fill="none" stroke="#ffb020" stroke-width="2.4" stroke-linejoin="round"/>
-        </svg>
-        <b>Career</b><span>Your team, your car, and a championship to win.</span>
-      </button>
+      <button id="modequick" type="button">Quick play</button>
+      <button id="modecareer" type="button">Career</button>
     </div>
-    <button id="bestlapsbtn">Best laps <span>Review your fastest runs and watch the record back.</span></button>
-    <button id="netbtn" type="button"><b>Connect controller</b><span>PS5 / Xbox · shoulder controls</span></button>
-    <div id="controller-panel" aria-hidden="true">
-      <div class="controller-kicker">Controller link</div>
-      <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
-      <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick ←</b> steer left</span><span><b>Left stick →</b> steer right</span></div>
-      <button id="controller-close" type="button">Close</button>
-    </div>
+    <button id="bestlapsbtn">Best laps</button>
+    <button id="netbtn" type="button">Connect controller</button>
   </div>
-  <button id="customize-home">Customise your car <span>Open the garage ↗</span></button>
-  <div id="bar"><i></i></div>
+  <button id="customize-home">Customise your car</button>
 </div>
 
 <div id="qualifying-load" aria-hidden="true">
@@ -14537,16 +14618,113 @@ const careerOriginalLoadReady=qualifyingLoadReady;
 qualifyingLoadReady=function(){if(CAREER.active&&!pendingReplay&&!window._autoReplay&&!qualifyingWeatherChoice){qualifyingWeatherChoice=CareerSeason.event(careerSlot()).lighting;}careerOriginalLoadReady();};
 // The home screen uses existing launch, garage, replay and controller actions.
 const home=document.getElementById('boot');
-home.insertAdjacentHTML('afterbegin','<header class="apex-header"><div class="apex-wordmark">APEX <i>/</i> 26</div><nav aria-label="Main menu"><span class="active">Home</span><button id="home-career-nav">Career</button><button id="home-garage-nav">Garage</button></nav><span class="edition-label">3D F1 SIM / SEASON 2026</span></header>');
-document.getElementById('homecopy').innerHTML='<div class="eyebrow">THE NEXT CHAPTER IS YOURS</div><h1>Built to race.<br><em>Born to win.</em></h1><p>From your first contract to the final chequered flag. Make your mark on the grid.</p><div class="spec"><span>SPA-FRANCORCHAMPS</span><span>10 CAR GRID</span><span>YOUR CAREER</span></div><button id="home-career-hero">Start your career <span>↗</span></button>';
-document.getElementById('home-career-hero').onclick=careerOpen;document.getElementById('home-career-nav').onclick=careerOpen;document.getElementById('home-garage-nav').onclick=openCustomizer;
+/* The header and the copy are in the document now -- see #boot in the markup
+   and home-apex.css -- so they are not injected here any more. Building a
+   front door out of innerHTML at runtime meant it could not be styled without
+   reading JavaScript, and it fought the stylesheet for the same elements. */
+
+/* ===================================================================== APEX
+   The front door's behaviour: which word is lit, which panel is up, and what
+   the cards do. Everything here ends in a call that already existed --
+   careerOpen, goRacing, openCustomizer, openLapBook -- so this is a way in
+   rather than a second implementation of anything. */
+const apexNav=document.getElementById('apexnav');
+const apexPanels=Array.prototype.slice.call(document.querySelectorAll('.apex-panel'));
+function apexShow(sec){
+  Array.prototype.forEach.call(apexNav.children,b=>b.classList.toggle('on',b.dataset.sec===sec));
+  apexPanels.forEach(p=>p.classList.toggle('on',p.dataset.sec===sec));
+  if(sec==='career') apexPaintSlots();
+  /* The panel is what changed, so that is what a screen reader should land on. */
+  const live=document.querySelector('.apex-panel.on .apex-title');
+  if(live){ live.tabIndex=-1; }
+}
+Array.prototype.forEach.call(apexNav.children,b=>{
+  b.addEventListener('click',()=>apexShow(b.dataset.sec));
+});
+/* Left and right walk the menu, which is how a console front end behaves and
+   costs nothing to support. Ignored while anything else has focus. */
+document.addEventListener('keydown',e=>{
+  const boot=document.getElementById('boot');
+  if(!boot || boot.classList.contains('gone')) return;
+  if(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const k=e.key;
+  if(k!=='ArrowLeft' && k!=='ArrowRight') return;
+  const items=Array.prototype.slice.call(apexNav.children);
+  const at=Math.max(0, items.findIndex(b=>b.classList.contains('on')));
+  const next=(at + (k==='ArrowRight'?1:items.length-1)) % items.length;
+  apexShow(items[next].dataset.sec);
+  items[next].focus();
+  e.preventDefault();
+});
+/* THE SAVE SLOTS, on the front page, as cards.
+
+   They read the same CAREER_SLOTS the career screen does, so a slot shown here
+   and the same slot shown inside are one fact rendered twice, never two facts
+   that can disagree. Clicking one selects it and opens the career on that
+   save, which is the shortcut the mock-up is really promising: the front door
+   should get you into the season you were already playing. */
+function apexPaintSlots(){
+  const host=document.getElementById('apex-slots');
+  if(!host || typeof CAREER_SLOTS==='undefined') return;
+  host.innerHTML='';
+  CAREER_SLOTS.forEach((c,i)=>{
+    const used=!!c.used;
+    const rounds=c.rounds||8;
+    const pct=used?Math.round(Math.min(1,((c.round||1)-1)/rounds)*100):0;
+    const b=document.createElement('button');
+    b.type='button'; b.className='apex-card';
+    b.innerHTML=
+       '<span class="art" style="background-image:url(\'assets/career/'
+      +(used?'driver-garage.png':'pitlane-hero.png')+'\')"></span>'
+      +'<span class="slot">Slot '+(i+1)+'</span>'
+      +'<span class="name">'+(used?apexEsc(c.team||'Continue'):'New career')+'</span>'
+      +(used?'<span class="bar"><i style="width:'+pct+'%"></i></span>':'')
+      +'<span class="meta">'
+      +(used ? 'Round '+Math.min(c.round||1,rounds)+' of '+rounds+' &middot; '+(c.points||0)+' pts'
+             : 'Start your journey')
+      +'</span>'
+      +'<span class="go">'+(used?'Continue &rarr;':'Create a save &rarr;')+'</span>';
+    b.onclick=()=>{ if(typeof CAREER_AT!=='undefined') CAREER_AT=i; careerOpen(); };
+    host.appendChild(b);
+  });
+}
+const apexEsc=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+/* One place that knows what a card means. */
+document.querySelectorAll('.apex-card[data-go]').forEach(card=>{
+  card.addEventListener('click',()=>{
+    switch(card.dataset.go){
+      case 'career':     careerOpen(); break;
+      case 'quick':      if(typeof CAREER!=='undefined') CAREER.active=false;
+                         goRacing('spa22'); break;
+      case 'garage':     openCustomizer(); break;
+      case 'replays':    openLapBook(); break;
+      case 'controller': controllerPanelToggle(); break;
+    }
+  });
+});
+apexShow('home');
 document.getElementById('racepick').innerHTML='<small>01 / ON TRACK</small><b>Grand Prix <i>↗</i></b><span>Jump into a three-lap race at Spa.</span>';
 document.getElementById('bestlapsbtn').innerHTML='<small>02 / YOUR RECORDS</small><b>Time archive ↗</b><span>Your fastest laps. Every angle.</span>';
 document.getElementById('netbtn').innerHTML='<small>03 / GET CONNECTED</small><b>Controller ↗</b><span>PS5 & Xbox · ready when you are.</span>';
 document.getElementById('customize-home').innerHTML='<small>04 / THE GARAGE</small><b>Your car ↗</b><span>A livery that is unmistakably yours.</span>';
 home.appendChild(document.getElementById('customize-home'));
 home.insertAdjacentHTML('beforeend','<footer class="apex-footer"><span><i></i> READY TO RACE</span><span>SPA, BELGIUM <b>50.4372° N / 5.9714° E</b></span><span>PRECISION. COMMITMENT. LEGACY.</span></footer>');
-function careerHomeRefresh(){const btn=document.getElementById('home-career-hero');btn.innerHTML=(CAREER_SLOTS.some(c=>c.used)?'Continue your career':'Start your career')+' <span>↗</span>';}
+/* The front page, brought up to date after a career changes. It used to write
+   into #home-career-hero, a button the old injected header made; that element
+   is gone, and calling .innerHTML on null throws -- which would have taken out
+   every path that leaves a career. It updates the card and the slots now, and
+   it does not assume either is on screen. */
+function careerHomeRefresh(){
+  const any=(typeof CAREER_SLOTS!=='undefined') && CAREER_SLOTS.some(c=>c.used);
+  const name=document.getElementById('apex-careername');
+  if(name) name.textContent = any ? 'Continue career' : 'Start career';
+  const meta=document.getElementById('apex-careermeta');
+  if(meta && any){
+    const live=CAREER_SLOTS.filter(c=>c.used).length;
+    meta.innerHTML=live+' save'+(live>1?'s':'')+' &middot; pick up where you left off';
+  }
+  if(typeof apexPaintSlots==='function') apexPaintSlots();
+}
 try{
  const legacy=localStorage.getItem(CAREER_KEY);
  if(legacy&&JSON.parse(legacy).some(c=>c&&c.used&&c.version!==2)&&!localStorage.getItem('careerSlotsBeforeV2'))localStorage.setItem('careerSlotsBeforeV2',legacy);

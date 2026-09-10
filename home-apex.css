@@ -1,0 +1,304 @@
+/* ===========================================================================
+   APEX / 26 — the front door.
+
+   A full-bleed hero, a word menu across the top, and one panel that changes
+   with the word you are on. The reference is a console game's start screen:
+   the picture carries it, the type is the interface, and nothing is a grey box.
+
+   TYPE. No webfont is fetched. This page is offline-capable -- the service
+   worker caches a shell so it runs with no network at all -- and a font from a
+   CDN would be a silent fallback the first time anyone opened it cold. The
+   display face is the heaviest condensed grotesque the machine already has,
+   skewed and tightened, and the glitch is CSS: two coloured copies of the same
+   text sliced by clip-path and knocked a few pixels out of register.
+   =========================================================================== */
+
+:root{
+  --apex-red:#ff1f2d;
+  --apex-red-hot:#ff5a52;
+  --apex-ink:#f4f6f9;
+  --apex-dim:rgba(244,246,249,.55);
+  --apex-faint:rgba(244,246,249,.3);
+  --apex-panel:rgba(8,7,9,.72);
+  --apex-line:rgba(255,255,255,.14);
+  --apex-display:"Arial Black","Helvetica Neue",Impact,system-ui,sans-serif;
+  --apex-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+
+/* ------------------------------------------------------------ the surface */
+#boot{
+  position:fixed;inset:0;z-index:9;overflow:hidden;
+  display:grid;grid-template-rows:auto 1fr auto;
+  padding:0;margin:0;
+  background:#07060a;color:var(--apex-ink);
+  font-family:var(--apex-mono);
+  transition:opacity .7s ease;
+}
+#boot.gone{opacity:0;pointer-events:none}
+
+/* The picture, and the three things sitting on top of it: a wash so type
+   stays readable, a scanline weave, and a slow drift so the screen is never
+   completely still. */
+#boot:before{
+  content:"";position:absolute;inset:-3% -3% -3% -3%;z-index:0;
+  background:url('assets/home/hero-red.webp') center right/cover no-repeat;
+  animation:apexDrift 26s ease-in-out infinite alternate;
+}
+#boot:after{
+  content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(7,6,10,.97) 0%,rgba(7,6,10,.9) 26%,rgba(7,6,10,.45) 58%,rgba(7,6,10,.15) 100%),
+    linear-gradient(180deg,rgba(7,6,10,.85) 0%,rgba(7,6,10,0) 26%,rgba(7,6,10,0) 62%,rgba(7,6,10,.92) 100%),
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px);
+}
+@keyframes apexDrift{
+  from{transform:scale(1.05) translate3d(0,0,0)}
+  to  {transform:scale(1.12) translate3d(-1.4%,-1%,0)}
+}
+/* A red bar that sweeps the screen every so often, like a bad feed. */
+.apex-sweep{
+  position:absolute;left:0;right:0;height:14vh;z-index:2;pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(255,31,45,.11),transparent);
+  mix-blend-mode:screen;animation:apexSweep 7.5s linear infinite;
+}
+@keyframes apexSweep{
+  0%{top:-20vh;opacity:0}
+  8%{opacity:1}
+  92%{opacity:1}
+  100%{top:110vh;opacity:0}
+}
+
+/* -------------------------------------------------------------- the header */
+.apex-header{
+  position:relative;z-index:4;
+  display:flex;align-items:center;gap:clamp(16px,3vw,48px);
+  padding:clamp(18px,2.4vw,30px) clamp(22px,4vw,64px);
+}
+.apex-wordmark{
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(15px,1.5vw,21px);
+  letter-spacing:.02em;line-height:1;white-space:nowrap;
+}
+.apex-wordmark i{font-style:normal;color:var(--apex-red);margin:0 1px}
+.apex-wordmark small{
+  display:block;margin-top:5px;font-family:var(--apex-mono);font-style:normal;
+  font-size:7.5px;letter-spacing:.42em;color:var(--apex-dim);font-weight:400;
+}
+
+/* THE WORD MENU, and the effect Wells asked for: the one under the pointer
+   grows and everything else shrinks and fades. It is done on the LIST, not the
+   item -- :hover on the nav dims every child, and the child being hovered
+   overrides it -- so the shrink happens to the others rather than the grow
+   happening to one, which is what makes it read as a roll rather than a bump. */
+#apexnav{display:flex;align-items:baseline;gap:clamp(10px,2.2vw,34px);flex:1;flex-wrap:wrap}
+#apexnav button{
+  position:relative;background:none;border:0;padding:6px 2px 10px;cursor:pointer;
+  color:var(--apex-ink);font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(12px,1.28vw,17px);letter-spacing:.06em;text-transform:uppercase;
+  opacity:.62;transform-origin:center bottom;
+  transition:transform .34s cubic-bezier(.16,1,.3,1),opacity .28s ease,color .28s ease,letter-spacing .34s ease;
+}
+#apexnav:hover button{opacity:.3;transform:scale(.9)}
+#apexnav button:hover,#apexnav button:focus-visible{
+  opacity:1;transform:scale(1.34);color:#fff;letter-spacing:.1em;outline:none;
+}
+#apexnav button.on{opacity:1;color:#fff}
+/* The underline is the marker, and it grows out of the middle. */
+#apexnav button:after{
+  content:"";position:absolute;left:50%;right:50%;bottom:2px;height:2px;
+  background:var(--apex-red);box-shadow:0 0 12px rgba(255,31,45,.9);
+  transition:left .34s cubic-bezier(.16,1,.3,1),right .34s cubic-bezier(.16,1,.3,1);
+}
+#apexnav button.on:after,#apexnav button:hover:after{left:0;right:0}
+.edition-label{
+  font-size:8px;letter-spacing:.34em;color:var(--apex-faint);white-space:nowrap;
+  text-transform:uppercase;
+}
+
+/* --------------------------------------------------------------- the stage */
+.apex-stage{
+  position:relative;z-index:4;display:grid;align-content:center;
+  padding:0 clamp(22px,4vw,64px);min-height:0;
+}
+/* Every section is stacked in the same place and faded between, so switching
+   is a cut on the same picture rather than a page change. */
+.apex-panel{
+  grid-area:1/1;display:flex;flex-direction:column;gap:clamp(14px,1.8vw,26px);
+  opacity:0;visibility:hidden;transform:translateY(18px);
+  transition:opacity .38s ease,transform .5s cubic-bezier(.16,1,.3,1),visibility .38s;
+}
+.apex-panel.on{opacity:1;visibility:visible;transform:none}
+
+.apex-kicker{
+  font-size:8.5px;letter-spacing:.42em;text-transform:uppercase;color:var(--apex-red);
+  display:flex;align-items:center;gap:11px;
+}
+.apex-kicker:before{content:"";width:34px;height:2px;background:var(--apex-red);
+  box-shadow:0 0 14px rgba(255,31,45,.85)}
+
+/* THE BIG TITLE, and the glitch. The two copies are drawn from the same
+   attribute so there is one string to change and no chance of them drifting
+   apart. Each is clipped to a horizontal band and shifted, and the bands jump
+   about -- which is what makes it read as a broken signal rather than a drop
+   shadow. */
+.apex-title{
+  position:relative;margin:0;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(44px,8.4vw,132px);line-height:.84;letter-spacing:-.035em;
+  text-transform:uppercase;text-shadow:0 12px 60px rgba(0,0,0,.7);
+}
+.apex-title em{font-style:italic;color:var(--apex-red);display:block}
+.apex-title[data-glitch]:before,
+.apex-title[data-glitch]:after{
+  content:attr(data-glitch);position:absolute;left:0;top:0;width:100%;
+  pointer-events:none;
+}
+.apex-title[data-glitch]:before{
+  color:#00e5ff;clip-path:inset(12% 0 62% 0);
+  animation:apexGlitchA 4.2s steps(1) infinite;
+}
+.apex-title[data-glitch]:after{
+  color:var(--apex-red);clip-path:inset(58% 0 18% 0);
+  animation:apexGlitchB 3.4s steps(1) infinite;
+}
+@keyframes apexGlitchA{
+  0%,86%,100%{transform:none;opacity:0}
+  87%{transform:translate3d(-5px,-2px,0);opacity:.85;clip-path:inset(6% 0 74% 0)}
+  90%{transform:translate3d(4px,1px,0);opacity:.85;clip-path:inset(38% 0 44% 0)}
+  93%{transform:translate3d(-3px,2px,0);opacity:.85;clip-path:inset(66% 0 12% 0)}
+}
+@keyframes apexGlitchB{
+  0%,80%,100%{transform:none;opacity:0}
+  82%{transform:translate3d(6px,2px,0);opacity:.9;clip-path:inset(22% 0 58% 0)}
+  85%{transform:translate3d(-6px,-1px,0);opacity:.9;clip-path:inset(60% 0 16% 0)}
+  88%{transform:translate3d(3px,3px,0);opacity:.9;clip-path:inset(8% 0 76% 0)}
+}
+@media (prefers-reduced-motion:reduce){
+  #boot:before,.apex-sweep,.apex-title[data-glitch]:before,.apex-title[data-glitch]:after{animation:none}
+  .apex-sweep{display:none}
+}
+
+.apex-sub{
+  margin:0;max-width:34ch;font-size:10.5px;line-height:2;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--apex-dim);
+}
+
+/* ---------------------------------------------------------------- the cards
+   One shape for everything a section offers, so a save slot, a race mode and
+   the garage all read as the same kind of object. */
+.apex-cards{display:flex;gap:clamp(10px,1.2vw,16px);flex-wrap:wrap}
+.apex-card{
+  position:relative;overflow:hidden;flex:1 1 210px;max-width:300px;min-height:150px;
+  display:flex;flex-direction:column;justify-content:flex-end;gap:6px;
+  padding:16px 18px 15px;cursor:pointer;text-align:left;
+  color:var(--apex-ink);font-family:var(--apex-mono);
+  background:var(--apex-panel);border:1px solid var(--apex-line);
+  backdrop-filter:blur(9px);
+  transition:transform .38s cubic-bezier(.16,1,.3,1),border-color .3s ease,background .3s ease;
+}
+.apex-card:before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--apex-red);
+  transform:scaleY(0);transform-origin:top;transition:transform .38s cubic-bezier(.16,1,.3,1);
+}
+.apex-cards:hover .apex-card{opacity:.55;transform:scale(.97)}
+.apex-card:hover,.apex-card:focus-visible{
+  opacity:1 !important;transform:translateY(-6px) scale(1.03);
+  border-color:var(--apex-red);background:rgba(24,6,9,.8);outline:none;
+  box-shadow:0 22px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,31,45,.4) inset;
+}
+.apex-card:hover:before,.apex-card:focus-visible:before{transform:scaleY(1)}
+.apex-card .slot{font-size:8px;letter-spacing:.34em;text-transform:uppercase;color:var(--apex-faint)}
+.apex-card .name{
+  font-family:var(--apex-display);font-style:italic;font-size:19px;letter-spacing:.01em;
+  text-transform:uppercase;line-height:1.05;
+}
+.apex-card .meta{font-size:9px;letter-spacing:.12em;color:var(--apex-dim);text-transform:uppercase;line-height:1.7}
+.apex-card .go{
+  margin-top:9px;padding-top:9px;border-top:1px solid var(--apex-line);
+  font-size:8.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--apex-red);
+}
+/* The art sits behind the words, dimmed, and lifts on hover. */
+.apex-card .art{
+  position:absolute;inset:0;z-index:-1;opacity:.3;
+  background-position:center;background-size:cover;
+  transition:opacity .4s ease,transform .6s cubic-bezier(.16,1,.3,1);
+}
+.apex-card:hover .art{opacity:.52;transform:scale(1.08)}
+.apex-card .bar{height:3px;background:rgba(255,255,255,.12);margin:2px 0 4px}
+.apex-card .bar i{display:block;height:100%;background:var(--apex-red);box-shadow:0 0 10px rgba(255,31,45,.8)}
+
+/* --------------------------------------------------------------- the footer */
+.apex-footer{
+  position:relative;z-index:4;display:flex;align-items:center;justify-content:space-between;
+  gap:16px;padding:clamp(14px,2vw,26px) clamp(22px,4vw,64px);
+  font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:var(--apex-faint);
+}
+.apex-footer .keys{display:flex;gap:18px;flex-wrap:wrap}
+.apex-footer b{color:var(--apex-red);font-weight:400}
+#bootmsg{margin:0;font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:var(--apex-faint)}
+#boot #bar{width:min(280px,32vw);height:2px;background:rgba(255,255,255,.12);overflow:hidden}
+#boot #bar i{display:block;width:0;height:100%;background:var(--apex-red);
+  box-shadow:0 0 12px rgba(255,31,45,.9);transition:width .3s ease}
+
+/* ------------------------------------------------------- controller + cog */
+#home-settings{position:absolute;right:clamp(22px,4vw,64px);top:clamp(18px,2.4vw,30px);z-index:6}
+#home-settings .cog{
+  background:rgba(8,7,9,.6);border:1px solid var(--apex-line);border-radius:0;
+  color:var(--apex-ink);font-family:var(--apex-mono);font-size:9px;letter-spacing:.24em;
+  text-transform:uppercase;padding:10px 14px;cursor:pointer;transition:all .28s ease;
+}
+#home-settings .cog:hover{border-color:var(--apex-red);color:#fff}
+#home-settings .settings-menu{
+  display:none;width:min(340px,calc(100vw - 48px));margin-top:9px;padding:15px;
+  background:rgba(8,7,9,.94);border:1px solid var(--apex-line);backdrop-filter:blur(12px);
+}
+#home-settings.open .settings-menu{display:block}
+#home-settings .menu-kicker{font-size:8px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--apex-red);margin-bottom:11px}
+#home-settings .settings-toggle{
+  width:100%;text-align:left;background:none;border:0;color:var(--apex-ink);cursor:pointer;
+  font-family:var(--apex-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;padding:8px 0;
+}
+#home-settings .limit-dropdown{display:none;margin-top:9px}
+#home-settings .settings-item.open .limit-dropdown{display:grid;gap:7px}
+#home-settings .ctrl-row{display:flex;align-items:center;gap:8px;font-size:9px;
+  letter-spacing:.08em;color:var(--apex-dim)}
+#home-settings kbd{
+  font-family:var(--apex-mono);font-size:8.5px;background:rgba(255,255,255,.09);
+  border:1px solid var(--apex-line);padding:3px 6px;color:var(--apex-ink);
+}
+#home-settings .ctrl-note{opacity:.6}
+
+#controller-panel{
+  display:none;margin-top:14px;padding:16px;gap:11px;max-width:460px;
+  background:var(--apex-panel);border:1px solid var(--apex-line);backdrop-filter:blur(9px);
+}
+#controller-panel.on{display:grid}
+#controller-panel .controller-kicker{font-size:8px;letter-spacing:.32em;
+  text-transform:uppercase;color:var(--apex-red)}
+#controller-status{font-size:10px;letter-spacing:.1em;line-height:1.6}
+#controller-map{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;
+  font-size:9px;letter-spacing:.08em;color:var(--apex-dim)}
+#controller-map b{color:var(--apex-ink);font-weight:400}
+#controller-close{
+  justify-self:start;background:none;border:1px solid var(--apex-line);color:var(--apex-ink);
+  font-family:var(--apex-mono);font-size:8.5px;letter-spacing:.22em;text-transform:uppercase;
+  padding:8px 12px;cursor:pointer;
+}
+#controller-close:hover{border-color:var(--apex-red)}
+
+/* Everything the old home used and the new one does not show. Kept in the
+   document because scripts elsewhere still reach for these by id. */
+#homecopy,#home-actions,#pick,#modepick,#customize-home,#racepick,
+#modequick,#modecareer,#bestlapsbtn,#netbtn{display:none !important}
+
+@media (max-width:860px){
+  .apex-header{flex-wrap:wrap;gap:12px}
+  .edition-label{display:none}
+  .apex-title{font-size:clamp(38px,12vw,64px)}
+  .apex-cards{flex-direction:column}
+  .apex-card{max-width:none}
+}
+@media (max-height:620px){
+  .apex-stage{align-content:start;padding-top:10px}
+  .apex-title{font-size:clamp(32px,6vw,54px)}
+  .apex-card{min-height:118px}
+}
