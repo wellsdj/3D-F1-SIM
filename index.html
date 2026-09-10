@@ -6,6 +6,7 @@
 <title>APEX / 26 — 3D F1 SIM</title>
 <script src="career-season.js"></script>
 <script src="retirement-route.js"></script>
+<script src="collision-physics.js"></script>
 <style>
   :root{
     --ink:#0b0c0d;
@@ -4185,73 +4186,7 @@ function styleUI(){
    wing element, an endplate or barge board, and small chunks like mirrors and
    winglets. Each shape needs its own geometry and so its own instanced mesh,
    so the pool is split three ways and a hit draws from all of them. */
-const DEBRIS_KINDS=[
-  { // wing element: long, wide and very thin
-    dim:[1.15,0.045,0.26], n:16, weight:3, spin:9,
-    cols:[0xd6600f,0xd6600f,0x151517,0xe8e6de] },
-  { // endplate / barge board: an upright panel
-    dim:[0.30,0.50,0.035], n:16, weight:3, spin:11,
-    cols:[0x151517,0x1d1d20,0xd6600f,0x0d3f56] },
-  { // mirror, vent, winglet: small solid chunks
-    dim:[0.24,0.15,0.19], n:16, weight:2, spin:16,
-    cols:[0x151517,0x0d3f56,0xd6600f,0x1d1d20] }
-];
-const debrisPools=[];
 
-(function initDebris(){
-  const mtx=new THREE.Matrix4(), q=new THREE.Quaternion(),
-        v=new THREE.Vector3(0,-800,0), one=new THREE.Vector3(1,1,1);
-  mtx.compose(v,q,one);
-  DEBRIS_KINDS.forEach(k=>{
-    const g=new THREE.BoxGeometry(k.dim[0],k.dim[1],k.dim[2]);
-    // r128 drops instanceColor unless USE_COLOR is on, and that needs a real
-    // colour attribute present -- a neutral white one turns it on
-    const white=new Float32Array(g.attributes.position.count*3); white.fill(1);
-    g.setAttribute('color',new THREE.BufferAttribute(white,3));
-    const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.52,metalness:0.2});
-    const mesh=new THREE.InstancedMesh(g,m,k.n);
-    mesh.frustumCulled=false;
-    mesh.castShadow=true; mesh.userData.casts=true; shadowCasters.push(mesh);
-    scene.add(mesh);
-    const items=[];
-    for(let i=0;i<k.n;i++){ items.push({life:0}); mesh.setMatrixAt(i,mtx); }
-    mesh.instanceMatrix.needsUpdate=true;
-    debrisPools.push({mesh, items, spin:k.spin, weight:k.weight,
-                      cols:k.cols.map(c=>sRGB(c))});
-  });
-})();
-
-const _dmtx=new THREE.Matrix4(), _dq=new THREE.Quaternion(), _de=new THREE.Euler(),
-      _dv=new THREE.Vector3(), _ds=new THREE.Vector3();
-
-function spawnPiece(vIn){
-  // pick a shape by weight, then the first free slot in that pool
-  let total=0; debrisPools.forEach(p=>total+=p.weight);
-  let r=Math.random()*total, pool=debrisPools[0];
-  for(const p of debrisPools){ r-=p.weight; if(r<=0){ pool=p; break; } }
-  const items=pool.items;
-  let slot=0, oldest=1e9;
-  for(let i=0;i<items.length;i++){
-    if(items[i].life<=0){ slot=i; oldest=-1; break; }
-    if(items[i].life<oldest){ oldest=items[i].life; slot=i; }
-  }
-  const d=items[slot];
-  const h=carGroup.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
-  d.x=carGroup.position.x+(Math.random()-0.5)*1.8;
-  d.y=0.45+Math.random()*0.6;
-  d.z=carGroup.position.z+(Math.random()-0.5)*1.8;
-  const carry=carState.speed*(0.35+Math.random()*0.35);
-  d.vx=fx*carry+(Math.random()-0.5)*vIn*1.8;
-  d.vy=1.6+Math.random()*(1.2+vIn*0.35);
-  d.vz=fz*carry+(Math.random()-0.5)*vIn*1.8;
-  const sp=pool.spin;
-  d.wx=(Math.random()-0.5)*sp; d.wy=(Math.random()-0.5)*sp; d.wz=(Math.random()-0.5)*sp;
-  d.rx=Math.random()*6.283; d.ry=Math.random()*6.283; d.rz=Math.random()*6.283;
-  d.sc=0.85+Math.random()*0.5;
-  d.life=6+Math.random()*4;
-  pool.mesh.setColorAt(slot, pool.cols[(Math.random()*pool.cols.length)|0]);
-  if(pool.mesh.instanceColor) pool.mesh.instanceColor.needsUpdate=true;
-}
 /* Sand thrown out of the traps.
 
    This used the crash-debris pools before, which is why it came out as white
@@ -4358,52 +4293,7 @@ function updateDust(dt){
   dustPts.visible=live;
 }
 
-function hitBarrier(vIn){
-  const n=clamp(Math.round(vIn*0.75),1,8);
-  for(let i=0;i<n;i++) spawnPiece(vIn);
-}
-function clearDebris(){
-  _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1);
-  _dmtx.compose(_dv,_dq,_ds);
-  debrisPools.forEach(p=>{
-    for(let i=0;i<p.items.length;i++){ p.items[i].life=0; p.mesh.setMatrixAt(i,_dmtx); }
-    p.mesh.instanceMatrix.needsUpdate=true;
-  });
-}
-function updateDebris(dt){
-  debrisPools.forEach(pool=>{
-    let live=false;
-    const items=pool.items;
-    for(let i=0;i<items.length;i++){
-      const d=items[i];
-      if(d.life<=0) continue;
-      live=true;
-      d.life-=dt;
-      d.vy-=9.81*dt;
-      d.x+=d.vx*dt; d.y+=d.vy*dt; d.z+=d.vz*dt;
-      const floor=terrainH(d.x,d.z)+0.05;
-      if(d.y<floor){
-        d.y=floor;
-        if(d.vy<-0.6){ d.vy=-d.vy*0.32; }      // bounce, losing most of it
-        else { d.vy=0; d.vx*=0.72; d.vz*=0.72; d.wx*=0.5; d.wy*=0.5; d.wz*=0.5; }
-        d.vx*=0.78; d.vz*=0.78;
-      }
-      d.rx+=d.wx*dt; d.ry+=d.wy*dt; d.rz+=d.wz*dt;
-      if(d.life<=0){ _dv.set(0,-800,0); _dq.identity(); _ds.set(1,1,1); }
-      else{
-        _dv.set(d.x,d.y,d.z);
-        _de.set(d.rx,d.ry,d.rz); _dq.setFromEuler(_de);
-        // shrink away over the last second rather than vanishing mid-frame
-        const f=d.sc*Math.min(1,d.life);
-        _ds.set(f,f,f);
-      }
-      _dmtx.compose(_dv,_dq,_ds);
-      pool.mesh.setMatrixAt(i,_dmtx);
-    }
-    if(live) pool.mesh.instanceMatrix.needsUpdate=true;
-  });
-}
-
+function clearDebris(){damageReset();}
 /* ------------------------------------------------------------------ trees */
 const windU={value:0};
 const treeGroup=new THREE.Group(); scene.add(treeGroup);
@@ -5438,6 +5328,7 @@ function ttSaveBest(){
   TT.bestSplits=TT.splits.slice();
 }
 function ttStart(cinematic=true){
+  damageReset();
   limitsReset();sessionLapInvalid=false;
   qualifyingLoadHide();
   ttBuild();
@@ -5494,7 +5385,6 @@ function ttStep(dt){
     return;
   }
   TT.t+=dt;
-  barrCheck(dt);
   tlCheck(dt);
   ttSplit();
   recStep(TT.t);
@@ -8859,71 +8749,8 @@ const TL_GRACE=0.30;
    by. */
 const TL_QUIET=5.0;
 let _tlOff=0, _tlCounted=false, _tlLock=0;
-/* Hitting a wall.
-
-   The car's four corners are asked whether they are standing on a barrier
-   square. One of them is enough: you do not get to put a wheel through Armco.
-
-   What happens then is deliberately blunt -- the car stops, hard, and the run
-   is over. That is what hitting a barrier is, and anything gentler invites you
-   to use the wall as a braking aid. */
-let BARR_HIT=0;
-/* How hard the last one was, 0..1, and how long ago. The camera reads these:
-   a lurch forward and a burst of violence, decaying over about a second. */
-let BARR_LURCH=0, BARR_SHAKE=0;
-/* Damage, which here means one thing: the car will not go as fast again.
-
-   Not bodywork -- that is the car-to-car crunch and it is a different system.
-   This is the wall taking something out of the car that no amount of throttle
-   gives back. It accumulates, so a driver who leans on the barriers all lap
-   ends up slower than one who does not, and it is capped so a bad lap is still
-   a drivable one. */
-/* Kept at zero and read by nothing. The damage model it belonged to is gone;
-   the name survives only because the offline harnesses assert it stays 0. */
-let BARR_DMG=0;
-/* The line between a bounce and a shunt, as an ANGLE and not a speed.
-
-   into is the cosine of the angle between where the car is pointing and the
-   wall's face, so 0.5 is thirty degrees: brush a barrier at anything shallower
-   and you bounce off it with your speed intact, arrive at more than thirty
-   degrees and you have driven into it.
-
-   It used to be a closing speed of 18 m/s, which made the same clip harmless
-   at 150 kph and race-ending at 300. The angle is the thing that decides
-   whether a car bounces or stops, and now it is the only thing. */
-const BARR_SHUNT_COS=0.5;
-let BARR_SPARK=0;               // rate limit for scrape sparks
-/* A bounce is not instant, and this is what stops it reading as a teleport.
-
-   The reflection is computed the moment the car touches, but applying it in
-   that one frame moves the car and spins it between two drawn images -- which
-   is exactly what teleporting looks like. The answer is not to soften the
-   physics but to pay it out over a few frames: the turn and the speed it costs
-   are held here and eased in, so the car is seen to be knocked off line rather
-   than found somewhere else already pointing differently.
-
-   Both are pending amounts rather than target values, so they add to whatever
-   the driver is doing instead of fighting it -- hold the throttle through a
-   bump and the engine and the barrier are simply both at work. */
-/* No contact may last longer than this. Whatever the geometry does, a car
-   that has been touching a wall for a tenth of a second is stuck in it, and
-   being stuck is never the right answer -- it is the failure mode that
-   survives every other fix, because it needs only one corner case in 4,334
-   walls to happen. So it is handled as a class rather than as a bug: hold the
-   contact past the limit and the car is put back on clear ground, whatever
-   the reason it was there. */
-const BARR_MAX_TOUCH=0.10;
-let BARR_TOUCH=0;               // seconds of unbroken contact
-/* The last pose the car stood completely free in. This is the guarantee of
-   last resort: pushing out along the wall's normal works for a wall, and fails
-   in a pocket -- in a narrow V the normal points at the other face, so there
-   is no clear ground that way at any distance. Somewhere the car legitimately
-   was, on the other hand, is always clear, because it was standing there. */
-let _freeX=null, _freeZ=0, _freeH=0;
-let BARR_BLEED=0;               // m/s still to be taken off
-let BARR_TURN=0;                // radians still to be turned, signed
-const BARR_BLEED_TAU=0.20;      // how quickly the speed goes
-const BARR_TURN_TAU=0.11;       // how quickly the car comes round
+/* Contact camera feedback; cosmetic wing damage has no performance multiplier. */
+let BARR_HIT=0, BARR_LURCH=0, BARR_SHAKE=0, BARR_SPARK=0;
 
 /* Is any corner of the car inside a wall, for a pose the car might take?
    Asked about poses the car has not moved to yet, which is what makes the
@@ -9126,7 +8953,7 @@ function spawnSparks(x,y,z,power){
    half-metre steps and the FIRST blocked step is what stops the car -- so the
    answer does not depend on the frame rate. */
 const BARR_STEP=0.5;
-let _bx=null, _bz=null, _bh=0;
+
 /* ONE WALL COLLISION, AS NUMBERS. The only implementation there is.
 
    Both the player and the nine other cars come through here, so "the AI hits
@@ -9141,26 +8968,6 @@ let _bx=null, _bz=null, _bh=0;
 
    Out come the two components of the velocity after the hit, the speed that
    costs, and the direction to steer toward. */
-function wallBounce(v, into, nrm, hx, hz){
-  const shunt = into >= BARR_SHUNT_COS;
-  /* e is how much of the speed going INTO the wall comes back out. MU is the
-     scrub along the face, in proportion to how hard the car is pressed in --
-     without it a shallow graze costs nothing, because almost none of the
-     speed is aimed at the wall. A shunt barely bounces and scrubs hard. */
-  const e  = shunt ? 0.10 : 0.25;
-  const MU = shunt ? 0.55 : 0.35;
-  const vIn = v*into;
-  const vt = Math.max(0, v*Math.sqrt(Math.max(0, 1 - into*into)) - MU*vIn);
-  const vn = vIn*e;
-  const dx = hx + (1+e)*into*nrm.x;
-  const dz = hz + (1+e)*into*nrm.z;
-  const dl = Math.hypot(dx,dz);
-  return { shunt, e, vt, vn,
-           loss: Math.max(0, v - Math.hypot(vt,vn)),
-           dirx: dl>1e-4 ? dx/dl : hx,
-           dirz: dl>1e-4 ? dz/dl : hz };
-}
-
 /* THE FACE THE CAR HIT, AS A DIRECTION.
    Hoisted out of barrCheck so the other cars can use it too: nine rivals
    that drove through armco while the player bounced off it were not "the
@@ -9223,316 +9030,6 @@ function barrNormal(x,z){
   return {x:nx, z:nz};
 }
 
-function barrCheck(dt){
-  /* Cheap after the first success, and it retries until the circuit is far
-     enough loaded to size the grid -- so the walls are live on a lap driven
-     straight out of the loading screen, without the map ever being opened. */
-  if(!wallsReady) wallsInit();
-  BARR_LURCH*=Math.pow(0.02, dt/0.55);
-  BARR_SHAKE*=Math.pow(0.02, dt/0.75);
-  if(BARR_SPARK>0) BARR_SPARK-=dt;
-  /* Pay out whatever the last contact still owes, before anything else looks
-     at where the car is or how fast it is going. */
-  if(BARR_BLEED>0){
-    const take=Math.min(BARR_BLEED, BARR_BLEED*Math.min(1, dt/BARR_BLEED_TAU) + 0.4*dt);
-    carState.speed=Math.max(0, carState.speed-take);
-    BARR_BLEED-=take;
-    if(BARR_BLEED<0.02) BARR_BLEED=0;
-  }
-  if(BARR_TURN!==0){
-    const t=BARR_TURN*Math.min(1, dt/BARR_TURN_TAU);
-    carState.hdg+=t;
-    BARR_TURN-=t;
-    if(Math.abs(BARR_TURN)<0.002) BARR_TURN=0;
-  }
-  if(BARR_HIT>0) BARR_HIT=Math.max(0,BARR_HIT-dt);
-  if(!BARR.data||!BARR.count||CARPTS.length!==4) return false;
-
-  const x1=carState.wx, z1=carState.wz, h=carState.hdg;
-  /* No previous pose yet -- first frame, or the car was teleported to the grid.
-     Trust where it is and start from there. */
-  if(_bx===null || Math.hypot(x1-_bx, z1-_bz)>12){
-    _bx=x1; _bz=z1; _bh=h;
-    return false;
-  }
-  const dx=x1-_bx, dz=z1-_bz, d=Math.hypot(dx,dz);
-  if(d<1e-6){
-    if(!barrBlocked(x1,z1,h)){ _bx=x1; _bz=z1; _bh=h; return false; }
-  }
-  const steps=Math.max(1, Math.ceil(d/BARR_STEP));
-  let okX=_bx, okZ=_bz, hit=false;
-  for(let i=1;i<=steps;i++){
-    const t=i/steps, px=_bx+dx*t, pz=_bz+dz*t;
-    if(barrBlocked(px,pz,h)){ hit=true; break; }
-    okX=px; okZ=pz;
-  }
-  if(!hit){
-    _bx=x1; _bz=z1; _bh=h; BARR_TOUCH=0;
-    _freeX=x1; _freeZ=z1; _freeH=h;
-    return false;
-  }
-
-  /* WHICH WAY THE WALL FACES.
-
-     Everything below depends on this. A wall is only a wall in one direction:
-     arriving square into it is a shunt, and running down it at ten degrees is
-     a scrape that costs paint and a little speed. Without a normal the code
-     cannot tell those apart, and it treated both as the end of the race.
-
-     Taken from the grid rather than from the lines: finding the nearest of
-     4,333 polylines every frame needs an index nobody has built, while the
-     cells are already a spatial index and the answer is 48 array reads. Each
-     occupied cell nearby pulls the normal away from itself, weighted by
-     distance, so the result points out of the wall's face. */
-  BARR_TOUCH+=dt;
-  const v=carState.speed;
-  const hx=Math.sin(h), hz=Math.cos(h);
-  /* Where the car actually met it -- half a step past the last clear pose --
-     and which way that face points. Falling back to "straight back the way we
-     came" keeps a hit meaningful when the normal cannot be read. */
-  let nrm=barrNormal(okX+hx*0.9, okZ+hz*0.9) || barrNormal(okX, okZ);
-  if(!nrm) nrm={x:-hx, z:-hz};
-  /* Closing speed along the face. This is the only number that decides what
-     kind of contact this was: cos(0) into a wall at 300 kph is a shunt, and
-     the same 300 kph at ten degrees is 14 m/s of it, which is a scrape. */
-  const into=-(hx*nrm.x + hz*nrm.z);
-  const vN=Math.max(0, v*into);
-
-  /* STUCK FOR MORE THAN A TENTH OF A SECOND: GET OUT, BY THE SHORTEST ROUTE.
-
-     Everything below assumes the car is beside a wall and can leave. Sometimes
-     it is not -- it has ended up between two walls, or inside one where the
-     tracing crosses itself -- and every frame it is pushed back to a pose that
-     is also touching. So after a tenth of a second the car is simply moved to
-     clear ground.
-
-     THE ORDER OF THAT SEARCH IS THE WHOLE THING. It used to run angle-major:
-     the wall's own normal was tried at every distance from half a metre to
-     EIGHT before any other direction was considered. A normal is a good guess
-     and it is not always right -- read off a jagged trace, or with the car
-     sitting exactly on a segment, it can point across the road instead of away
-     from it -- and when it was wrong the car was moved eight metres along it.
-     On a ten-metre road with the walls a metre off it, that is the far side.
-     Hit the right-hand wall and end up against the left-hand one.
-
-     Distance-major now: every direction is tried at half a metre, then every
-     direction at one metre, and so on. The car therefore always moves the
-     SHORTEST distance that frees it, and a wrong normal costs half a metre
-     instead of eight.
-
-     The reach stays at eight metres, and shortening it was a mistake I made
-     and undid: three metres fixed the sideways throw but left a car wedged in
-     a narrow pocket with nowhere inside three metres to go, and it sat there
-     for nine seconds. The reach was never the bug -- the ORDER was. With the
-     nearest escape always taken first, a long reach only ever gets used when
-     nothing closer exists. */
-  if(BARR_TOUCH>BARR_MAX_TOUCH){
-    const DIRS=8, REACH=8.0;
-    let ox=null, oz=0;
-    for(let d=0.5; d<=REACH && ox===null; d+=0.5){
-      for(let a=0; a<DIRS; a++){
-        const ang=(a%2?-1:1)*Math.ceil(a/2)*(Math.PI/6);    // 0, ±30, ±60, ±90
-        const dx2=nrm.x*Math.cos(ang)-nrm.z*Math.sin(ang);
-        const dz2=nrm.x*Math.sin(ang)+nrm.z*Math.cos(ang);
-        const px=okX+dx2*d, pz=okZ+dz2*d;
-        if(!barrBlocked(px,pz,h)){ ox=px; oz=pz; break; }
-      }
-    }
-    /* Last resort: the pose the car last stood free in. Only reached when
-       nothing in any direction within eight metres works, which means the car
-       is wedged somewhere a search cannot get it out of.
-
-       NOT guarded by distance, and that was tried twice and undone twice. A
-       car deep in a narrow V has no free pose within eight metres, and often
-       none within twenty-five either -- the last place it stood free is back
-       where it entered. Refusing that leaves it wedged for the whole race,
-       which is the exact failure this hatch exists to prevent.
-
-       It is safe to be unguarded because of the search above it: the sideways
-       throw came from taking a long move in a wrongly-guessed direction, and
-       the distance-major order fixed that at its source. By the time this line
-       runs, no direction at any distance up to eight metres works, so the only
-       thing left is somewhere the car has actually been. */
-    if(ox===null && _freeX!==null && !barrBlocked(_freeX,_freeZ,_freeH)){
-      ox=_freeX; oz=_freeZ; carState.hdg=_freeH;
-    }
-    if(ox!==null){
-      carState.wx=ox; carState.wz=oz;
-      _bx=ox; _bz=oz; _bh=carState.hdg;
-      BARR_TOUCH=0;
-      PLAYER.bumpX += nrm.x*2; PLAYER.bumpZ += nrm.z*2;
-      return true;
-    }
-  }
-
-  _bx=okX; _bz=okZ; _bh=h;
-
-  /* ---- A BOUNCE. The angle decides, and it costs you nothing. ----
-
-     What this is now: a reflection. The car's direction of travel is mirrored
-     in the wall's face and damped on the normal axis only. Clip one at a
-     shallow angle and you come off it pointed further from the wall, having
-     paid for the part of your speed that was going into it -- which is what
-     bouncing is.
-
-     Two things were wrong before. The threshold was a closing SPEED, so the
-     same twelve-degree clip was a harmless scrape at 150 kph and a race-ending
-     shunt at 300: the angle you hit it at decided nothing, the speedometer
-     did. And it scrubbed -- every frame in contact took a slice off, so a bump
-     cost a chunk of the straight afterwards.
-
-     Now it is the angle against the wall's own face and nothing else. Under
-     thirty degrees you bounce off. Steeper than that you have driven into a
-     wall rather than brushed one, and that is the branch below. */
-  if(into < BARR_SHUNT_COS){
-    /* Mirror the heading in the face. e is how much of the normal component
-       comes back: 1 is a billiard ball, 0 is sliding flat along the wall. Half
-       sends the car away from the barrier without throwing it across the road.
-
-       And the speed that comes out is the length of the reflected velocity,
-       not the speed that went in. That is the whole of the slowing-down, and
-       it needs no rule of its own: the part running along the wall is kept
-       whole and the part going into it comes back halved, so what a bump costs
-       falls out of the angle by itself. Three degrees costs nothing you would
-       notice, thirty costs a tenth of the speed. Renormalising this to keep
-       the speed exactly -- which is what it did a moment ago -- was a step too
-       far in the other direction: hitting a wall should cost something. */
-    /* e is how much of the speed going INTO the wall comes back out of it. A
-       quarter, not a half: half threw the car far enough across the road that
-       a clip on the left cost you the right-hand side of the circuit as well.
-       A quarter pushes you off the barrier and no further.
-
-       MU is the other half of the answer, and it is what a graze should
-       actually cost. Bouncing alone only ever spends the part of the speed
-       aimed at the wall, which at five degrees is almost none of it -- so a
-       brush was free. A car scraping along a barrier is also being rubbed
-       along it, and that friction acts on the speed running ALONG the face,
-       in proportion to how hard it is being pressed in. That is the term that
-       makes a graze cost something you notice at any angle. */
-    const B=wallBounce(v, into, nrm, hx, hz);
-    const e=B.e, vt=B.vt, vn=B.vn;
-
-    /* The car stays where it was last clear. It used to be moved a whole
-       frame's travel along the brand new heading in the same instant the
-       heading changed, which is two teleports at once: the car appeared
-       somewhere else, already pointing somewhere else. */
-    carState.wx=okX; carState.wz=okZ;
-    _bx=okX; _bz=okZ; _bh=carState.hdg;
-
-    /* The turn and the speed it costs are queued, not applied. */
-    {
-      let d=Math.atan2(B.dirx, B.dirz)-carState.hdg;
-      while(d>Math.PI) d-=Math.PI*2;
-      while(d<-Math.PI) d+=Math.PI*2;
-      if(Math.abs(d)>Math.abs(BARR_TURN)) BARR_TURN=d;
-    }
-    if(B.loss>BARR_BLEED) BARR_BLEED=B.loss;
-
-    /* And the push off the wall arrives as a velocity, through the same
-       channel a car leaning on you uses, so it carries the car out over about
-       a third of a second instead of placing it there. That is what actually
-       separates the car from the barrier now. */
-    PLAYER.bumpX += nrm.x*(0.3+vn);
-    PLAYER.bumpZ += nrm.z*(0.3+vn);
-    /* Sparks where it touched, rate-limited so a long graze does not empty the
-       pool. No debris: bouncing off a barrier does not shed bodywork. */
-    if(vN>1.5 && BARR_SPARK<=0){
-      BARR_SPARK=0.05;
-      const y=(carGroup?carGroup.position.y:0)+0.2;
-      spawnSparks(carState.wx-nrm.x*1.0, y, carState.wz-nrm.z*1.0, clamp(vN/40,0.04,0.30));
-    }
-    BARR_SHAKE=Math.max(BARR_SHAKE, clamp(vN*0.10,0,1.6));
-    return true;
-  }
-
-  /* ---- A SHUNT. Square into it, and it costs you the corner. ----
-
-     IT DOES NOT STOP THE CAR DEAD ANY MORE. This used to be `speed = 0`, and
-     that one line is what made a hit feel wrong: the car halted for a frame,
-     and then the push-out and the slew along the wall carried it away again,
-     so what you felt was a freeze followed by being spat out. Nothing on a
-     circuit does that. A car that hits a barrier at an angle keeps going --
-     it scrubs along the face shedding speed fast, and it is the SPEED that
-     collapses, not the motion.
-
-     So a shunt is now the same reflection as a graze with harsher numbers,
-     and the speed it costs is queued as bleed like every other loss, paid out
-     over a fifth of a second instead of in one instant. Head-on at 300 kph
-     leaves about a tenth of the speed and sheds it over that fifth of a
-     second, which is a race-ending hit and still not a freeze-frame. */
-  {
-    const B=wallBounce(v, into, nrm, hx, hz);   // barely any bounce, heavy scrub
-    if(B.loss>BARR_BLEED) BARR_BLEED=B.loss;
-    PLAYER.bumpX += nrm.x*(0.3+B.vn);
-    PLAYER.bumpZ += nrm.z*(0.3+B.vn);
-  }
-  PLAYER.carVY=0;
-
-  /* AND OFF THE WALL, FACING ALONG IT -- otherwise the car is stuck there for
-     good, and this is a genuine deadlock rather than an annoyance.
-
-     This mattered even more when the branch above set the speed to zero: the
-     yaw rate is speed * tan(steer) / wheelbase, so at zero speed the car
-     CANNOT TURN however hard the wheel is held -- the heading stayed pointing
-     into the wall, the throttle drove the car into the wall, the movement was
-     refused, and that repeated every frame for ever. The speed no longer
-     collapses in one frame, but it does get low, so the same trap is still
-     reachable and this is still what keeps the car out of it.
-
-     So the car is pushed back out along the face until it stands clear, and
-     turned to lie along the barrier -- keeping whichever way down it it was
-     already going. That is roughly what happens to a real car that hits a
-     wall and slews along it, and it means the throttle points somewhere
-     useful instead of into armco. */
-  let ox=okX, oz=okZ;
-  for(let d=0.5; d<=5.0; d+=0.5){
-    const px=okX+nrm.x*d, pz=okZ+nrm.z*d;
-    if(!barrBlocked(px,pz,h)){ ox=px; oz=pz; break; }
-  }
-  const wx2=-nrm.z, wz2=nrm.x;                 // along the wall
-  const sgn=(hx*wx2 + hz*wz2)>=0 ? 1 : -1;     // the way we were already going
-  const nh=Math.atan2(wx2*sgn, wz2*sgn);
-  /* Turned round over a fraction of a second rather than in one frame --
-     snapping it looked like the car had been picked up and put down facing
-     the other way. */
-  if(!barrBlocked(ox,oz,nh)){
-    let d=nh-carState.hdg;
-    while(d>Math.PI) d-=Math.PI*2;
-    while(d<-Math.PI) d+=Math.PI*2;
-    BARR_TURN=d;
-  }
-  carState.wx=ox; carState.wz=oz;
-  _bx=ox; _bz=oz; _bh=carState.hdg;
-  /* The bleed queued above is NOT cleared here. It used to be, with the note
-     "it is already stopped" -- true only while the line above it set the speed
-     to zero. Now the bleed is the whole of the slowing down. */
-
-  if(BARR_HIT>0) return true;
-  BARR_HIT=2.0;
-
-  const power=clamp(vN/80, 0, 1);           // by the closing speed, not the road speed
-  /* The weight goes forward. A lurch the camera folds into its pitch, and a
-     burst of violence on top of the usual cockpit buzz, both proportional to
-     how hard it arrived -- at walking pace it is a nudge, at speed the horizon
-     drops out of the frame. */
-  BARR_LURCH=Math.max(BARR_LURCH, 0.045+power*0.30);
-  BARR_SHAKE=Math.max(BARR_SHAKE, power*9);
-  const y=(carGroup?carGroup.position.y:0)+0.25;
-  spawnSparks(carState.wx+hx*1.9, y, carState.wz+hz*1.9, power);
-  /* No debris. hitBarrier() threw one to eight lumps of bodywork off the car
-     and left them lying on the circuit; a barrier takes paint and a wing, not
-     a shower of parts, and they were the things falling off. Car-to-car
-     contact still sheds bodywork -- that is a different system and it stays. */
-  if(typeof ttVoid==='function') ttVoid('into the barrier');
-  const el=document.getElementById('limwarn');
-  if(el){
-    el.innerHTML='<b>INTO THE BARRIER</b><span>'
-                +Math.round(vN*3.6)+' kph into the wall</span>';
-    el.classList.add('show');
-    setTimeout(()=>el.classList.remove('show'), 3200);
-  }
-  return true;
-}
 function tlCheck(dt){
   if(RETIRE.on || !TT.live || TT.cd>0 || CARPTS.length!==4) return;
   let on=0;
@@ -10248,73 +9745,12 @@ function turnWheels(list, wl, wr, spinAng, steerAng){
 
    inp: thr 0..1, brk 0..1, steer -1..1 -- a key held down is 1, and the
    preview's markers and pure pursuit produce the same three numbers. */
-/* THE OTHER NINE CARS AGAINST THE SAME BARRIERS.
-
-   stepCar's comment has always said the rivals are "the same code running on a
-   different set of inputs". That was true of the pedals, the rack, the grip
-   and the surface, and untrue of the one thing you watch them do: they drove
-   straight through armco while the player bounced off it.
-
-   So this is the player's collision with the player's parts taken out. The
-   maths is not reimplemented -- it calls wallBounce, the same function and the
-   same four constants -- so a rival meeting a wall at forty degrees loses what
-   you lose at forty degrees. What it does not carry is anything that only
-   makes sense for the car being looked out of: no sparks, no camera shake, no
-   weight transfer, no bodywork damage.
-
-   Returns true if the car touched something. */
-function aiWall(C, dt){
-  if(!SEG.n || !C || !C.st) return false;
-  const st=C.st, h=st.hdg;
-  if(!barrBlocked(st.wx, st.wz, h)){
-    C._fx=st.wx; C._fz=st.wz; C._fh=h;         // the last pose it stood clear in
-    return false;
-  }
-  /* Back to where it was clear. Without a remembered pose -- a car placed
-     inside a wall by the grid layout, say -- there is nothing to reverse to
-     and pushing it out is all that is left. */
-  const okX = C._fx!==undefined && C._fx!==null ? C._fx : st.wx;
-  const okZ = C._fx!==undefined && C._fx!==null ? C._fz : st.wz;
-  const hx=Math.sin(h), hz=Math.cos(h);
-  let nrm=barrNormal(okX+hx*0.9, okZ+hz*0.9) || barrNormal(okX, okZ);
-  if(!nrm) nrm={x:-hx, z:-hz};
-  const into=-(hx*nrm.x + hz*nrm.z);
-  const B=wallBounce(st.speed, Math.max(0,into), nrm, hx, hz);
-
-  st.wx=okX; st.wz=okZ;
-  st.speed=Math.max(0, st.speed - B.loss);
-  /* Turned toward the way off the wall rather than snapped to it, at the same
-     rate the player's turn is paid out. */
-  let d2=Math.atan2(B.dirx, B.dirz)-st.hdg;
-  while(d2>Math.PI) d2-=Math.PI*2;
-  while(d2<-Math.PI) d2+=Math.PI*2;
-  st.hdg += d2*Math.min(1, dt/BARR_TURN_TAU);
-  C.bumpX=(C.bumpX||0)+nrm.x*(0.3+B.vn);
-  C.bumpZ=(C.bumpZ||0)+nrm.z*(0.3+B.vn);
-
-  /* Wedged: the same escape the player gets, nearest direction first, so a
-     rival cannot sit in a barrier for the rest of the race. */
-  C._touch=(C._touch||0)+dt;
-  if(C._touch>BARR_MAX_TOUCH){
-    for(let dd=0.5; dd<=8.0; dd+=0.5){
-      let out=false;
-      for(let a=0;a<8;a++){
-        const ang=(a%2?-1:1)*Math.ceil(a/2)*(Math.PI/6);
-        const ex=nrm.x*Math.cos(ang)-nrm.z*Math.sin(ang);
-        const ez=nrm.x*Math.sin(ang)+nrm.z*Math.cos(ang);
-        if(!barrBlocked(okX+ex*dd, okZ+ez*dd, st.hdg)){
-          st.wx=okX+ex*dd; st.wz=okZ+ez*dd; out=true; break;
-        }
-      }
-      if(out) break;
-    }
-    C._touch=0;
-  }
-  return true;
-}
-
+/* Retirement driving uses the same barrier response as the racing grid. */
+function aiWall(C,dt){return collisionWall(C,dt);}
 function stepCar(C, inp, dt){
   const st=C.st;
+  C._collisionPrev={wx:st.wx,wz:st.wz,hdg:st.hdg};
+  if(C.impactYaw){const v=CollisionPhysics.velocity(C);st.hdg+=C.impactYaw*dt;CollisionPhysics.setVelocity(C,v.x,v.z);C.impactYaw*=Math.exp(-5*dt);}
   applyPedals(st, inp.thr, inp.brk, C.surf, dt);
   steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
   // speed is read before the surface takes its cut, so a car entering gravel
@@ -10499,9 +9935,11 @@ function drive(dt){
         carState.n=side*WALL_N;
         const vIn=carState.speed*Math.sin(carState.psi)*side;   // +ve = into it
         if(vIn>0){
-          if(vIn>1.2) hitBarrier(vIn);
-          carState.psi=-carState.psi*0.28;                      // glance off
-          carState.speed=Math.max(1.5, carState.speed*(1-clamp(vIn*0.05,0.02,0.5)));
+          wingImpact(PLAYER,carState.wx+Math.sin(carState.hdg)*2,carState.wz+Math.cos(carState.hdg)*2,vIn);
+          const tangent=carState.speed*Math.cos(carState.psi);
+          const along=Math.sign(tangent)*Math.max(0,Math.abs(tangent)-.18*1.12*vIn);
+          const across=-side*.12*vIn;
+          carState.speed=Math.hypot(along,across);carState.psi=Math.atan2(across,along);
         }
       }
     }
@@ -11786,287 +11224,113 @@ function aiPedals(d, C){
   const a=(tgt*tgt-v*v)/(2*la);
   return {thr:clamp(a/Math.max(.001,26*(1-(v/MAXSPEED)**2)),0,1),brk:0};
 }
-/* ---------------------------------------------------------------------------
-   Cars touching cars.
-
-   What this is not: a barrier. Hitting the wall is a crash and is handled
-   elsewhere. This is the other thing -- running alongside somebody, catching
-   their wheel with yours, leaning on them through a corner. It should cost a
-   little speed and a little line and nothing else. No stopping dead, no shower
-   of sparks, no invisible wall.
-
-   Each car is a capsule: a segment down its length with a radius, which is a
-   fair description of a car and costs one closest-point-between-segments to
-   test. On contact the two are pushed apart along the line between them, and
-   each takes half of an impulse along that line. The restitution is low --
-   cars are not billiard balls, they are carbon boxes that scrub against each
-   other -- and the only speed lost is a fraction of the closing speed along the
-   contact normal. Two cars running side by side at 300 kph with a hundredth of
-   a metre of overlap lose nothing, which is right: touching at a shallow angle
-   is a scrape, not a shunt.
-
-   The push arrives as a velocity rather than a teleport, so a car that is leant
-   on drifts off line and has to be caught, the way it would. */
-const HIT_R=0.86;            // half the car's width, near enough
-const HIT_HL=1.85;           // half its length, a little short of the real nose
-const HIT_E=0.32;            // restitution: it bumps off, it does not bounce
-const HIT_SCRUB=0.12;        // of the closing speed, lost as scrub
-const HIT_DECAY=0.30;        // seconds for a shove to bleed away
-const CRUNCH_OFF=17.0;       // m/s: hard enough that a wing leaves the car
-function carEnds(st){
-  const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
-  return {ax:st.wx-fx*HIT_HL, az:st.wz-fz*HIT_HL, bx:st.wx+fx*HIT_HL, bz:st.wz+fz*HIT_HL, fx, fz};
-}
-/* Closest points between two segments, flattened to 2D -- the cars are on the
-   same road, so height is not what decides whether they are touching. */
-function segClosest(a,b){
-  const ux=a.bx-a.ax, uz=a.bz-a.az, vx=b.bx-b.ax, vz=b.bz-b.az;
-  const wx=a.ax-b.ax, wz=a.az-b.az;
-  const A=ux*ux+uz*uz, B=ux*vx+uz*vz, C=vx*vx+vz*vz, D=ux*wx+uz*wz, E=vx*wx+vz*wz;
-  const den=A*C-B*B;
-  let s = den>1e-9 ? clamp((B*E-C*D)/den,0,1) : 0;
-  let t = C>1e-9 ? clamp((B*s+E)/C,0,1) : 0;
-  s = A>1e-9 ? clamp((B*t-D)/A,0,1) : 0;
-  return { px:a.ax+ux*s, pz:a.az+uz*s, qx:b.ax+vx*t, qz:b.az+vz*t };
-}
-/* One pair. Written for any two cars so the same call serves the AI now and a
-   car on the other end of a connection later. */
-/* Crunching.
-
-   Not a damage model and not a penalty -- the car simply stops being the shape
-   it was. A hard enough hit pushes the bodywork in where it landed: the actual
-   vertices of the actual mesh, moved along the direction of the impact, most at
-   the point of contact and tapering to nothing a metre away. Hit the same
-   corner twice and it goes in twice. Nothing pops back out.
-
-   Two things have to be handled or this deforms every car at once. A cloned car
-   SHARES its geometry with the car it came from, so the first time a car is
-   crunched it gets its own copy -- lazily, because nine unused copies of a
-   hundred thousand triangles is a waste of memory that most races never need.
-   And the bounding sphere has to be recomputed afterwards, or the renderer
-   culls the car using the shape it used to be.
-
-   Pieces that are already their own mesh -- the rear wing -- come off entirely
-   rather than denting, because that is what happens to them. */
-/* The rear wing is the one piece that is genuinely its own mesh. It is found
-   by where it sits rather than by name, because gltfpack left every mesh in
-   this model called mesh_0_1 and the like -- names were never going to work. */
-function crunchRearPart(C){
-  const root=C.group; if(!root) return null;
-  if(C._rearPart) return C._rearPart;      // only cache a part that was found
-  C._rearPart=null;
-  const wr=root.getObjectByName('Wheel_RL')||root.getObjectByName('Wheel_RR');
-  if(!wr) return null;
-  root.updateMatrixWorld(true);
-  const inv=new THREE.Matrix4().copy(root.matrixWorld).invert();
-  const pr=new THREE.Vector3(); wr.getWorldPosition(pr); pr.applyMatrix4(inv);
-  const wf=root.getObjectByName('Wheel_FL')||root.getObjectByName('Wheel_FR');
-  const pf=new THREE.Vector3(); if(wf) wf.getWorldPosition(pf); pf.applyMatrix4(inv);
-  const fwd=Math.sign(pf.z-pr.z)||1;
-  const box=new THREE.Box3(), c=new THREE.Vector3();
-  let best=null, bestBack=0;
-  root.traverse(o=>{
-    if(!o.isMesh||!o.geometry) return;
-    box.setFromObject(o); if(box.isEmpty()) return;
-    box.getCenter(c); c.applyMatrix4(inv);
-    const behind=(pr.z-c.z)*fwd;
-    if(behind>0.05 && c.y>pr.y*1.45 && behind>bestBack){ bestBack=behind; best=o; }
-  });
-  C._rearPart=best;
-  return best;
-}
-/* Denting the panels is OFF, and honestly so.
-
-   Pushing the actual vertices in is the right idea and it is not working on
-   this model. Four attempts, each measured rather than eyeballed: a dent came
-   out as 20,866 m, then 20,596 m, then 5.58 m, against a cap of 0.34 m. The
-   geometry is packed in a way that keeps defeating it -- unnamed meshes, whole
-   car in one mesh, unsigned 16-bit vertex positions, non-uniform and mirrored
-   node scale -- and the world coordinates check out as metres, which means the
-   fault is still somewhere I have not found.
-
-   A car that folds up is a good feature. A car that turns into a spike across
-   the circuit the first time somebody taps you at the Bus Stop is far worse
-   than no feature, and you would meet it within a lap. So it stays off until it
-   is right, and the code stays here rather than being deleted.
-
-   What does ship is the part that cannot go wrong: a piece that is genuinely
-   its own mesh leaves the car. */
-const CRUNCH_DENT=false;
-const CRUNCH_MIN=7.0;       // m/s of closing speed before anything bends
-const CRUNCH_R=1.15;        // metres of bodywork affected around the contact
-const CRUNCH_MAX=0.34;      // deepest a single hit can push the panel in
-/* Its own geometry, in numbers that can hold a dent.
-
-   Two things are wrong with the geometry as it arrives, and both are gltfpack
-   doing its job. It is SHARED with every other car cloned from the same model,
-   so denting one would dent the whole grid including yours. And the positions
-   are a Uint16Array of raw integers -- unsigned -- so a vertex pushed even
-   slightly past zero does not go negative, it wraps round to 65535 and the
-   vertex teleports fifteen metres across the car. That is what the five-metre
-   "dents" were.
-
-   So the first time a car is actually hit it gets its own copy, converted to
-   floats. Same numbers, same scale, but they can now go where they are put. */
-function crunchOwn(o){
-  if(o.userData.ownGeom) return;
-  const g=o.geometry.clone();
-  const p=g.attributes.position;
-  if(!(p.array instanceof Float32Array)){
-    const f=new Float32Array(p.count*3);
-    for(let i=0;i<p.count;i++){ f[i*3]=p.getX(i); f[i*3+1]=p.getY(i); f[i*3+2]=p.getZ(i); }
-    g.setAttribute('position', new THREE.BufferAttribute(f,3));
-  }
-  o.geometry=g;
-  o.userData.ownGeom=true;
-}
-const _cwP=new THREE.Vector3(), _cwD=new THREE.Vector3(), _cwV=new THREE.Vector3();
-const _cwW=new THREE.Vector3(), _cwL=new THREE.Vector3();
-function crunchAt(C, wx, wy, wz, dx, dz, energy){
-  if(!CRUNCH_DENT) return;
-  const root=C.group; if(!root) return;
-  const depth=Math.min(CRUNCH_MAX, (energy-CRUNCH_MIN)*0.022);
-  if(depth<=0.004) return;
-  root.updateMatrixWorld(true);
-  const dl=Math.hypot(dx,dz)||1; dx/=dl; dz/=dl;
-  root.traverse(o=>{
-    if(!o.isMesh||!o.geometry||!o.geometry.attributes.position) return;
-    if(o.userData.detached) return;
-    if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
-    const bs=o.geometry.boundingSphere;
-    _cwV.copy(bs.center).applyMatrix4(o.matrixWorld);
-    /* The radius has to be measured in the world too: the sphere's radius is in
-       the mesh's own units, so it is scaled by whatever the node does. */
-    const sc=new THREE.Vector3();
-    o.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), sc);
-    const unit=Math.max(Math.abs(sc.x),Math.abs(sc.y),Math.abs(sc.z));
-    const reach=bs.radius*unit+CRUNCH_R;
-    if((_cwV.x-wx)**2+(_cwV.y-wy)**2+(_cwV.z-wz)**2 > reach*reach) return;
-
-    crunchOwn(o);
-    const pos=o.geometry.attributes.position;
-    const M=o.matrixWorld, inv=new THREE.Matrix4().copy(M).invert();
-    let moved=0;
-    /* Every measurement in metres.
-
-       Working in the mesh's own coordinates was hopeless: this model is
-       quantised, so its numbers are not metres and are not the same multiple of
-       a metre from one mesh to the next. Guessing the conversion produced a
-       car twenty kilometres long. Each vertex is taken out to the world, judged
-       there against a distance in metres, moved there, and brought back. */
-    for(let i=0;i<pos.count;i++){
-      _cwW.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(M);
-      const d2=(_cwW.x-wx)**2+(_cwW.y-wy)**2+(_cwW.z-wz)**2;
-      if(d2>CRUNCH_R*CRUNCH_R) continue;
-      const f=1-Math.sqrt(d2)/CRUNCH_R;                   // most at the contact
-      const k=depth*f*f;
-      _cwW.x+=dx*k; _cwW.y+=k*0.28; _cwW.z+=dz*k;
-      _cwL.copy(_cwW).applyMatrix4(inv);
-      pos.setXYZ(i, _cwL.x, _cwL.y, _cwL.z);
-      moved++;
-    }
-    if(moved){
-      pos.needsUpdate=true;
-      o.geometry.computeBoundingSphere();                 // or it culls the old shape
-      o.geometry.computeVertexNormals();                  // so the dent catches light
-    }
-  });
-}
-/* A part that leaves the car. It keeps the shape it had, drops out of the
-   car's group into the world, and falls where the impact threw it. */
+/* Shared car/barrier contact response and cosmetic model wing sections. */
+const HIT_DECAY=.55;
 const DEBRIS=[];
-function crunchDetach(o, vx, vy, vz){
-  if(!o||o.userData.detached) return;
-  o.userData.detached=true;
-  o.updateMatrixWorld(true);
-  const m=o.matrixWorld.clone();
-  scene.add(o);                                   // re-parenting keeps it visible
-  m.decompose(o.position, o.quaternion, o.scale);
-  o.userData.detached=true;
-  DEBRIS.push({o, vx, vy, vz, spin:(Math.random()-0.5)*6, t:0});
-}
-function crunchStep(dt){
-  for(let i=DEBRIS.length-1;i>=0;i--){
-    const d=DEBRIS[i];
-    d.vy-=9.81*dt; d.t+=dt;
-    d.o.position.x+=d.vx*dt; d.o.position.y+=d.vy*dt; d.o.position.z+=d.vz*dt;
-    d.o.rotateZ(d.spin*dt);
-    const g=groundAt(d.o.position.x, d.o.position.z, d.o.position.y);
-    const floor=(g.hit?g.y:0)+0.06;
-    if(d.o.position.y<=floor){                    // landed: stop it there
-      d.o.position.y=floor; DEBRIS.splice(i,1); continue;
-    }
-    d.vx*=0.995; d.vz*=0.995;
-    if(d.t>12) DEBRIS.splice(i,1);                // long gone
+const wingDamage=new Map();
+function wingPrepare(C){
+ if(wingDamage.has(C))return wingDamage.get(C);
+ const root=C.group;if(!root)return [];
+ root.updateMatrixWorld(true);
+ const inv=new THREE.Matrix4().copy(root.matrixWorld).invert();
+ const wheel=name=>{const o=root.getObjectByName(name);return o?o.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv):null;};
+ const front=wheel('Wheel_FL'),rear=wheel('Wheel_RL');if(!front||!rear)return [];
+ const sign=Math.sign(front.z-rear.z)||1,records=[],meshes=[];
+ root.traverse(o=>{if(o.isMesh&&o.geometry&&o.geometry.attributes.position&&!o.userData.wingSection)meshes.push(o);});
+ for(const mesh of meshes){
+  // Wheel/suspension subtrees are never eligible, even if geometry crosses a wing region.
+  let node=mesh,excluded=false;while(node&&node!==root){if(/wheel|tyre|tire|susp|brake|steer/i.test(node.name))excluded=true;node=node.parent;}if(excluded)continue;
+  const original=mesh.geometry,pos=original.attributes.position,index=original.index;
+  const transform=new THREE.Matrix4().multiplyMatrices(inv,mesh.matrixWorld),p=new THREE.Vector3();
+  const labels=new Int8Array(pos.count);
+  for(let i=0;i<pos.count;i++){
+   p.set(pos.getX(i),pos.getY(i),pos.getZ(i)).applyMatrix4(transform);
+   const frontWing=(p.z-front.z)*sign>.28&&p.y<front.y+.38&&p.y>front.y-.5&&Math.abs(p.x)>.22;
+   const rearWing=(rear.z-p.z)*sign>.12&&p.y>rear.y+.32;
+   if(frontWing||rearWing)labels[i]=(frontWing?1:4)+(p.x<-.4?0:p.x>.4?2:1);
   }
-}
-function carsTouch(A, B, dt){
-  if(!A||!B) return false;
-  const sa=A.st, sb=B.st;
-  if((sa.wx-sb.wx)**2 + (sa.wz-sb.wz)**2 > 64) return false;   // 8 m apart: nothing to do
-  const ea=carEnds(sa), eb=carEnds(sb);
-  const c=segClosest(ea,eb);
-  let nx=c.qx-c.px, nz=c.qz-c.pz;
-  let d=Math.hypot(nx,nz);
-  const gap=2*HIT_R;
-  if(d>=gap) return false;
-  if(d<1e-4){ nx=sb.wx-sa.wx; nz=sb.wz-sa.wz; d=Math.hypot(nx,nz)||1; }
-  nx/=d; nz/=d;
-  const overlap=gap-d;
-  // out of each other, half each
-  sa.wx-=nx*overlap*0.5; sa.wz-=nz*overlap*0.5;
-  sb.wx+=nx*overlap*0.5; sb.wz+=nz*overlap*0.5;
-  // closing speed along the contact
-  const vax=Math.sin(sa.hdg)*sa.speed+(A.bumpX||0), vaz=Math.cos(sa.hdg)*sa.speed+(A.bumpZ||0);
-  const vbx=Math.sin(sb.hdg)*sb.speed+(B.bumpX||0), vbz=Math.cos(sb.hdg)*sb.speed+(B.bumpZ||0);
-  const vn=(vbx-vax)*nx+(vbz-vaz)*nz;
-  if(vn<0){                                   // only if they are coming together
-    const close=Math.abs(vn);
-    /* A nudge and a shunt are not the same event: the harder they arrive, the
-       further they throw each other. */
-    const e=Math.min(0.9, HIT_E + close/36);
-    const j=-(1+e)*vn*0.5;                    // equal cars, half each
-    A.bumpX=(A.bumpX||0)-nx*j; A.bumpZ=(A.bumpZ||0)-nz*j;
-    B.bumpX=(B.bumpX||0)+nx*j; B.bumpZ=(B.bumpZ||0)+nz*j;
-    const scrub=close*HIT_SCRUB*(1+close/34);
-    sa.speed=Math.max(0, sa.speed-scrub);
-    sb.speed=Math.max(0, sb.speed-scrub);
-
-    /* And the bodywork takes it. The contact point is where the two cars
-       actually touched, so the dent lands where you can see it happen. */
-    if(close>CRUNCH_MIN){
-      const hy=(A.groundY+B.groundY)*0.5;
-      crunchAt(A, c.px, hy, c.pz,  nx,  nz, close);
-      crunchAt(B, c.qx, hy, c.qz, -nx, -nz, close);
-      /* Hit hard enough from behind and the rear wing does not dent, it goes.
-         Which end took it is decided by where along each car the contact was:
-         +1 is the nose, -1 the gearbox. */
-      if(close>CRUNCH_OFF){
-        const ta=((c.px-sa.wx)*Math.sin(sa.hdg)+(c.pz-sa.wz)*Math.cos(sa.hdg))/HIT_HL;
-        const tb=((c.qx-sb.wx)*Math.sin(sb.hdg)+(c.qz-sb.wz)*Math.cos(sb.hdg))/HIT_HL;
-        const fling=(C,st,dir)=>{
-          const part=crunchRearPart(C);
-          if(part) crunchDetach(part, dir*nx*close*0.35+st.speed*Math.sin(st.hdg)*0.4,
-                                      2.2+close*0.06,
-                                      dir*nz*close*0.35+st.speed*Math.cos(st.hdg)*0.4);
-        };
-        if(ta<-0.5) fling(A, sa, -1);
-        if(tb<-0.5) fling(B, sb,  1);
-      }
-    }
+  const buckets=Array.from({length:7},()=>[]),groups=original.groups.length?original.groups:[{start:0,count:index?index.count:pos.count,materialIndex:0}];
+  for(const group of groups){const lists=Array.from({length:7},()=>[]);const end=Math.min(group.start+group.count,index?index.count:pos.count);
+   for(let i=group.start;i+2<end;i+=3){const a=index?index.getX(i):i,b=index?index.getX(i+1):i+1,c=index?index.getX(i+2):i+2;
+    const label=labels[a]&&labels[a]===labels[b]&&labels[b]===labels[c]?labels[a]:0;lists[label].push(a,b,c);}
+   lists.forEach((indices,b)=>{if(indices.length)buckets[b].push({indices,materialIndex:group.materialIndex});});
   }
-  A.touchT=B.touchT=0.25;                     // for anything that wants to know
-  return true;
+  if(!buckets.slice(1).some(b=>b.length))continue;
+  const geometry=bucket=>{const g=new THREE.BufferGeometry();for(const name of Object.keys(original.attributes))g.setAttribute(name,original.attributes[name]);const indices=[];for(const group of bucket){g.addGroup(indices.length,group.indices.length,group.materialIndex);for(const i of group.indices)indices.push(i);}g.setIndex(indices);g.boundingBox=original.boundingBox&&original.boundingBox.clone();g.boundingSphere=original.boundingSphere&&original.boundingSphere.clone();return g;};
+  const record={mesh,original,sections:[]};mesh.geometry=geometry(buckets[0]);
+  for(let b=1;b<7;b++){if(!buckets[b].length)continue;const part=new THREE.Mesh(geometry(buckets[b]),mesh.material);part.name='Wing section '+b;part.userData.wingSection=true;part.position.copy(mesh.position);part.quaternion.copy(mesh.quaternion);part.scale.copy(mesh.scale);part.castShadow=mesh.castShadow;part.receiveShadow=mesh.receiveShadow;mesh.parent.add(part);
+   const center=new THREE.Vector3();let count=0;for(const group of buckets[b])for(const i of group.indices){p.set(pos.getX(i),pos.getY(i),pos.getZ(i)).applyMatrix4(transform);center.add(p);count++;}center.multiplyScalar(1/count);
+   record.sections.push({part,center,broken:false});
+  }records.push(record);
+ }
+ wingDamage.set(C,records);return records;
 }
-/* Everyone against everyone. With one AI this was you and it; with a grid it
-   has to be every pair, or cars occupy the same piece of road at the first
-   corner and simply pass through each other. */
+function wingImpact(C,x,z,severity){
+ if(severity<6||!C.group)return;
+ const st=C.st,dx=x-st.wx,dz=z-st.wz;
+ const localX=dx*Math.cos(st.hdg)-dz*Math.sin(st.hdg),localZ=dx*Math.sin(st.hdg)+dz*Math.cos(st.hdg);
+ const radius=Math.min(1.35,.5+severity*.024),v=CollisionPhysics.velocity(C);
+ for(const record of wingPrepare(C))for(const section of record.sections){
+  if(section.broken||Math.hypot(section.center.x-localX,section.center.z-localZ)>radius)continue;
+  section.broken=true;const part=section.part;part.updateMatrixWorld(true);const matrix=part.matrixWorld.clone();
+  const o=new THREE.Group();o.position.copy(section.center).applyMatrix4(C.group.matrixWorld);scene.add(o);o.updateMatrixWorld(true);
+  o.add(part);new THREE.Matrix4().copy(o.matrixWorld).invert().multiply(matrix).decompose(part.position,part.quaternion,part.scale);part.userData.detached=true;section.pivot=o;
+  DEBRIS.push({o,vx:v.x,vy:Math.min(5,1+severity*.07),vz:v.z,spin:(section.center.x<0?-1:1)*Math.min(7,severity*.15),t:0});
+ }
+}
+function damageReset(){
+ for(const [C,records] of wingDamage){for(const r of records){r.mesh.geometry.dispose();r.mesh.geometry=r.original;for(const s of r.sections){if(s.pivot&&s.pivot.parent)s.pivot.parent.remove(s.pivot);s.part.removeFromParent?s.part.removeFromParent():s.part.parent&&s.part.parent.remove(s.part);s.part.geometry.dispose();}}C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;}
+ wingDamage.clear();DEBRIS.length=0;
+ for(const C of [PLAYER,...AIS.map(d=>d.car).filter(Boolean)]){C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;}
+}
+function wingDebrisStep(dt){
+ for(let i=DEBRIS.length-1;i>=0;i--){const d=DEBRIS[i];d.t+=dt;d.vy-=9.81*dt;d.o.position.x+=d.vx*dt;d.o.position.y+=d.vy*dt;d.o.position.z+=d.vz*dt;d.o.rotateZ(d.spin*dt);
+  const g=groundAt(d.o.position.x,d.o.position.z,d.o.position.y),floor=(g.hit?g.y:0)+.08;
+  if(d.o.position.y<floor){d.o.position.y=floor;d.vy=Math.abs(d.vy)>.6?-d.vy*.22:0;const drag=Math.exp(-6*dt);d.vx*=drag;d.vz*=drag;d.spin*=drag;}
+  if(d.t>20){d.o.visible=false;DEBRIS.splice(i,1);}
+ }
+}
+function collisionWall(C,dt){
+ if(!SEG.n||!C||!C.st)return false;
+ const st=C.st,prev=C._collisionPrev||{wx:st.wx,wz:st.wz,hdg:st.hdg};
+ const dx=st.wx-prev.wx,dz=st.wz-prev.wz;if(Math.hypot(dx,dz)>20)return false;
+ let dh=Math.atan2(Math.sin(st.hdg-prev.hdg),Math.cos(st.hdg-prev.hdg));
+ const steps=Math.max(1,Math.ceil((Math.hypot(dx,dz)+Math.abs(dh)*2.5)/.25));let safe={...prev},hit=null;
+ for(let i=0;i<=steps;i++){const t=i/steps,q={wx:prev.wx+dx*t,wz:prev.wz+dz*t,hdg:prev.hdg+dh*t};if(barrBlocked(q.wx,q.wz,q.hdg)){hit=q;break;}safe=q;}
+ if(!hit)return false;
+ const normal=barrNormal(safe.wx,safe.wz);if(!normal)return false;
+ const point=CollisionPhysics.support(hit,-normal.x,-normal.z);
+ st.wx=safe.wx+normal.x*.03;st.wz=safe.wz+normal.z*.03;st.hdg=safe.hdg;
+ const severity=CollisionPhysics.impulse(C,null,{nx:-normal.x,nz:-normal.z,x:point.x,z:point.z});wingImpact(C,point.x,point.z,severity);
+ // Resolve an initially overlapping spawn locally; never teleport to a distant remembered pose.
+ for(let i=0;i<20&&barrBlocked(st.wx,st.wz,st.hdg);i++){st.wx+=normal.x*.1;st.wz+=normal.z*.1;}
+ if(C===PLAYER&&severity>2){BARR_SHAKE=Math.max(BARR_SHAKE,Math.min(5,severity*.1));if(BARR_SPARK<=0){spawnSparks(point.x,(C.groundY||0)+.2,point.z,Math.min(.6,severity/60));BARR_SPARK=.1;}}
+ return true;
+}
+function carsTouch(A,B,dt){
+ if(!A||!B||Math.abs((A.groundY||0)-(B.groundY||0))>1.5)return false;
+ const a=A.st,b=B.st;let hit=CollisionPhysics.solve(A,B);
+ if(!hit&&dt>0&&A._collisionPrev&&B._collisionPrev){
+  const pa=A._collisionPrev,pb=B._collisionPrev,ea={...a},eb={...b};
+  const travel=Math.hypot(ea.wx-pa.wx,ea.wz-pa.wz)+Math.hypot(eb.wx-pb.wx,eb.wz-pb.wz);
+  if(travel<20){const steps=Math.max(1,Math.ceil(travel/.3));
+   for(let i=1;i<steps;i++){const t=i/steps;for(const [s,p,e] of [[a,pa,ea],[b,pb,eb]]){s.wx=p.wx+(e.wx-p.wx)*t;s.wz=p.wz+(e.wz-p.wz)*t;s.hdg=p.hdg+Math.atan2(Math.sin(e.hdg-p.hdg),Math.cos(e.hdg-p.hdg))*t;}
+    hit=CollisionPhysics.solve(A,B);if(hit)break;}
+   if(!hit){Object.assign(a,ea);Object.assign(b,eb);}
+  }
+ }
+ if(!hit)return false;
+ wingImpact(A,hit.x,hit.z,hit.closing);wingImpact(B,hit.x,hit.z,hit.closing);A.touchT=B.touchT=.2;return true;
+}
 function carContact(dt){
-  if(NET.watching || TTREC.playing) return;   // not a car you are driving
-  const live=AIS.filter(d=>d.car&&d.on&&!d.hold);
-  for(const d of live) carsTouch(PLAYER, d.car, dt);
-  for(let a=0;a<live.length;a++)
-    for(let b=a+1;b<live.length;b++) carsTouch(live[a].car, live[b].car, dt);
+ if(NET.watching||TTREC.playing)return;
+ if(!wallsReady)wallsInit();
+ const cars=[PLAYER,...AIS.filter(d=>d.car&&d.on&&!d.hold).map(d=>d.car)];
+ for(let pass=0;pass<3;pass++)for(let a=0;a<cars.length;a++)for(let b=a+1;b<cars.length;b++){
+  const A=cars[a],B=cars[b];if(pass||Math.hypot(A.st.wx-B.st.wx,A.st.wz-B.st.wz)<16)carsTouch(A,B,pass?0:dt);
+ }
+ for(const C of cars)collisionWall(C,dt);
+ BARR_SHAKE*=Math.exp(-5*dt);BARR_LURCH*=Math.exp(-5*dt);BARR_SPARK=Math.max(0,BARR_SPARK-dt);
 }
 
 /* The grid, and what is on it.
@@ -12501,7 +11765,8 @@ function raceStart(opts){
      the collision's memory of where the car was is dropped -- it is about to
      be teleported onto the grid, and a swept test between here and there would
      read as driving through everything in between. */
-  BARR_DMG=0; BARR_LURCH=0; BARR_SHAKE=0; BARR_HIT=0; BARR_TOUCH=0; _bx=null; _freeX=null;
+  BARR_LURCH=0; BARR_SHAKE=0; BARR_HIT=0;
+  damageReset();
   aiField(RACE_CARS-1);                 // you, and nine of them
 
   /* WHERE YOU START.
@@ -12742,7 +12007,7 @@ function aiStep(d, dt, t){
   const ped=aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
   stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(d, C, dt)}, dt);
   /* And then the barriers, which apply to them exactly as they do to you. */
-  if(aiWall(C, dt)) d.hitWall=(d.hitWall||0)+1;
+
   aiOffTrackWatch(d);
   placeCar(C, dt, t);
   d.t+=dt;
@@ -13028,7 +12293,7 @@ window.SIM={
     carGroup.traverse(o=>{ if(o.isMesh) onCar++; });
     return {meshes, dentedMeshes:own, verticesMoved:moved, deepest:+worst.toFixed(3),
             debris:DEBRIS.length, piecesOffTheCar:gone, meshesStillOnCar:onCar,
-            rearFound:!!crunchRearPart(PLAYER)};
+            rearFound:wingPrepare(PLAYER).some(r=>r.sections.some(s=>s.center.z<0))};
   },
   vertexKind(){
     const out=[];
@@ -13072,12 +12337,8 @@ window.SIM={
     /* A hit of a chosen severity, delivered where a car would deliver it. */
     const h=carState.hdg, fx=Math.sin(h), fz=Math.cos(h);
     const at=fromBehind?-1.9:1.9;
-    crunchAt(PLAYER, carState.wx+fx*at, PLAYER.groundY+0.35, carState.wz+fz*at,
-             fromBehind?fx:-fx, fromBehind?fz:-fz, depth);
-    if(fromBehind && depth>CRUNCH_OFF){
-      const part=crunchRearPart(PLAYER);
-      if(part) crunchDetach(part, 2, 3, 2);
-    }
+    wingImpact(PLAYER,carState.wx+fx*at,carState.wz+fz*at,depth);
+
     return true;
   },
   standings(){ return { pos:RACE.pos, field:RACE.field, lap:RACE.lapN,
@@ -13485,7 +12746,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); crunchStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
@@ -13709,7 +12970,6 @@ function frame(now){
     if(looseSpray>2) looseSpray=2;               // never bank a debt
   } else looseSpray=0;
   updateDust(dt);
-  updateDebris(dt);
 
   /* The drone. Before the lights go out the camera is not in the car at all:
      it stands off ahead and above the start, looking back down the pit straight
