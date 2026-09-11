@@ -9769,6 +9769,7 @@ const STEER_ON=0.232, STEER_OFF=0.052;  // seconds, application and return
 const CAR_HALF_W=1.0;             // half the car's width, for the wall test
 let WALL_N=BARRIER_LAT-CAR_HALF_W;
 const kmhEl=document.getElementById('kmh');
+const unitEl=document.getElementById('unit');
 
 /* R puts the car back on the centreline where it stands, pointing down the
    road and stopped. Everything that could be left leaning or wound up from
@@ -9792,7 +9793,12 @@ function resetToTrack(){
    The state object is whatever is being driven -- carState for the player, pv
    for the ghost. Pedals are 0..1 so a key ("down" = 1) and a marker (a
    percentage) can both drive it. */
-function applyPedals(st, thr, brk, surf, dt){
+/* Reverse. Hold the brake with the car stopped and it backs up: there is no
+   separate gear to select, because there is no gearbox in this model and a
+   key you have to find is a worse answer than the one you are already
+   holding. Capped well below walking-out-of-trouble speed. */
+const REV_MAX=8.5/3.6;                 // 8.5 kph, plenty to get off a barrier
+function applyPedals(st, thr, brk, surf, dt, allowRev){
   if(thr>0){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
@@ -9810,14 +9816,23 @@ function applyPedals(st, thr, brk, surf, dt){
               : surf.grass ? 1 - 0.06*surf.grassFrac : 1;
     st.speed += 26.0*(1.0 - v*v)*bog*dt*thr;
   }
-  else if(brk>0) st.speed -= 46*dt*brk;
-  else st.speed -= (0.8 + st.speed*0.028)*dt;
+  else if(brk>0){
+    /* The brake is the brake down to a standstill and the reverse pedal below
+       it, at a fraction of the authority -- 46 m/s/s backwards out of a gravel
+       trap would be a launch, not a recovery. */
+    st.speed -= (st.speed>0 ? 46 : 7.5)*dt*brk;
+  }
+  /* Coasting decays toward zero from either side. Subtracting unconditionally
+     was right while speed could not go below zero and would have quietly
+     accelerated the car backwards for ever once it could. */
+  else if(st.speed>0) st.speed -= (0.8 + st.speed*0.028)*dt;
+  else if(st.speed<0) st.speed = Math.min(0, st.speed + (0.8 - st.speed*0.028)*dt);
   /* The career car's top end. CAR_TOP is 1 outside a career and 0.90 to 1.00
      inside one, so a season starts with a car that will not pull 360 and ends
      with one that will. The drag curve above is untouched: the engine is the
      same, it simply runs out of road sooner, which is what a slower car feels
      like rather than a heavier one. */
-  st.speed=clamp(st.speed,0,MAXSPEED*(st===carState?CAR_TOP:1));
+  st.speed=clamp(st.speed, allowRev?-REV_MAX:0, MAXSPEED*(st===carState?CAR_TOP:1));
   /* NO DAMAGE MODEL. There was one here: every barrier hit took a slice off the
      player's top speed, up to about 80 kph, so a scruffy race ended with the
      car unable to reach 360 down the Kemmel. It is gone at Wells's request --
@@ -9841,7 +9856,12 @@ function yawFor(speed, steerAng, surf, gripMul){
   const dTyre=-steerAng/STEER_RATIO;                 // +ve = left
   let yawRate=speed*Math.tan(dTyre)/WHEELBASE;
   const slick = surf.grass ? 1 - 0.465*surf.grassFrac : 1;
-  const yawMax = speed>0.5 ? A_GRIP*turnBoost(speed*3.6)*slick*(gripMul||1)/speed : 8;
+  /* Magnitude, not signed: in reverse `speed>0.5` was false, so the ceiling
+     fell back to 8 rad/s and the car span on the spot. The sign belongs on
+     yawRate above -- which is what makes the back of the car lead, exactly as
+     it does when you reverse a real one. */
+  const vAbs=Math.abs(speed);
+  const yawMax = vAbs>0.5 ? A_GRIP*turnBoost(vAbs*3.6)*slick*(gripMul||1)/vAbs : 8;
   return clamp(yawRate,-yawMax,yawMax);
 }
 /* What the surface takes off you for being on it. */
@@ -10023,7 +10043,7 @@ function stepCar(C, inp, dt){
   const st=C.st;
   C._collisionPrev={wx:st.wx,wz:st.wz,hdg:st.hdg};
   if(C.impactYaw){const v=CollisionPhysics.velocity(C);st.hdg+=C.impactYaw*dt;CollisionPhysics.setVelocity(C,v.x,v.z);C.impactYaw*=Math.exp(-5*dt);}
-  applyPedals(st, inp.thr, inp.brk, C.surf, dt);
+  applyPedals(st, inp.thr, inp.brk, C.surf, dt, inp.rev);
   steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
@@ -10105,6 +10125,16 @@ function placeCar(C, dt, t){
   C.group.rotation.set(-C.carPitch, C.st.hdg + C.slipAng, C.carRoll);
 }
 
+/* Held, not tapped: a quarter of a second of brake at a standstill before the
+   car will back up, so stopping hard never turns into reversing by accident.
+   Any throttle, or getting properly rolling again, cancels it. */
+let playerRevHold=0;
+function playerRev(brk, thr, kph, dt){
+  if(thr>0 || kph>3){ playerRevHold=0; return false; }
+  if(brk>0 && kph<1.2) playerRevHold+=dt;
+  else if(!brk) playerRevHold=0;
+  return playerRevHold>0.25;
+}
 function drive(dt){
   if(RETIRE.on){retirementDrive(dt);return;}
   if(RESULT.on){carState.speed=0;silenceEngine();return;}
@@ -10170,7 +10200,11 @@ function drive(dt){
       steerRack(PLAYER, want, 0, dt, AIDS);   // the wheel still turns on the grid
     }else{
       // the same call the preview car makes, with keys instead of a program
-      yawRate=stepCar(PLAYER, {thr:thrMag, brk:brkMag, steer:want}, dt);
+      /* Spa runs this branch, not the track-space one below -- reverse has to
+         be wired through stepCar or holding the brake at a standstill does
+         nothing at all on the circuit you actually race. */
+      yawRate=stepCar(PLAYER, {thr:thrMag, brk:brkMag, steer:want,
+                               rev:playerRev(brkMag,thrMag,kph,dt)}, dt);
       if(onLoose) looseSpray += carState.speed*looseFrac*dt;
     }
   }else{
@@ -10179,7 +10213,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt);
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, playerRev(brkMag,thrMag,kph,dt));
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
@@ -10289,7 +10323,10 @@ function presentCar(dt, thr, brk, gridded, yawRate){
     setSound(st, rolling && sbufTrim.accel ? sbufTrim.accel.len*0.5 : 0);
   }
 
-  kmhEl.textContent = Math.round(wSpd*3.6);
+  kmhEl.textContent = Math.round(Math.abs(wSpd)*3.6);
+  /* Backwards is still a speed. The number stays positive and the unit says
+     which way you are going, rather than a minus sign nobody reads at 78px. */
+  if(unitEl) unitEl.textContent = wSpd < -0.3 ? 'km/h · R' : 'km/h';
 }
 
 /* A window onto the running car, for driving this thing from outside -- a
@@ -12234,6 +12271,70 @@ function aiToggle(){
   return true;
 }
 function aiStepAll(dt, t){ for(const d of AIS) aiStep(d, dt, t); }
+/* ==========================================================================
+   GETTING UNSTUCK
+   A car beached on a kerb or nose-in to a barrier used to sit there for the
+   rest of the race. It now backs off and rejoins, and if backing off does not
+   work it is out -- which is what would happen, and is better than a parked
+   car nobody can pass cleanly.
+
+   Stuck is under 5 kph for more than two seconds. Three attempts steering the
+   nose back toward the line; a fourth with the lock thrown the other way, for
+   the case where the first three were steering it further into whatever it is
+   caught on; then the flag.
+   ========================================================================== */
+const AI_STUCK_KPH=5, AI_STUCK_T=2, AI_REV_T=1.6, AI_SETTLE_T=2.5, AI_TRIES=4;
+function aiUnstick(d, C, dt){
+  if(d.hold || d.react>0 || d.finish) return null;
+  const kph=Math.abs(C.st.speed)*3.6;
+
+  if(!d.rescue){
+    d.stuckT = kph<AI_STUCK_KPH ? (d.stuckT||0)+dt : 0;
+    if(d.stuckT<=AI_STUCK_T) return null;
+    d.stuckT=0;
+    d.tries=(d.tries||0)+1;
+    if(d.tries>AI_TRIES){ aiRetire(d,'Stuck on track'); return null; }
+    /* The last attempt throws the lock the other way. */
+    d.rescue={phase:'back', t:0, flip:(d.tries>=AI_TRIES ? -1 : 1)};
+  }
+
+  const r=d.rescue; r.t+=dt;
+  if(r.phase==='back'){
+    /* Steer so the nose comes back toward the line as the car backs away from
+       whatever stopped it: off is +ve to the right of the line, and in reverse
+       the back of the car leads, so the lock goes the same side as the error. */
+    const side=(d.off>0 ? 1 : -1) * r.flip;
+    if(r.t>AI_REV_T){ r.phase='go'; r.t=0; }
+    return {thr:0, brk:1, steer:side, rev:true};
+  }
+  /* Let it drive itself out. If it is genuinely going again the attempt
+     counter resets, so a car that gets stuck once early does not arrive at the
+     last round of the ladder an hour later on its first real problem. */
+  if(r.t>AI_SETTLE_T){
+    d.rescue=null;
+    if(kph>12) d.tries=0;
+  }
+  return null;
+}
+/* Out of the race, and said out loud. */
+function aiRetire(d, why){
+  if(!d.on) return;
+  d.on=false; d.rescue=null; d.dsq=true; d.dsqWhy=why||'Retired';
+  if(d.car){ d.car.st.speed=0; if(d.car.group) d.car.group.visible=false; }
+  raceFlash(d.name||'Car', why||'Retired');
+}
+/* The one place a retirement is announced. Its own strip rather than the lap
+   flash, because that one belongs to your lap and this is about someone else. */
+function raceFlash(who, why){
+  let el=document.getElementById('race-flash');
+  if(!el){ el=document.createElement('div'); el.id='race-flash'; document.body.appendChild(el); }
+  const row=document.createElement('div');
+  row.className='rf-row';
+  row.innerHTML='<b>Disqualified</b><span>'+String(who).replace(/[&<>"]/g,'')
+               +'</span><i>'+String(why).replace(/[&<>"]/g,'')+'</i>';
+  el.appendChild(row);
+  setTimeout(()=>{ row.classList.add('out'); setTimeout(()=>row.remove(),600); }, 5200);
+}
 function aiStep(d, dt, t){
   if(!d.on||!d.car) return;
   const C=d.car, st=C.st;
@@ -12276,8 +12377,14 @@ function aiStep(d, dt, t){
     st2.sk+=(d.speedK||1); }
   if(C.surf && C.surf.ok && (C.surf.grass||C.surf.loose)) d._offN=(d._offN||0)+1;
   aiTraffic(d, dt);
-  const ped=aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
-  stepCar(C, {thr:ped.thr, brk:ped.brk, steer:aiSteer(d, C, dt)}, dt);
+  /* A recovery overrides the pedals and the wheel while it runs; the rest of
+     the time it returns null and nothing about normal driving changes. */
+  if(d._pinTest) C.st.speed=0;          // test harness: held as if wedged
+  const esc=aiUnstick(d, C, dt);
+  if(!d.on) return;
+  const ped=esc || aiPedals(d, C); d._thr=ped.thr; d._brk=ped.brk;
+  stepCar(C, {thr:ped.thr, brk:ped.brk, rev:!!(esc&&esc.rev),
+              steer: esc ? esc.steer : aiSteer(d, C, dt)}, dt);
   /* And then the barriers, which apply to them exactly as they do to you. */
 
   aiOffTrackWatch(d);
@@ -12763,6 +12870,27 @@ window.SIM={
   place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
                   PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
   speed(v){ carState.speed=v; },
+  /* Reverse, from the outside: whether the hold has armed it and what the
+     speed actually is, because the readout shows a magnitude. */
+  revState(){ return {hold:+(playerRevHold||0).toFixed(2), speed:+carState.speed.toFixed(2),
+                      surf:PLAYER.surf?{grass:!!PLAYER.surf.grass,loose:!!PLAYER.surf.loose,
+                                        ok:!!PLAYER.surf.ok}:null,
+                      n:+carState.n.toFixed(2), gridded:startPhase!=='go'}; },
+  /* The stuck ladder, from the outside: how many attempts a car has made,
+     whether it is mid-recovery, and whether it has been shown the flag. */
+  aiStuck(){ return AIS.map(d=>({name:d.name, on:!!d.on, tries:d.tries||0,
+                                 stuck:+(d.stuckT||0).toFixed(1),
+                                 phase:d.rescue?d.rescue.phase:null,
+                                 flip:d.rescue?d.rescue.flip:0,
+                                 dsq:!!d.dsq, why:d.dsqWhy||null,
+                                 hold:!!d.hold, react:+(d.react||0).toFixed(2),
+                                 pin:!!d._pinTest,
+                                 kph:d.car?+(Math.abs(d.car.st.speed)*3.6).toFixed(1):null})); },
+  /* Wedge one, to prove the ladder runs. */
+  aiPin(i,on){ const d=AIS[i]; if(!d) return false;
+    d._pinTest=!!on;
+    if(on){ d.hold=false; d.react=0; }   // released, then wedged
+    return true; },
   hold(k,on){ keys[k]=!!on; },
   mark(edge, pts){          // drop points on an edge, as the mouse would
     tleLines[edge]=pts.map(m=>editModelToWorld(m));
