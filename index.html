@@ -1114,19 +1114,11 @@ if('serviceWorker' in navigator){
   </header>
 
   <div id="home-settings">
-    <button class="cog" id="home-settings-toggle" aria-label="Settings" aria-expanded="false">
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <!-- Drawn, not fetched: eight teeth on a ring, so it reads as a cog at
-             16 px and still has an edge to catch the light when it turns. -->
-        <path d="M12 2.6l1.5 2.1 2.5-.6.4 2.5 2.3 1.1-1.1 2.3 1.6 2-2 1.6.2 2.5-2.6.1-1.2 2.3-2.2-1.3-2.2 1.3-1.2-2.3-2.6-.1.2-2.5-2-1.6 1.6-2-1.1-2.3 2.3-1.1.4-2.5 2.5.6z"
-              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      </svg>
-    </button>
+    <button class="cog" id="home-settings-toggle" aria-label="Open settings" aria-expanded="false">Settings</button>
     <div class="settings-menu">
       <div class="menu-kicker">Session settings</div>
       <div class="settings-item" id="home-controls-item">
-        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="true">Controls</button>
+        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="false">Controls &rsaquo;</button>
         <div class="limit-dropdown" id="home-controls-dropdown">
           <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
           <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
