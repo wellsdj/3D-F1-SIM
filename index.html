@@ -1223,8 +1223,6 @@ if('serviceWorker' in navigator){
   <footer class="apex-footer">
     <p id="bootmsg">System ready // Spa 2022</p>
     <div id="bar"><i></i></div>
-    <div class="apex-motto">Racing unites us</div>
-    <div class="apex-fhf"><span>Faster</span><span>Higher</span><span>Further</span></div>
   </footer>
 
   <!-- Kept because scripts elsewhere still reach for these by id. Hidden. -->
@@ -1357,22 +1355,22 @@ if('serviceWorker' in navigator){
 
 <section id="customizer" aria-hidden="true">
   <div id="customizer-stage"></div>
-  <button class="overlay-close" id="customizer-close" aria-label="Close car customiser">×</button>
-  <div class="custom-copy">
-    <div class="overlay-kicker">Garage 01 · Live spec</div>
-    <h2>Build your <em>line.</em></h2>
-    <p class="custom-intro">Turn the car slowly. Set the body, halo / roll hoop, wing core, and wheel finishes before qualifying.</p>
+  <button class="overlay-close" id="customizer-close" aria-label="Close livery">&times;</button>
+  <div class="livery-panel">
+    <div class="lv-tag">Garage 01 <i>///</i></div>
+    <h2>Livery<em>Build your line</em></h2>
+    <p class="lv-note">Four surfaces. Pick a colour or set your own — it saves as you go
+      and carries into your next run.</p>
+    <div class="lv-groups">
+      <div class="style-group"><label>Body <span id="style-body-value">Obsidian</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#111418" aria-label="Body colour"></div></div>
+      <div class="style-group"><label>Halo / roll hoop <span id="style-ring-value">Black</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#15171b" aria-label="Halo colour"></div></div>
+      <div class="style-group"><label>Wing core <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b" aria-label="Wing colour"></div></div>
+      <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd" aria-label="Rim colour"></div></div>
+    </div>
+    <button id="custom-next" type="button">Take it to the season <i>&rsaquo;</i></button>
+    <button id="custom-back" type="button">&lsaquo; Back to the season</button>
   </div>
-  <div class="custom-controls">
-    <div class="style-group"><label>Body <span id="style-body-value">Obsidian</span></label><div class="style-row"><div class="style-swatches" data-style="body"></div><input type="color" data-style-picker="body" value="#111418"></div></div>
-    <div class="style-group"><label>Halo / roll hoop <span id="style-ring-value">Black</span></label><div class="style-row"><div class="style-swatches" data-style="ring"></div><input type="color" data-style-picker="ring" value="#15171b"></div></div>
-    <div class="style-group"><label>Wing core / carbon <span id="style-wing-value">Carbon</span></label><div class="style-row"><div class="style-swatches" data-style="wing"></div><input type="color" data-style-picker="wing" value="#15171b"></div></div>
-    <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd"></div></div>
-    <p class="custom-note">Changes save automatically and carry into your next run.</p>
-    <button id="custom-next" type="button">Next &mdash; take it to the season &nearr;</button>
-    <button id="custom-back" type="button">&larr; Back to the season</button>
-  </div>
-  <div class="custom-tag">McLaren MCL39 · Qualifying trim</div>
+  <div class="custom-tag">Drag to turn &middot; changes save as you go</div>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -3862,6 +3860,9 @@ const carGroup=new THREE.Group(); scene.add(carGroup);
 const wheels=[];
 let carObj=null, wheelR=0.357, steer=null, wingL=null, wingR=null;
 let customSpin=true, customDragging=false, customLastX=0;
+/* Three-quarters on to the nose: straight on hides the shape, side on hides
+   the front wing and the halo. */
+const CUSTOM_POSE=Math.PI*0.78;
 let customizerOn=false, customizerAngle=0, pendingReplay=false, podiumRoot=null;
 const CUSTOM_BG=new THREE.Color(0x05070b);   // the garage's own black
 const customizerStage=new THREE.Group();
@@ -13832,7 +13833,10 @@ function openCustomizer(){
      Outside one it is somewhere you go to look at the car, and the cross is
      the only way out it needs. */
   document.body.classList.toggle('career-build', !!(typeof CAREER!=='undefined' && CAREER.active));
-  customizerOn=true; customizerAngle=0; customizerStage.visible=true;
+  /* Held still, looking at the nose. It used to turn slowly on its own, which
+     made picking a colour a moving target -- you want to see the change, not
+     chase it. Drag still works if you want another angle. */
+  customizerOn=true; customSpin=false; customizerAngle=CUSTOM_POSE; customizerStage.visible=true;
   resetCustomizerPose();
   const el=document.getElementById('customizer'); if(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
   bootEl.classList.add('gone');
@@ -14773,39 +14777,42 @@ function apexPaintSlots(){
   const row=(icon,text)=>'<div class="crow">'+APEX_ICON[icon]+'<span>'+text+'</span></div>';
 
   host.innerHTML=
-   '<div class="ccard'+(used?' live':' fresh')+'">'
-  +'<div class="ctag">'+(used?'Your career':'New career')+'<i>///</i></div>'
-  +'<h2>'+(used?'Continue':'New career')+'</h2>'
-  +'<div class="csub">'+(used?'Season '+(c.season||1):'Start your journey')+'</div>'
+  /* The whole card is the control, not just the strip at the bottom. Clicking
+     the plus and clicking the button were two different things before, which
+     is not how a card that size reads. */
+   '<button type="button" class="ccard'+(used?' live':' fresh')+'">'
+  +'<span class="cglitch" aria-hidden="true"></span>'
+  +'<span class="ctag">'+(used?'Your career':'No career yet')+'<i>///</i></span>'
+  +'<span class="ch2">'+(used?'Continue':'Start a career')+'</span>'
+  +'<span class="csub">'+(used?'Season '+(c.season||1):'Name a team and go racing')+'</span>'
   +(used
-     ? '<div class="cpct"><b>'+pct+'%</b><span><i style="width:'+pct+'%"></i></span></div>'
+     ? '<span class="cpct"><b>'+pct+'%</b><span><i style="width:'+pct+'%"></i></span></span>'
        +row('helmetSm', apexEsc(c.team||'Driver')+' · driver career')
        +row('chequer','Season '+(c.season||1)+' · Round '+round+' of '+rounds)
        +row('gauge',(c.points||0)+' pts · '+(c.coins||0).toLocaleString()+' credits')
-     : '<div class="cplus" aria-hidden="true">+</div>')
-  +'<button type="button" class="cgo">'+(used?'Continue':'Create a new save')+'</button>'
-  +'</div>'
-  /* The one save is the only save, so erasing is the way to a new team. It is
-     said out loud here rather than tucked into a corner of the card. */
+     : '<span class="cplus" aria-hidden="true">+</span>')
+  +'<span class="cgo">'+(used?'Continue':'Begin')+'</span>'
+  +'</button>'
   +(used
      ? '<div class="ccard ghost">'
-       +'<div class="ctag">Start again<i>///</i></div>'
-       +'<h2>Erase</h2>'
-       +'<div class="csub">One career at a time</div>'
+       +'<span class="cglitch" aria-hidden="true"></span>'
+       +'<span class="ctag">Start again<i>///</i></span>'
+       +'<span class="ch2">Erase</span>'
+       +'<span class="csub">One career at a time</span>'
        +'<p class="cnote">A career is a single save. Erasing '+apexEsc(c.team||'it')
        +' frees the slot for a new team — there is no undo.</p>'
        +'<button type="button" class="cgo danger">Erase this career</button>'
        +'</div>'
      : '');
 
-  host.querySelector('.ccard .cgo').onclick=()=>{ CAREER_AT=0; careerOpen(); };
+  host.querySelector('.ccard').onclick=()=>{ used ? (CAREER_AT=0, careerOpen()) : apexNewCareer(); };
   const del=host.querySelector('.cgo.danger');
   if(del){
     let armed=false, t=0;
-    del.onclick=()=>{
+    del.onclick=e=>{
+      e.stopPropagation();
       if(!armed){
-        armed=true; del.classList.add('armed');
-        del.textContent='Press again to erase';
+        armed=true; del.classList.add('armed'); del.textContent='Press again to erase';
         clearTimeout(t); t=setTimeout(()=>{ armed=false; del.classList.remove('armed');
           del.textContent='Erase this career'; },4000);
         return;
@@ -14817,50 +14824,122 @@ function apexPaintSlots(){
   }
 }
 
-/* ----------------------------------------------------------------- garage */
+/* Naming a new team, in the same window rather than the old overlay. */
+function apexNewCareer(){
+  let el=document.getElementById('apex-new');
+  if(!el){ el=document.createElement('div'); el.id='apex-new'; document.body.appendChild(el); }
+  el.innerHTML=
+   '<div class="newwrap">'
+  +'<span class="cglitch" aria-hidden="true"></span>'
+  +'<button type="button" class="fullx" aria-label="Close">&times;</button>'
+  +'<div class="ctag">New career<i>///</i></div>'
+  +'<h2 class="newh">Name your <em>team</em></h2>'
+  +'<p class="newnote">Eight rounds, nine rivals and a car you build yourself. '
+  +'The name goes on the car and on the timing screens.</p>'
+  +'<input id="apex-newname" type="text" maxlength="18" placeholder="Northgate" '
+  +'autocomplete="off" spellcheck="false" aria-label="Team name">'
+  +'<div class="newerr" id="apex-newerr"></div>'
+  +'<button type="button" class="newgo" id="apex-newgo">Start the season <i>&rsaquo;</i></button>'
+  +'</div>';
+  el.classList.add('on');
+  const input=el.querySelector('#apex-newname');
+  const err=el.querySelector('#apex-newerr');
+  const close=()=>el.classList.remove('on');
+  el.querySelector('.fullx').onclick=close;
+  el.onclick=e=>{ if(e.target===el) close(); };
+  const begin=()=>{
+    const name=(input.value||'').trim();
+    if(name.length<2){ err.textContent='Give the team a name first.'; input.focus(); return; }
+    /* Straight into the season with the name set, rather than handing off to
+       the old save-picker that only existed to choose between three slots. */
+    const c=CAREER_BLANK();
+    c.used=true; c.team=name; c.table=careerNewTable();
+    CAREER_SLOTS[0]=c; CAREER_AT=0; careerSave();
+    close();
+    apexPaintSlots(); apexPaintHome(); apexDriverBadge();
+    careerOpen();
+  };
+  el.querySelector('#apex-newgo').onclick=begin;
+  input.onkeydown=e=>{ if(e.key==='Enter') begin();
+                       if(e.key==='Escape') close(); };
+  setTimeout(()=>input.focus(),60);
+}
+
+/* One tile. Paint, aero and power were three doors to things that either live
+   in the livery editor anyway or belong in the season shop -- the garage is
+   about what the car looks like. */
 const APEX_TILES=[
   {k:'livery', icon:'livery', name:'Livery',  meta:'Change design'},
-  {k:'paint',  icon:'paint',  name:'Paint',   meta:'Colours & finish'},
-  {k:'aero',   icon:'wing',   name:'Aero',    meta:'Wings & parts'},
-  {k:'power',  icon:'gauge',  name:'Power',   meta:'Engine & drive'},
 ];
+
+/* The car, from the side, in your colours. Not a photograph and not the 3D
+   model -- a drawing that takes the four colours you actually chose, so the
+   panel shows your car rather than a car. */
+function apexCarSide(st){
+  const body=(st&&st.body)||'#c8102e', wing=(st&&st.wing)||'#15171b',
+        ring=(st&&st.ring)||'#15171b', rims=(st&&st.rims)||'#b6babd';
+  /* Laid out on a 300x92 grid: the ground is y=74, both wheels are r=22 with
+     their centres on y=52 so they sit on it, and the body is drawn between
+     them -- rear wing at the left, nose and front wing at the right. */
+  return '<svg class="gcar" viewBox="0 0 300 92" aria-hidden="true">'
+   +'<defs><linearGradient id="gcarG" x1="0" y1="0" x2="0" y2="1">'
+   +'<stop offset="0" stop-color="#fff" stop-opacity=".22"/>'
+   +'<stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>'
+   /* rear wing */
+   +'<path d="M30 15h44v8H30z" fill="'+wing+'"/>'
+   +'<path d="M32 15v20M72 15v20" stroke="'+wing+'" stroke-width="4" stroke-linecap="round"/>'
+   +'<path d="M52 23v20" stroke="'+wing+'" stroke-width="5"/>'
+   /* floor */
+   +'<path d="M46 66h226" stroke="'+wing+'" stroke-width="5" stroke-linecap="round"/>'
+   /* front wing */
+   +'<path d="M246 62h46v7h-46z" fill="'+wing+'"/>'
+   +'<path d="M290 56v14" stroke="'+wing+'" stroke-width="4.5" stroke-linecap="round"/>'
+   /* the car */
+   +'<path fill="'+body+'" d="M46 66V54c0-7 6-11 18-12l40-2c4-10 12-14 22-14h26'
+   +'c10 0 16 5 18 13l44 3c30 2 48 8 54 16l4 8Z"/>'
+   /* highlight along the top */
+   +'<path fill="url(#gcarG)" d="M46 66V54c0-7 6-11 18-12l40-2c4-10 12-14 22-14h26'
+   +'c10 0 16 5 18 13l44 3c30 2 48 8 54 16l4 8Z"/>'
+   /* sidepod inlet */
+   +'<path fill="rgba(0,0,0,.42)" d="M96 44h22v12H96z"/>'
+   /* cockpit */
+   +'<ellipse cx="146" cy="32" rx="15" ry="6" fill="rgba(0,0,0,.55)"/>'
+   /* halo */
+   +'<path fill="none" stroke="'+ring+'" stroke-width="5" stroke-linecap="round"'
+   +' d="M124 34c3-11 11-16 22-16s19 5 22 16"/>'
+   +'<path stroke="'+ring+'" stroke-width="4" stroke-linecap="round" d="M168 22l6 12"/>'
+   /* wheels */
+   +'<circle cx="66" cy="52" r="22" fill="#0b0b0d"/>'
+   +'<circle cx="66" cy="52" r="9.5" fill="'+rims+'"/>'
+   +'<circle cx="66" cy="52" r="4" fill="rgba(0,0,0,.5)"/>'
+   +'<circle cx="228" cy="52" r="22" fill="#0b0b0d"/>'
+   +'<circle cx="228" cy="52" r="9.5" fill="'+rims+'"/>'
+   +'<circle cx="228" cy="52" r="4" fill="rgba(0,0,0,.5)"/>'
+   +'</svg>';
+}
+
 function apexPaintGarage(){
   const tiles=document.getElementById('apex-gtiles');
   const setup=document.getElementById('apex-gsetup');
   if(!tiles||!setup) return;
   const c=apexCareer();
-  tiles.innerHTML=APEX_TILES.map((t,i)=>
-     '<button type="button" class="gtile'+(i===0?' on':'')+'" data-k="'+t.k+'">'
+  tiles.innerHTML=APEX_TILES.map(t=>
+     '<button type="button" class="gtile on" data-k="'+t.k+'">'
     +'<i class="gmark">///</i>'+APEX_ICON[t.icon]
     +'<b>'+t.name+'</b><span>'+t.meta+'</span></button>').join('');
   Array.prototype.forEach.call(tiles.querySelectorAll('.gtile'),b=>{
-    b.onclick=()=>{
-      Array.prototype.forEach.call(tiles.querySelectorAll('.gtile'),x=>x.classList.remove('on'));
-      b.classList.add('on');
-      /* Livery and paint are the customiser -- the real car, in 3D, that you
-         can turn. Aero and power are things you buy, so they go to the shop. */
-      if(b.dataset.k==='aero'||b.dataset.k==='power'){
-        if(c){ CAREER_AT=0; careerOpen(); if(typeof careerPage==='function') setTimeout(()=>careerPage('shop'),80); }
-        else apexShow('career');
-      } else openCustomizer();
-    };
+    b.onclick=()=>openCustomizer();
   });
 
-  /* Numbers you actually have: pace from the parts fitted, grip from aero. */
-  const pw=c?(c.power||0):0, ae=c?(c.aero||0):0;
-  const bar=(label,v)=>'<div class="grow"><span>'+label+'</span>'
-    +'<i><b style="width:'+v+'%"></b></i><em>'+Math.round(v)+'</em></div>';
-  const style=(typeof carStyle!=='undefined')?carStyle:{body:'#c8102e'};
+  const style=(typeof carStyle!=='undefined')?carStyle:null;
   setup.innerHTML=
    '<div class="hlabel">Current setup</div>'
-  +'<div class="gchip"><span class="gswatch" style="background:'+(style.body||'#c8102e')+'"></span>'
-  +'<span class="gname"><b>'+apexEsc(c?(c.team||'Custom livery'):'Custom livery')+'</b>'
-  +'<i>'+(c?('Season '+(c.season||1)):'No career')+'</i></span></div>'
-  +bar('Speed',      60+pw*8)
-  +bar('Downforce',  58+ae*8)
-  +bar('Handling',   55+(pw+ae)*4)
-  +'<button type="button" class="gfull">Open the garage <i>&rsaquo;</i></button>';
-  setup.querySelector('.gfull').onclick=openCustomizer;
+  +'<div class="gchip"><span class="gname"><b>'
+  +apexEsc(c?(c.team||'Custom livery'):'Custom livery')+'</b>'
+  +'<i>'+(c?('Season '+(c.season||1)):'Livery 01')+'</i></span></div>'
+  +apexCarSide(style)
+  +'<button type="button" class="gfull">Open the livery <i>&rsaquo;</i></button>';
+  setup.querySelector('.gfull').onclick=()=>openCustomizer();
 }
 
 /* ------------------------------------------------------------------- race */
@@ -15015,7 +15094,7 @@ function apexPaintHome(){
   +'<div class="hfoot">Season '+(c.season||1)+'<em>'
   +(pos===1?'Leading the championship':pos<=3?'Fighting for more':'Climbing the order')
   +'</em></div>'
-  +'<span class="hhelm" aria-hidden="true">'+APEX_ICON.helmet+'</span>'
+  +'<span class="hhelm" aria-hidden="true"></span>'
   +'</div>'
   /* 2 -- how far through */
   +'<div class="hcard hprog">'
@@ -15127,7 +15206,8 @@ document.getElementById('bestlapsbtn').innerHTML='<small>02 / YOUR RECORDS</smal
 document.getElementById('netbtn').innerHTML='<small>03 / GET CONNECTED</small><b>Controller ↗</b><span>PS5 & Xbox · ready when you are.</span>';
 document.getElementById('customize-home').innerHTML='<small>04 / THE GARAGE</small><b>Your car ↗</b><span>A livery that is unmistakably yours.</span>';
 home.appendChild(document.getElementById('customize-home'));
-home.insertAdjacentHTML('beforeend','<footer class="apex-footer"><span><i></i> READY TO RACE</span><span>SPA, BELGIUM <b>50.4372° N / 5.9714° E</b></span><span>PRECISION. COMMITMENT. LEGACY.</span></footer>');
+/* No strapline footer. It was three lines of tiny text saying nothing you
+   needed, over the top of the picture. */
 /* The front page, brought up to date after a career changes. It used to write
    into #home-career-hero, a button the old injected header made; that element
    is gone, and calling .innerHTML on null throws -- which would have taken out

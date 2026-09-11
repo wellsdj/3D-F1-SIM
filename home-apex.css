@@ -904,3 +904,222 @@
 }
 .lap-slot .watch:hover{background:rgba(255,31,45,.28);border-color:var(--apex-red);color:#fff}
 .lap-slot .watch.off{border-color:transparent;color:var(--apex-faint);cursor:default}
+
+/* ==========================================================================
+   SECOND PASS — cut corners, a real helmet, the livery window
+   ========================================================================== */
+
+/* Slanted corners. clip-path rather than a rotated overlay, so the cut is on
+   the element itself and the border, background and glow all follow it. */
+.hcard,.ccard,.gtile,.gsetup,.rbox,.rcard,.sbox,.lap-slot,
+#apex-full .fullwrap,#apex-new .newwrap{
+  clip-path:polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+/* A clipped element cannot also draw a 1px border on the cut edges, so the
+   frame becomes a lining drawn just inside it. */
+.hcard,.ccard,.gtile,.gsetup,.rbox,.rcard,.sbox,.lap-slot{
+  border:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.13);
+}
+.hcard.hpos{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 40px -12px rgba(255,31,45,.6)}
+.ccard.live{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 44px -14px rgba(255,31,45,.65)}
+.gtile.on{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 38px -14px rgba(255,31,45,.7)}
+.rcard{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 44px -16px rgba(255,31,45,.7)}
+.lap-slot:first-child{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 38px -14px rgba(255,31,45,.65)}
+.gtile:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.32)}
+.gtile.on:hover{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 46px -12px rgba(255,31,45,.85)}
+
+/* The helmet is the picture now, bled off the right edge of the card. */
+.hhelm{
+  position:absolute;right:-6%;top:50%;transform:translateY(-50%);
+  width:62%;height:112%;pointer-events:none;
+  background:url('assets/home/helmet-red.webp') center right/contain no-repeat;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 26%,#000 100%);
+  mask-image:linear-gradient(90deg,transparent,#000 26%,#000 100%);
+  opacity:.9;
+}
+/* Lift the text above the picture -- but not the picture itself: this rule is
+   more specific than .hhelm, so it was resetting it to position:relative and
+   collapsing it to nothing. */
+.hcard.hpos>*:not(.hhelm){position:relative;z-index:1}
+
+/* The torn red corner, on the cards that start something. */
+.cglitch{
+  position:absolute;right:0;top:0;width:104px;height:74px;pointer-events:none;z-index:0;
+  background:
+    linear-gradient(90deg,transparent 0 42%,var(--apex-red) 42% 58%,transparent 58%) 0 12px/100% 2px no-repeat,
+    linear-gradient(90deg,transparent 0 24%,var(--apex-red) 24% 76%,transparent 76%) 0 19px/100% 3px no-repeat,
+    linear-gradient(90deg,transparent 0 58%,var(--apex-red) 58% 88%,transparent 88%) 0 27px/100% 2px no-repeat,
+    linear-gradient(90deg,transparent 0 36%,rgba(255,31,45,.5) 36% 66%,transparent 66%) 0 34px/100% 4px no-repeat,
+    linear-gradient(90deg,transparent 0 70%,rgba(255,31,45,.34) 70% 94%,transparent 94%) 0 44px/100% 2px no-repeat;
+  opacity:.85;animation:glitchShift 3.4s steps(4,end) infinite;
+}
+@keyframes glitchShift{
+  0%,100%{transform:translateX(0)}
+  25%{transform:translateX(-5px)} 50%{transform:translateX(3px)} 75%{transform:translateX(-2px)}
+}
+.ccard.live .cglitch,.ccard.fresh .cglitch{opacity:1}
+
+/* The career card is one button now. */
+.ccard{
+  width:100%;text-align:left;cursor:pointer;background:linear-gradient(150deg,rgba(14,11,16,.9),rgba(10,8,12,.66));
+  transition:transform .2s ease,box-shadow .2s ease;
+}
+.ccard.ghost{cursor:default}
+.ccard.fresh:hover,.ccard.live:hover{transform:translateY(-3px)}
+.ccard.fresh:hover{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 40px -14px rgba(255,31,45,.7)}
+.ch2{display:block;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(24px,2.3vw,34px);text-transform:uppercase;color:#fff;line-height:1}
+.ctag{position:relative;z-index:1}
+.cplus{display:grid;place-items:center;min-height:86px;font-size:46px;color:var(--apex-faint);
+  font-weight:200;line-height:1;transition:color .2s}
+.ccard.fresh:hover .cplus{color:var(--apex-red)}
+.ccard>.cgo{display:block;text-align:center}
+
+/* ------------------------------------------------------- the livery window */
+/* No wash over the whole overlay: the car is drawn by the main renderer, in
+   the canvas *behind* this element, so anything opaque here hides it. The
+   panel brings its own ground and the left side stays clear glass. */
+#customizer.open{background:linear-gradient(90deg,rgba(4,3,5,.72) 0%,rgba(4,3,5,.28) 34%,rgba(4,3,5,0) 62%)}
+.livery-panel{
+  position:absolute;right:clamp(20px,3vw,54px);top:50%;transform:translateY(-50%);
+  width:min(37vw,420px);padding:22px 24px 24px;z-index:3;
+  background:linear-gradient(150deg,rgba(14,11,16,.95),rgba(9,7,11,.82));
+  backdrop-filter:blur(9px);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 40px 90px -40px rgba(0,0,0,.95);
+  clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);
+  display:flex;flex-direction:column;gap:12px;
+  font-family:var(--apex-mono);
+}
+.lv-tag{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.3em;
+  text-transform:uppercase;color:var(--apex-dim)}
+.lv-tag i{font-style:normal;color:var(--apex-red)}
+.livery-panel h2{
+  margin:0;font-family:var(--apex-display);font-style:italic;font-size:clamp(28px,2.7vw,40px);
+  line-height:.92;text-transform:uppercase;color:#fff;
+}
+#customizer .livery-panel h2 em{display:block;font-size:.42em;color:var(--apex-red);
+  font-style:italic;margin-top:4px;letter-spacing:-.01em}
+.lv-note{margin:0;font-size:11px;line-height:1.7;color:var(--apex-dim);letter-spacing:.02em}
+.lv-groups{display:flex;flex-direction:column;gap:11px;margin-top:2px}
+.livery-panel .style-group label{
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;
+  font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-dim);
+}
+.livery-panel .style-group label span{color:#fff;letter-spacing:.08em}
+.livery-panel .style-row{display:flex;align-items:center;gap:9px}
+.livery-panel .style-swatches{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.livery-panel .style-swatches button{
+  width:22px;height:22px;border:0;cursor:pointer;padding:0;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.28);
+  transition:transform .16s,box-shadow .16s;
+}
+.livery-panel .style-swatches button:hover{transform:translateY(-2px)}
+.livery-panel .style-swatches button[aria-pressed="true"]{
+  box-shadow:inset 0 0 0 1px #fff,0 0 0 2px var(--apex-red);
+}
+.livery-panel input[type="color"]{
+  width:30px;height:24px;padding:0;border:0;background:none;cursor:pointer;flex:0 0 auto;
+}
+#custom-next,#custom-back{
+  width:100%;cursor:pointer;font-family:var(--apex-mono);text-transform:uppercase;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+}
+#custom-next{
+  margin-top:6px;padding:14px 16px;border:0;
+  background:linear-gradient(100deg,rgba(140,14,24,.94),rgba(255,31,45,.72));
+  box-shadow:0 0 44px -16px rgba(255,31,45,.95);
+  font-size:11px;letter-spacing:.24em;color:#fff;
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+}
+#custom-next:hover{background:linear-gradient(100deg,rgba(170,16,28,.96),rgba(255,60,70,.86))}
+#custom-back{
+  padding:9px 10px;border:0;background:none;color:var(--apex-dim);
+  font-size:9.5px;letter-spacing:.22em;
+}
+#custom-back:hover{color:#fff}
+#customizer .custom-tag{
+  position:absolute;left:clamp(20px,3vw,54px);bottom:clamp(20px,3vh,40px);z-index:3;
+  font-family:var(--apex-mono);font-size:9px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--apex-faint);
+}
+#customizer .overlay-close{z-index:4}
+
+/* ----------------------------------------------------- the new-career window */
+#apex-new{position:fixed;inset:0;z-index:42;display:none;place-items:center;
+  background:rgba(4,3,5,.88);backdrop-filter:blur(8px)}
+#apex-new.on{display:grid}
+#apex-new .newwrap{
+  position:relative;width:min(440px,90vw);padding:26px 28px 28px;
+  display:flex;flex-direction:column;gap:12px;
+  background:linear-gradient(150deg,rgba(16,12,18,.97),rgba(10,8,12,.9));
+  box-shadow:inset 0 0 0 1px var(--apex-red),0 40px 90px -40px rgba(0,0,0,.95);
+  font-family:var(--apex-mono);
+  animation:cardIn .4s cubic-bezier(.16,1,.3,1) both;
+}
+#apex-new .fullx{position:absolute;right:12px;top:8px;background:none;border:0;color:var(--apex-dim);
+  font-size:22px;cursor:pointer;line-height:1;z-index:2}
+#apex-new .fullx:hover{color:#fff}
+.newh{margin:0;font-family:var(--apex-display);font-style:italic;font-size:clamp(26px,2.6vw,38px);
+  line-height:.95;text-transform:uppercase;color:#fff;position:relative;z-index:1}
+.newh em{font-style:italic;color:var(--apex-red)}
+.newnote{margin:0;font-size:11.5px;line-height:1.7;color:var(--apex-dim);letter-spacing:.02em}
+#apex-newname{
+  width:100%;padding:13px 14px;border:0;background:rgba(0,0,0,.5);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);
+  font-family:var(--apex-display);font-style:italic;font-size:22px;letter-spacing:.01em;
+  text-transform:uppercase;color:#fff;outline:none;
+}
+#apex-newname::placeholder{color:rgba(244,246,249,.22)}
+#apex-newname:focus{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 30px -12px rgba(255,31,45,.9)}
+.newerr{min-height:13px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--apex-red-hot)}
+.newgo{
+  padding:14px 16px;border:0;cursor:pointer;
+  background:linear-gradient(100deg,rgba(140,14,24,.94),rgba(255,31,45,.72));
+  box-shadow:0 0 44px -16px rgba(255,31,45,.95);
+  font-family:var(--apex-mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+}
+.newgo:hover{background:linear-gradient(100deg,rgba(170,16,28,.96),rgba(255,60,70,.86))}
+
+/* ------------------------------------------------ garage: one tile, one car */
+.gtiles{grid-template-columns:minmax(220px,300px)}
+.gcar{width:100%;height:auto;margin:4px 0 2px;
+  filter:drop-shadow(0 12px 24px rgba(0,0,0,.6))}
+.gsetup{gap:6px}
+
+@media (prefers-reduced-motion:reduce){ .cglitch{animation:none} }
+@media (max-width:1180px){
+  .livery-panel{position:static;transform:none;width:auto;margin:0 auto}
+}
+
+/* The helmet is a dark shape with a red rim on a black ground, so it vanishes
+   against a dark red card. Screened, the black drops out and only the light
+   is left -- which is the part of the picture you wanted. */
+.hhelm{
+  mix-blend-mode:screen;opacity:.95;
+  right:-10%;width:72%;height:128%;
+  background-size:cover;background-position:52% 50%;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 34%,#000 86%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 34%,#000 86%,transparent);
+}
+
+/* The livery window stands on its own: the menu behind it is not a backdrop
+   to read through. */
+body.customizer-open #boot{opacity:0;pointer-events:none}
+body.customizer-open #joybtn,
+body.customizer-open #netbtn{display:none}
+
+/* The torn corner sits inboard of the close button. */
+#apex-new .cglitch{right:30px;top:6px}
+
+/* A lit plate behind the car: the default livery is near-black, and a black
+   car on a black panel is an honest answer to the wrong question. */
+.gcar{
+  padding:10px 8px 6px;box-sizing:border-box;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 62%,transparent),
+    radial-gradient(ellipse 62% 40% at 50% 88%,rgba(255,31,45,.22),transparent 70%);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+  clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);
+}
