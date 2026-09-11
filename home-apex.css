@@ -258,47 +258,32 @@
   box-shadow:0 0 12px rgba(255,31,45,.9);transition:width .3s ease}
 
 /* ------------------------------------------------------- controller + cog */
-#home-settings{position:absolute;right:clamp(22px,4vw,64px);top:clamp(18px,2.4vw,30px);z-index:6}
-/* A cog, and it turns a quarter of a turn when you reach it. Not a
-   continuous spin: a thing that never stops moving is noise in the corner of
-   every screenshot, and the point of the motion is to acknowledge the pointer,
-   which one movement does better than perpetual rotation. */
-#home-settings .cog{
-  display:grid;place-items:center;width:40px;height:40px;padding:0;
-  background:none;border:0;color:var(--apex-dim);cursor:pointer;
-  transition:color .25s ease;
+/* THE COG IS ALREADY RIGHT, and the previous front door built it: a 66px
+   circle that rotates a quarter turn on hover and reveals the panel while the
+   pointer is anywhere inside it. That rule is still in the page and it works.
+
+   My first attempt rebuilt all of it -- a 40px square, my own hover-open, my
+   own rotation on the SVG -- which fought the original for the same elements,
+   squared off a round button, and left a 38px dead gap between the cog and a
+   menu still positioned for the old one. Crossing that gap dropped the hover
+   and shut the panel.
+
+   So this no longer restyles the button. It gives the icon a size, moves the
+   palette from amber to red, and stops. The rotation is the existing one on
+   the button, not a second one on the icon -- two would have made it 180. */
+#home-settings .cog svg{width:26px;height:26px;display:block}
+#home-settings .cog:hover,
+#home-settings.open .cog,
+#home-settings:focus-within .cog{
+  background:rgba(255,31,45,.16) !important;border-color:var(--apex-red) !important;
+  color:#fff;
 }
-#home-settings .cog svg{
-  width:21px;height:21px;display:block;
-  transition:transform .55s cubic-bezier(.16,1,.3,1);
-}
-#home-settings .cog:hover,#home-settings .cog:focus-visible{color:var(--apex-red);outline:none}
-#home-settings:hover .cog svg,#home-settings .cog:focus-visible svg{transform:rotate(90deg)}
-@media (prefers-reduced-motion:reduce){#home-settings .cog svg{transition:none}}
-#home-settings .settings-menu{
-  display:none;width:min(340px,calc(100vw - 48px));margin-top:9px;padding:15px;
-  background:rgba(8,7,9,.94);border:1px solid var(--apex-line);backdrop-filter:blur(12px);
-}
-/* Opens on hover as well as on click. The panel keeps its place in flow
-   directly under the cog, so nothing is repositioned -- and because it sits
-   inside #home-settings, the pointer never leaves the hover target on the way
-   down to it. :focus-within is the keyboard path; the click handler stays. */
-#home-settings:hover .settings-menu,
-#home-settings:focus-within .settings-menu,
-#home-settings.open .settings-menu{display:block}
-#home-settings .menu-kicker{font-size:8px;letter-spacing:.32em;text-transform:uppercase;
-  color:var(--apex-red);margin-bottom:11px}
-#home-settings .settings-toggle{
-  width:100%;text-align:left;background:none;border:0;color:var(--apex-ink);cursor:pointer;
-  font-family:var(--apex-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;padding:8px 0;
-}
-#home-settings .limit-dropdown{display:none;margin-top:9px}
-#home-settings .settings-item.open .limit-dropdown{display:grid;gap:7px}
+#home-settings .menu-kicker{color:var(--apex-red);opacity:1}
 #home-settings .ctrl-row{display:flex;align-items:center;gap:8px;font-size:9px;
   letter-spacing:.08em;color:var(--apex-dim)}
 #home-settings kbd{
   font-family:var(--apex-mono);font-size:8.5px;background:rgba(255,255,255,.09);
-  border:1px solid var(--apex-line);padding:3px 6px;color:var(--apex-ink);
+  border:1px solid var(--apex-line);padding:3px 6px;color:var(--apex-ink);border-radius:3px;
 }
 #home-settings .ctrl-note{opacity:.6}
 

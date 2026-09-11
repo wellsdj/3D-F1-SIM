@@ -356,17 +356,21 @@
      the frame loop and only ever laid out here */
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
-  #boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:flex-start;
-        justify-content:flex-start;gap:0;overflow-y:auto;padding:clamp(44px,6vw,86px) clamp(28px,8vw,132px);
-        background:linear-gradient(90deg,rgba(3,7,12,.98) 0%,rgba(3,7,12,.9) 24%,
-        rgba(3,7,12,.47) 55%,rgba(3,7,12,.15) 100%),
-        linear-gradient(180deg,rgba(3,7,12,.2),rgba(3,7,12,.76)),url('home-hero.png') center/cover;
-        color:var(--paper);font-family:var(--mono);z-index:9;transition:opacity .7s ease}
-  #boot:before{content:"";position:absolute;inset:20px;pointer-events:none;border:1px solid rgba(236,234,228,.09);
-               clip-path:polygon(0 0,38% 0,38% 1px,0 1px,0 100%,1px 100%,1px 0)}
-  #boot:after{content:"";position:absolute;left:0;right:0;top:0;height:3px;
-              background:linear-gradient(90deg,var(--amber),#ff5b28 34%,transparent 72%);opacity:.9}
-  #boot p{margin:0;font-size:10px;letter-spacing:.3em;text-transform:uppercase;opacity:.68}
+  /* The old front door's rules lived here and are gone. home-apex.css owns
+     #boot now, and leaving these behind was not harmless: a later stylesheet
+     only wins the properties it actually NAMES, so every declaration left
+     standing here kept applying underneath the new design.
+
+     Two of them were doing real damage. #boot:before set
+     clip-path:polygon(...1px...) -- an L-shaped hairline for a decorative
+     corner rule -- and the new rule never mentions clip-path, so the hero
+     image was loaded, cached, served with a 200, painted, and then clipped to
+     one pixel. That is the black screen. #boot:after set height:3px, which an
+     explicit height wins over inset:0, so the readability wash over the
+     picture was a three-pixel strip at the top.
+
+     Deleted rather than overridden one property at a time, because the next
+     property nobody thought of would have done the same thing again. */
   #homecopy{position:relative;z-index:1;max-width:560px;margin-bottom:24px}
   #homecopy .eyebrow{display:flex;align-items:center;gap:10px;color:#ffb020;font-size:10px;
                       letter-spacing:.28em;text-transform:uppercase;margin-bottom:18px}
@@ -846,7 +850,7 @@
   #customizer .custom-tag{position:absolute;z-index:1;right:clamp(24px,5vw,80px);bottom:clamp(28px,6vw,82px);font-size:9px;letter-spacing:.24em;text-transform:uppercase;opacity:.45}
   #customizer-stage{position:absolute;z-index:0;inset:0;pointer-events:none;background:radial-gradient(ellipse at 72% 55%,rgba(255,176,32,.08),transparent 33%),radial-gradient(ellipse at 72% 62%,rgba(21,95,150,.12),transparent 42%)}
 
-  @media (max-width:700px){#boot{padding:26px 22px 30px;justify-content:flex-end;background:linear-gradient(180deg,rgba(3,7,12,.18) 0%,rgba(3,7,12,.52) 33%,rgba(3,7,12,.97) 76%),url('home-hero.png') 64% center/cover}
+  @media (max-width:700px){
     #homecopy{margin-bottom:18px}#homecopy h1{font-size:clamp(38px,13vw,66px)}#homecopy p{font-size:9px}
     #homecopy .spec{font-size:8px;gap:12px}#pick button{padding:14px 48px 13px 16px}#bestlapsbtn{padding:13px 16px}
     #home-settings{right:18px;top:18px}#home-settings .cog{width:52px;height:52px;font-size:24px}#home-settings .settings-menu{top:62px;width:min(285px,calc(100vw - 36px))}
