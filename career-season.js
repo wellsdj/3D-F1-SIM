@@ -22,8 +22,44 @@ function migrate(c){
 }
 function event(c){const i=c.rounds===4?(c.round-1)*2:c.round-1;return {name:EVENTS[i]||'Season complete',lighting:CONDITIONS[i]||'midday',track:'Spa-Francorchamps',round:c.round};}
 function begin(c){migrate(c);if(c.round>c.rounds)return false;if(c.weekend.stage==='briefing')c.weekend.stage='practice';return true;}
+/* WHAT A PRACTICE LAP IS WORTH.
+   Turning up paid 250 credits and 50 UP for the first lap and nothing after
+   that, so practice was one installation lap and back to the garage. Pace pays
+   now, on a ladder that starts at 1:20 -- and only when you actually improve
+   on your own best of the weekend, so it rewards finding time rather than
+   circulating at the same speed until the tiers have been farmed. */
+const PRACTICE_TIERS=[[74,220],[76,150],[78,100],[80,60]];
+const CAREER_BEST_UP=200;
+/* The quickest valid lap this career has ever set, in any session, with one
+   instance of `exclude` skipped -- the lap being scored is already in the
+   ledger by the time this runs, and a lap cannot beat itself. */
+function bestEver(c,exclude){
+ let best=null,skipped=false;
+ for(const l of (c.laps||[])){
+  if(!l||!l.valid||!Number.isFinite(l.time))continue;
+  if(!skipped&&Math.abs(l.time-exclude)<1e-9){skipped=true;continue;}
+  if(best===null||l.time<best)best=l.time;
+ }
+ return best;
+}
 function lap(c,time){migrate(c);const w=c.weekend;if(!Number.isFinite(time)||time<=0||!['practice','qualifying'].includes(w.stage))return false;
- w[w.stage].push(time);if(w.stage==='practice'&&w.practice.length===1){c.coins+=250;c.upgradePoints+=50;w.practiceReward=250;}return true;}
+ w[w.stage].push(time);
+ if(w.stage!=='practice')return true;
+ const award={up:0,cr:0,best:false,tier:0,why:[]};
+ if(w.practice.length===1){c.coins+=250;award.cr=250;award.up+=50;award.why.push('Clean practice lap');w.practiceReward=250;}
+ /* Only an improvement pays. */
+ if(w.practiceBest===undefined||time<w.practiceBest){
+  w.practiceBest=time;
+  const tier=PRACTICE_TIERS.find(t=>time<t[0]);
+  if(tier){award.up+=tier[1];award.tier=tier[0];award.why.push('Under '+Math.floor(tier[0]/60)+':'+String(Math.round(tier[0]%60)).padStart(2,'0'));}
+  /* A career best needs something to have beaten: the first lap of a career
+     is not an achievement, it is the only data point. */
+  const prior=bestEver(c,time);
+  if(prior!==null&&time<prior){award.up+=CAREER_BEST_UP;award.best=true;award.why.push('Career best lap');}
+ }
+ if(award.up)c.upgradePoints+=award.up;
+ w.lastReward=award.up||award.cr?award:null;
+ return true;}
 function qualify(c){const w=c.weekend;const best=Math.min(...w.qualifying);const base=Math.min(...w.practice,126);
  // Rival lap times are simulated from the existing team pace, consistently for this weekend.
  const field=(c.table||[]).map((t,i)=>({ai:i,pace:t.pace,time:base*(1+(1-t.pace)*.16)+(c.difficulty-5)*-.6+((c.season*13+c.round*7+i*11)%17)/10}));
