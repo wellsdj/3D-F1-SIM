@@ -430,3 +430,97 @@
   display:block;
 }
 .lap-slot .watch.off:hover{background:none;border-color:var(--apex-line);color:var(--apex-faint)}
+
+/* ------------------------------------------------- the championship board */
+/* Sits where the two duplicate cards used to be. A standings table is data,
+   not navigation, so it earns the space rather than repeating the nav. */
+#apex-standings{max-width:560px}
+.apex-board{
+  border:1px solid var(--apex-line);
+  border-left:2px solid var(--apex-red);
+  background:linear-gradient(100deg,rgba(8,7,9,.86),rgba(8,7,9,.52));
+  backdrop-filter:blur(5px);
+  padding:6px 0 8px;
+  font-family:var(--apex-mono);
+  font-variant-numeric:tabular-nums;
+  animation:boardIn .5s cubic-bezier(.2,.7,.3,1) both;
+}
+@keyframes boardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.apex-board .brow{
+  display:grid;
+  grid-template-columns:34px 3px 1fr auto;
+  align-items:center;
+  gap:10px;
+  padding:5px 16px;
+  font-size:12.5px;
+  letter-spacing:.06em;
+  color:var(--apex-dim);
+}
+.apex-board .brow+.brow{border-top:1px solid rgba(255,255,255,.05)}
+.apex-board .bhead{
+  grid-template-columns:1fr auto auto;
+  gap:16px;
+  padding-bottom:9px;
+  margin-bottom:3px;
+  border-bottom:1px solid var(--apex-line);
+  color:var(--apex-faint);
+  font-size:10.5px;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+}
+.apex-board .bhead .bp{color:var(--apex-ink);letter-spacing:.26em}
+.apex-board .bp{color:var(--apex-faint)}
+.apex-board .bc{align-self:stretch;min-height:15px}      /* the car's colour */
+.apex-board .bn{
+  color:var(--apex-ink);
+  text-transform:uppercase;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.apex-board .bn em{font-style:normal;color:var(--apex-faint);letter-spacing:.18em;font-size:10px}
+.apex-board .bv{color:var(--apex-ink);font-weight:700}
+
+/* Your row, and only your row, is red -- currentColor feeds the stripe too. */
+.apex-board .brow.you{
+  color:var(--apex-red);
+  background:linear-gradient(90deg,rgba(255,31,45,.16),transparent 70%);
+}
+.apex-board .brow.you .bp,
+.apex-board .brow.you .bn,
+.apex-board .brow.you .bv{color:var(--apex-red-hot)}
+.apex-board .brow.you .bn em{color:rgba(255,90,82,.6)}
+
+.apex-board.empty{padding:18px 18px 16px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.apex-board.empty .bhead{
+  border:0;padding:0;margin:0;display:block;
+  color:var(--apex-faint);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+}
+.apex-board.empty p{margin:0;color:var(--apex-dim);font-size:13px;line-height:1.5;max-width:38ch}
+.apex-board.empty .bgo{
+  border:1px solid var(--apex-line);background:none;cursor:pointer;
+  color:var(--apex-red);font-family:var(--apex-mono);font-size:11px;
+  letter-spacing:.18em;text-transform:uppercase;padding:8px 14px;
+  transition:background .18s,border-color .18s;
+}
+.apex-board.empty .bgo:hover{background:rgba(255,31,45,.12);border-color:var(--apex-red)}
+
+/* -------------------------------------------------------- erasing a career */
+.apex-erase{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:18px}
+.apex-erase-btn{
+  border:1px solid var(--apex-line);background:none;cursor:pointer;
+  color:var(--apex-dim);font-family:var(--apex-mono);font-size:11px;
+  letter-spacing:.18em;text-transform:uppercase;padding:9px 15px;
+  transition:color .18s,border-color .18s,background .18s;
+}
+.apex-erase-btn:hover{color:var(--apex-ink);border-color:rgba(255,255,255,.3)}
+.apex-erase-btn.armed{
+  color:#fff;border-color:var(--apex-red);background:rgba(255,31,45,.22);
+  animation:erasePulse 1s ease-in-out infinite;
+}
+@keyframes erasePulse{50%{background:rgba(255,31,45,.34)}}
+.apex-erase-note{color:var(--apex-faint);font-family:var(--apex-mono);font-size:11px;line-height:1.6;max-width:46ch}
+@media (prefers-reduced-motion:reduce){
+  .apex-board{animation:none}
+  .apex-erase-btn.armed{animation:none}
+}

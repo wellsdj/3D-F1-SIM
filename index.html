@@ -1154,26 +1154,16 @@ if('serviceWorker' in navigator){
       <div class="apex-kicker">The next chapter is yours</div>
       <h1 class="apex-title" data-glitch="Built to race.">Built to race.<em>Born to win.</em></h1>
       <p class="apex-sub">From your first contract to the final chequered flag.</p>
-      <div class="apex-cards">
-        <button type="button" class="apex-card" data-go="career">
-          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
-          <span class="slot">01</span><span class="name" id="apex-careername">Career</span>
-          <span class="meta" id="apex-careermeta">Your team, your car, a championship</span>
-          <span class="go">Enter &rarr;</span>
-        </button>
-        <button type="button" class="apex-card" data-go="quick">
-          <span class="art" style="background-image:url('assets/career/pitlane-hero.png')"></span>
-          <span class="slot">02</span><span class="name">Quick race</span>
-          <span class="meta">Straight onto the circuit &middot; ten cars &middot; three laps</span>
-          <span class="go">Drive &rarr;</span>
-        </button>
-      </div>
+      <!-- Career and Race are both a word away in the nav; repeating them here
+           as cards was the same door twice. The space shows the championship
+           instead: where your season actually stands. -->
+      <div id="apex-standings"></div>
     </section>
 
     <section class="apex-panel" data-sec="career">
       <div class="apex-kicker">Your journey starts here</div>
       <h1 class="apex-title" data-glitch="Career"><em>Career</em></h1>
-      <p class="apex-sub">Three saves. Pick up where you left off, or start again.</p>
+      <p class="apex-sub">One career at a time. Pick up where you left off.</p>
       <div class="apex-cards" id="apex-slots"></div>
     </section>
 
@@ -13984,8 +13974,14 @@ const CAREER_POINTS=[25,18,15,12,10,8,6,4,2,1];
 const CAREER_BLANK=()=>({ used:false, team:'', coins:1000, round:1,
                           rounds:CAREER_ROUNDS, points:0, power:0, aero:0,
                           table:null, last:null });
-let CAREER_SLOTS=[CAREER_BLANK(),CAREER_BLANK(),CAREER_BLANK()];
-let CAREER_AT=0;                       // which slot is being played
+/* One career at a time. Three slots invited you to hedge -- start again the
+   moment a season went badly rather than race your way out of it -- and made
+   every screen that wanted to show "your" championship ask which one first.
+   Erasing is now the only way to start over, and it is a deliberate act.
+   Still an array: the stored shape does not change, so a save written by the
+   three-slot build still loads. */
+let CAREER_SLOTS=[CAREER_BLANK()];
+let CAREER_AT=0;                       // always the one
 const CAREER={ active:false };         // the slot in play, mirrored for the race
 
 function careerLoad(){
@@ -13993,8 +13989,13 @@ function careerLoad(){
     const raw=localStorage.getItem(CAREER_KEY);
     if(!raw) return;
     const a=JSON.parse(raw);
-    if(Array.isArray(a)) for(let i=0;i<3;i++)
-      if(a[i]) CAREER_SLOTS[i]=Object.assign(CAREER_BLANK(), a[i]);
+    if(!Array.isArray(a)) return;
+    /* Whichever career was actually being played is the one that survives:
+       the furthest-on save, so nobody who had three loses the real one. */
+    const keep=a.filter(c=>c&&c.used).sort((x,y)=>
+      (y.season||1)-(x.season||1) || (y.round||1)-(x.round||1) || (y.points||0)-(x.points||0))[0]
+      || a[0];
+    if(keep) CAREER_SLOTS[0]=Object.assign(CAREER_BLANK(), keep);
   }catch(e){}
 }
 function careerSave(){
@@ -14678,6 +14679,7 @@ function apexShow(sec){
   apexPanels.forEach(p=>p.classList.toggle('on',p.dataset.sec===sec));
   if(sec==='career') apexPaintSlots();
   if(sec==='replays') apexPaintLaps();
+  if(sec==='home') apexPaintStandings();
   /* The panel is what changed, so that is what a screen reader should land on. */
   const live=document.querySelector('.apex-panel.on .apex-title');
   if(live){ live.tabIndex=-1; }
@@ -14710,27 +14712,54 @@ document.addEventListener('keydown',e=>{
 function apexPaintSlots(){
   const host=document.getElementById('apex-slots');
   if(!host || typeof CAREER_SLOTS==='undefined') return;
+  const c=CAREER_SLOTS[0], used=!!c.used, rounds=c.rounds||8;
+  const pct=used?Math.round(Math.min(1,((c.round||1)-1)/rounds)*100):0;
   host.innerHTML='';
-  CAREER_SLOTS.forEach((c,i)=>{
-    const used=!!c.used;
-    const rounds=c.rounds||8;
-    const pct=used?Math.round(Math.min(1,((c.round||1)-1)/rounds)*100):0;
-    const b=document.createElement('button');
-    b.type='button'; b.className='apex-card';
-    b.innerHTML=
-       '<span class="art" style="background-image:url(\'assets/career/'
-      +(used?'driver-garage.png':'pitlane-hero.png')+'\')"></span>'
-      +'<span class="slot">Slot '+(i+1)+'</span>'
-      +'<span class="name">'+(used?apexEsc(c.team||'Continue'):'New career')+'</span>'
-      +(used?'<span class="bar"><i style="width:'+pct+'%"></i></span>':'')
-      +'<span class="meta">'
-      +(used ? 'Round '+Math.min(c.round||1,rounds)+' of '+rounds+' &middot; '+(c.points||0)+' pts'
-             : 'Start your journey')
-      +'</span>'
-      +'<span class="go">'+(used?'Continue &rarr;':'Create a save &rarr;')+'</span>';
-    b.onclick=()=>{ if(typeof CAREER_AT!=='undefined') CAREER_AT=i; careerOpen(); };
-    host.appendChild(b);
-  });
+  const b=document.createElement('button');
+  b.type='button'; b.className='apex-card';
+  b.innerHTML=
+     '<span class="art" style="background-image:url(\'assets/career/'
+    +(used?'driver-garage.png':'pitlane-hero.png')+'\')"></span>'
+    +'<span class="slot">'+(used?'Season '+(c.season||1):'New')+'</span>'
+    +'<span class="name">'+(used?apexEsc(c.team||'Continue'):'Start your career')+'</span>'
+    +(used?'<span class="bar"><i style="width:'+pct+'%"></i></span>':'')
+    +'<span class="meta">'
+    +(used ? 'Round '+Math.min(c.round||1,rounds)+' of '+rounds+' &middot; '+(c.points||0)
+             +' pts &middot; '+(c.coins||0).toLocaleString()+' credits'
+           : 'Name your team, build your car, race a championship')
+    +'</span>'
+    +'<span class="go">'+(used?'Continue &rarr;':'Begin &rarr;')+'</span>';
+  b.onclick=()=>{ CAREER_AT=0; careerOpen(); };
+  host.appendChild(b);
+
+  /* Erasing is the only way to a new career now, so it gets said plainly
+     rather than hidden in a corner of the card. Two presses, no modal --
+     the same shape as deleting a lap. */
+  if(used){
+    const wrap=document.createElement('div');
+    wrap.className='apex-erase';
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='apex-erase-btn';
+    btn.textContent='Erase this career';
+    let armed=false, t=0;
+    btn.onclick=()=>{
+      if(!armed){
+        armed=true; btn.classList.add('armed');
+        btn.textContent='Press again to erase '+(c.team||'this career');
+        clearTimeout(t); t=setTimeout(()=>{
+          armed=false; btn.classList.remove('armed'); btn.textContent='Erase this career'; },4000);
+        return;
+      }
+      clearTimeout(t);
+      CAREER_SLOTS[0]=CAREER_BLANK(); CAREER.active=false; careerSave();
+      apexPaintSlots(); apexPaintStandings();
+    };
+    wrap.appendChild(btn);
+    wrap.insertAdjacentHTML('beforeend',
+      '<span class="apex-erase-note">A career is a single save. Erasing it frees the slot '
+      +'for a new team &mdash; there is no undo.</span>');
+    host.appendChild(wrap);
+  }
 }
 /* THE TOP TEN, ON THE PAGE.
 
@@ -14785,6 +14814,41 @@ function replayGo(){
     setTimeout(replayStart, 260);
   }
   else startTrack('spa22');
+}
+/* The championship for the one career, straight from CareerSeason.standings --
+   the same table the season is scored against, not a second copy of it. Team
+   colours come from CAREER_TEAMS, so the stripe down each row is the car. */
+function apexPaintStandings(){
+  const host=document.getElementById('apex-standings');
+  if(!host) return;
+  const c=(typeof CAREER_SLOTS!=='undefined') && CAREER_SLOTS[0];
+  if(!c || !c.used || typeof CareerSeason==='undefined'){
+    host.innerHTML='<div class="apex-board empty">'
+      +'<span class="bhead">Championship</span>'
+      +'<p>No career yet. Name a team and the table starts filling in.</p>'
+      +'<button type="button" class="bgo" data-go="career">Start a career &rarr;</button>'
+      +'</div>';
+    const g=host.querySelector('.bgo'); if(g) g.onclick=()=>apexShow('career');
+    return;
+  }
+  let rows=[];
+  try{ rows=CareerSeason.standings(c)||[]; }catch(e){ rows=[]; }
+  const rounds=c.rounds||8, round=Math.min(c.round||1,rounds);
+  const colour=n=>{ const t=(typeof CAREER_TEAMS!=='undefined')
+                      && CAREER_TEAMS.find(x=>x.name===n);
+                    return t?t.body:'#e8402a'; };
+  host.innerHTML='<div class="apex-board">'
+    +'<div class="brow bhead"><span class="bp">Championship</span>'
+    +'<span class="bn">Season '+(c.season||1)+'</span>'
+    +'<span class="bv">Round '+round+' / '+rounds+'</span></div>'
+    +rows.map((r,i)=>
+       '<div class="brow'+(r.you?' you':'')+'">'
+      +'<span class="bp">'+String(i+1).padStart(2,'0')+'</span>'
+      +'<span class="bc" style="background:'+(r.you?'currentColor':colour(r.name))+'"></span>'
+      +'<span class="bn">'+apexEsc(r.name||'\u2014')+(r.you?' <em>you</em>':'')+'</span>'
+      +'<span class="bv">'+(r.points||0)+'</span>'
+      +'</div>').join('')
+    +'</div>';
 }
 function apexPaintLaps(){
   const host=document.getElementById('apex-laps');
