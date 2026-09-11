@@ -11592,12 +11592,13 @@ function wingPrepare(C){
  wingDamage.set(C,records);return records;
 }
 function wingImpact(C,x,z,severity){
- if(severity<6||!C.group)return;
+ if(severity<12||!C.group)return;
  const st=C.st,dx=x-st.wx,dz=z-st.wz;
  const localX=dx*Math.cos(st.hdg)-dz*Math.sin(st.hdg),localZ=dx*Math.sin(st.hdg)+dz*Math.cos(st.hdg);
  const radius=Math.min(1.35,.5+severity*.024),v=CollisionPhysics.velocity(C);
  for(const record of wingPrepare(C))for(const section of record.sections){
-  if(section.broken||Math.hypot(section.center.x-localX,section.center.z-localZ)>radius)continue;
+  const threshold=section.center.z<0?18:12; // rear 3×, front 2× the former threshold
+  if(severity<threshold||section.broken||Math.hypot(section.center.x-localX,section.center.z-localZ)>radius)continue;
   section.broken=true;const part=section.part;part.updateMatrixWorld(true);const matrix=part.matrixWorld.clone();
   const o=new THREE.Group();o.position.copy(section.center).applyMatrix4(C.group.matrixWorld);scene.add(o);o.updateMatrixWorld(true);
   o.add(part);new THREE.Matrix4().copy(o.matrixWorld).invert().multiply(matrix).decompose(part.position,part.quaternion,part.scale);part.userData.detached=true;section.pivot=o;
@@ -11841,6 +11842,7 @@ function raceClock(dt){
       if(d.lapN>=RACE_LAPS) d.finish=RACE.raceT;
     }
     d._prevLap=d.i;
+    aiSlowRetirement(d,dt);
   }
   racePositions();
 }
@@ -11881,6 +11883,7 @@ function racePositions(){
 function raceFinish(){
   if(RESULT.on || RETIRE.on) return;
   RESULT.on=true; RESULT.you=RACE.raceT;
+  finishCamera();
   raceResultRows();
   careerScore();
 }
@@ -11908,9 +11911,9 @@ function raceResultRows(){
      with seconds added to it. */
   const rows=[{who:'You', t:LIMITS.dsq?null:RESULT.you, pen:LIMITS.pen,
                you:true, dsq:LIMITS.dsq, run:LIMITS.dsq?-1:0}];
-  AIS.forEach((d,k)=>{ if(d.car&&d.on)
-    rows.push({who:d.name||GRID_NAMES[k%GRID_NAMES.length], t:d.finish||null, pen:0,
-               run:(d.lapN||0)*L+(d.i||0)*d.ds}); });
+  AIS.forEach((d,k)=>{ if(d.car&&(d.on||d.dsq))
+    rows.push({who:d.name||GRID_NAMES[k%GRID_NAMES.length], t:d.dsq?null:d.finish||null, pen:0,dsq:!!d.dsq,
+               run:d.dsq?-1:(d.lapN||0)*L+(d.i||0)*d.ds}); });
   const done=rows.filter(r=>r.t), out=rows.filter(r=>!r.t);
   done.forEach(r=>r.total=r.t+r.pen);
   done.sort((a,b)=>a.total-b.total);
@@ -11919,8 +11922,17 @@ function raceResultRows(){
   raceResultUI();
 }
 /* Keeps filling in until the last of them is home. */
+function finishCamera(){
+  const tv=CAMS.findIndex(c=>c.tv);
+  const changed=camMode!==tv||orbit||freeLook;
+  camMode=tv;orbit=false;freeLook=false;TT.drone=0;
+  document.body.classList.remove('cinema');
+  if(!tvCams.length&&TT.curve)tvBuild(TT.curve,TT.len);
+  if(changed){tvShot=null;tvSeq=0;updateStatus();}
+}
 function raceResultTick(){
   if(!RESULT.on) return;
+  finishCamera();
   if(CAREER.active && careerSlot().weekend.scored)return;
   const left=AIS.filter(d=>d.car&&d.on&&!d.finish).length;
   if(left!==RESULT._left){ RESULT._left=left; raceResultRows(); }
@@ -11929,7 +11941,8 @@ function raceResultTick(){
 function raceResultUI(){
   const box=raceEl('result'); if(!box) return;
   const lead=RESULT.rows[0];
-  let html='<div class="head"><b>Result</b><span>Spa 2022 &middot; '+RACE_LAPS+' laps</span></div><div class="rows">';
+  const mine=RESULT.rows.find(r=>r.you),position=RESULT.rows.findIndex(r=>r.you)+1;
+  let html='<div class="head"><b>Finished · P'+position+'</b><span>'+fmtTime(RESULT.you)+' · '+RACE_LAPS+' laps'+(mine&&mine.pen?' · +'+mine.pen.toFixed(1)+'s penalty':'')+'</span></div><div class="rows">';
   RESULT.rows.forEach((r,i)=>{
     const gap = r.dsq ? 'DSQ' : r.dnf ? 'DNF' : r.total==null ? 'still racing'
               : i===0 ? fmtTime(r.total)
@@ -11939,8 +11952,8 @@ function raceResultUI(){
           (r.pen?'<span class="pen">+'+r.pen.toFixed(1)+'s track limits</span>':'')+
           '</div><div class="tag">'+gap+'</div></div>';
   });
-  const pending=CAREER.active && careerSlot().weekend.stage==='race';
-  html+='</div><button id="resultclose" '+(pending?'disabled':'')+'>'+(pending?'Waiting for classification…':'Done')+'</button>';
+  const pending=AIS.some(d=>d.car&&d.on&&!d.finish) && (!CAREER.active||!careerSlot().weekend.scored);
+  html+='</div><button id="resultclose" '+(pending?'disabled':'')+'>'+(pending?'Results updating as cars finish…':'Done')+'</button>';
   box.innerHTML=html; box.classList.add('show');
   document.getElementById('resultclose').onclick=()=>{ box.classList.remove('show'); raceEnd(); if(CAREER.active){goHome();setTimeout(careerShowRewards,100);} };
 }
@@ -12135,6 +12148,7 @@ function raceStart(opts){
     } else d.paceMul=1;
     d.obj.visible=true;
     d.on=true; d.hold=true; d.laps=[]; d.t=0; d.worst=0;
+    d.dsq=false;d.dsqWhy='';d.slowRaceT=0;d.rescue=null;d.stuckT=0;d.tries=0;
     // A fresh independent draw for every car, including race restarts.
     d.react=aiReaction(d); d._react=0;
   }
@@ -12282,6 +12296,12 @@ function aiStepAll(dt, t){ for(const d of AIS) aiStep(d, dt, t); }
    caught on; then the flag.
    ========================================================================== */
 const AI_STUCK_KPH=5, AI_STUCK_T=2, AI_REV_T=1.6, AI_SETTLE_T=2.5, AI_TRIES=4;
+function aiSlowRetirement(d,dt){
+ if(!RACE.on||RACE.phase!=='racing'||!d.on||d.finish||d.hold||d.react>0){d.slowRaceT=0;return;}
+ const v=CollisionPhysics.velocity(d.car);
+ d.slowRaceT=Math.hypot(v.x,v.z)*3.6<=30?(d.slowRaceT||0)+dt:0;
+ if(d.slowRaceT>=10)aiRetire(d,'Below 30 km/h for 10 seconds');
+}
 function aiUnstick(d, C, dt){
   if(d.hold || d.react>0 || d.finish) return null;
   const kph=Math.abs(C.st.speed)*3.6;
