@@ -19,10 +19,14 @@ test('top gear sustains within its own recording, without replaying launch',()=>
  const m=new Model(bank());for(let i=0;i<1000;i++){const p=m.update(input(340),.02);assert.equal(p.sample,'gear7');assert.ok(p.offset<4);}
  assert.ok(m.cursors[7]>=2);
 });
-test('brake takes priority; a stationary car idles and grid revs do not upshift',()=>{
+test('brake takes priority; grid stays at idle regardless of pedal input',()=>{
  const m=new Model(bank());assert.equal(m.update(input(150,1,1),.1).mode,'brake');
  assert.equal(m.update(input(0,0),.1).mode,'idle');
- const p=m.update({...input(180),gridded:true},.1);assert.equal(p.gear,1);assert.equal(p.mode,'rev');
+ const p=m.update({...input(180),gridded:true},.1);assert.equal(p.gear,1);assert.equal(p.mode,'idle');
+ for(const throttle of [0,.5,1])for(const brake of [0,1]){
+  const held=m.update({...input(0,throttle,brake),gridded:true},.1);
+  assert.equal(held.key,p.key);assert.equal(held.sample,'idle');assert.equal(held.rate,1);
+ }
 });
 function context(){
  const param=()=>({value:0,calls:[],setValueAtTime(...a){this.calls.push(['set',...a]);},linearRampToValueAtTime(...a){this.calls.push(['ramp',...a]);},setTargetAtTime(...a){this.calls.push(['target',...a]);},cancelAndHoldAtTime(...a){this.calls.push(['hold',...a]);},cancelScheduledValues(...a){this.calls.push(['cancel',...a]);}});

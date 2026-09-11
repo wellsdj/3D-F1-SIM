@@ -64,7 +64,7 @@
     // Hysteresis keeps a brief lift from toggling gears around an upshift speed.
     while(this.gear>0&&speed<GEARS[this.gear-1].up*.84)this.gear--;
    }
-   const mode=input.gridded?(thr>.04?'rev':'idle'):speed<1.5?(thr>.04&&!brk?'rev':'idle'):brk>.04?'brake':thr>.04?'accel':'coast';
+   const mode=input.gridded?'idle':speed<1.5?(thr>.04&&!brk?'rev':'idle'):brk>.04?'brake':thr>.04?'accel':'coast';
    const changed=mode!==this.mode,shifted=previousGear!==this.gear;
    if(changed){this.serial++;if(mode==='coast')this.coastAge=0;}
    if(mode==='coast')this.coastAge+=dt;
