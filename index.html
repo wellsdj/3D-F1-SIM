@@ -14170,12 +14170,16 @@ function careerApply(){
   CAR_GRIP = 0.90 + 0.10*(c.aero/5);
 }
 /* --------------------------------------------------------------- the flow */
+/* Straight into the season. Choosing a save was a page that existed to pick
+   between three of them; there is one, and the front end already shows it, so
+   landing on a list with a single row in it was a door with nothing behind. */
 function careerOpen(){
   careerLoad();
-  careerPaintSlots();
-  careerPage('slots');
   const el=document.getElementById('career');
   if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
+  const c=careerSlot();
+  if(c && c.used) careerEnter();
+  else { careerClose(); apexNewCareer(); }
 }
 function careerClose(){
   const el=document.getElementById('career');
@@ -14582,7 +14586,8 @@ let careerSessionRunning=false;
 function careerTimedSession(){return CAREER.active && ['practice','qualifying'].includes(CareerSeason.migrate(careerSlot()).weekend.stage);}
 function careerRecordLap(time){if(!careerSessionRunning||!careerTimedSession())return; if(CareerSeason.lap(careerSlot(),time)){careerSave();goHome();}}
 const careerStyleSave=styleSave;
-styleSave=function(){careerStyleSave();if(CAREER.active){careerSlot().livery={...carStyle};careerSave();}};
+styleSave=function(){careerStyleSave();
+  if(typeof apexPaintGarage==='function' && document.querySelector('.apex-panel[data-sec="garage"].on')) apexPaintGarage();if(CAREER.active){careerSlot().livery={...carStyle};careerSave();}};
 careerSave=function(){
  try{if(CAREER.active)careerSlot().livery={...carStyle};localStorage.setItem(CAREER_KEY,JSON.stringify(CAREER_SLOTS));const e=document.getElementById('career-save-status');if(e)e.textContent='Progress saved on this device';}
  catch(e){const el=document.getElementById('career-save-status');if(el)el.textContent='Storage is full or unavailable. Keep this tab open to retain progress.';}
@@ -14875,46 +14880,84 @@ const APEX_TILES=[
 /* The car, from the side, in your colours. Not a photograph and not the 3D
    model -- a drawing that takes the four colours you actually chose, so the
    panel shows your car rather than a car. */
+/* The real car, not a drawing of one.
+
+   A second small renderer with its own scene and a clone of the loaded model.
+   The clone shares its materials with the car you drive, so the livery you
+   pick in the editor is the livery in this panel with nothing to keep in
+   sync -- and it is rendered once, on demand, not animated: a photograph of
+   your car, side on. */
+let apexShotR=null, apexShotS=null, apexShotC=null, apexShotCar=null;
+function apexCarView(host){
+  if(typeof carObj==='undefined' || !carObj || typeof THREE==='undefined') return false;
+  try{
+    if(!apexShotR){
+      const cv=document.createElement('canvas');
+      cv.className='gcar3d';
+      apexShotR=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+      apexShotR.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+      apexShotR.setSize(680,300,false);
+      apexShotS=new THREE.Scene();
+      apexShotS.add(new THREE.HemisphereLight(0x9fb4d8,0x0c0e13,1.15));
+      const key=new THREE.DirectionalLight(0xfff2ea,2.5); key.position.set(3.2,4.4,3.0);
+      apexShotS.add(key);
+      const rim=new THREE.DirectionalLight(0xff2230,3.2); rim.position.set(-4.2,1.5,-2.6);
+      apexShotS.add(rim);
+      const fill=new THREE.DirectionalLight(0xffffff,.7); fill.position.set(-1.5,2,4);
+      apexShotS.add(fill);
+      apexShotC=new THREE.PerspectiveCamera(26,680/300,.05,120);
+    }
+    if(apexShotCar){ apexShotS.remove(apexShotCar); apexShotCar=null; }
+    apexShotCar=carObj.clone(true);
+    apexShotCar.position.set(0,0,0);
+    apexShotCar.rotation.set(0,0,0);
+    apexShotS.add(apexShotCar);
+    /* Frame whatever the model actually measures rather than guessing: the
+       side of the car fills the width, seen from just above the mirror line. */
+    const box=new THREE.Box3().setFromObject(apexShotCar);
+    const size=box.getSize(new THREE.Vector3());
+    const mid=box.getCenter(new THREE.Vector3());
+    /* Frame it by arithmetic, not by a guessed multiplier: work out what has
+       to fit, then stand exactly far enough back for the field of view to
+       hold it. Guessing put the car two car-lengths too far away and it came
+       out the size of a thumbnail. */
+    const alongZ=size.z>=size.x;
+    const len=alongZ?size.z:size.x;
+    const aspect=apexShotC.aspect;
+    const fitH=Math.max(len/aspect, size.y*2.2);      // in view-height terms
+    const d=(fitH/2)/Math.tan(apexShotC.fov*Math.PI/360)*1.06;
+    /* Perpendicular to the long axis, a little above and a little ahead:
+       the side of the car, with enough of the nose to read the shape. */
+    const dir=(alongZ ? new THREE.Vector3(1,.34,.30) : new THREE.Vector3(.30,.34,1)).normalize();
+    apexShotC.position.copy(mid).addScaledVector(dir,d);
+    apexShotC.lookAt(mid.x,mid.y+size.y*0.06,mid.z);
+    apexShotR.render(apexShotS,apexShotC);
+    host.appendChild(apexShotR.domElement);
+    return true;
+  }catch(e){ return false; }
+}
+/* If the model is not loaded yet -- the garage can be open before the world
+   is -- this stands in, and the real one replaces it when it arrives. */
 function apexCarSide(st){
   const body=(st&&st.body)||'#c8102e', wing=(st&&st.wing)||'#15171b',
         ring=(st&&st.ring)||'#15171b', rims=(st&&st.rims)||'#b6babd';
-  /* Laid out on a 300x92 grid: the ground is y=74, both wheels are r=22 with
-     their centres on y=52 so they sit on it, and the body is drawn between
-     them -- rear wing at the left, nose and front wing at the right. */
   return '<svg class="gcar" viewBox="0 0 300 92" aria-hidden="true">'
-   +'<defs><linearGradient id="gcarG" x1="0" y1="0" x2="0" y2="1">'
-   +'<stop offset="0" stop-color="#fff" stop-opacity=".22"/>'
-   +'<stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>'
-   /* rear wing */
    +'<path d="M30 15h44v8H30z" fill="'+wing+'"/>'
    +'<path d="M32 15v20M72 15v20" stroke="'+wing+'" stroke-width="4" stroke-linecap="round"/>'
    +'<path d="M52 23v20" stroke="'+wing+'" stroke-width="5"/>'
-   /* floor */
    +'<path d="M46 66h226" stroke="'+wing+'" stroke-width="5" stroke-linecap="round"/>'
-   /* front wing */
    +'<path d="M246 62h46v7h-46z" fill="'+wing+'"/>'
    +'<path d="M290 56v14" stroke="'+wing+'" stroke-width="4.5" stroke-linecap="round"/>'
-   /* the car */
    +'<path fill="'+body+'" d="M46 66V54c0-7 6-11 18-12l40-2c4-10 12-14 22-14h26'
    +'c10 0 16 5 18 13l44 3c30 2 48 8 54 16l4 8Z"/>'
-   /* highlight along the top */
-   +'<path fill="url(#gcarG)" d="M46 66V54c0-7 6-11 18-12l40-2c4-10 12-14 22-14h26'
-   +'c10 0 16 5 18 13l44 3c30 2 48 8 54 16l4 8Z"/>'
-   /* sidepod inlet */
    +'<path fill="rgba(0,0,0,.42)" d="M96 44h22v12H96z"/>'
-   /* cockpit */
    +'<ellipse cx="146" cy="32" rx="15" ry="6" fill="rgba(0,0,0,.55)"/>'
-   /* halo */
    +'<path fill="none" stroke="'+ring+'" stroke-width="5" stroke-linecap="round"'
    +' d="M124 34c3-11 11-16 22-16s19 5 22 16"/>'
-   +'<path stroke="'+ring+'" stroke-width="4" stroke-linecap="round" d="M168 22l6 12"/>'
-   /* wheels */
    +'<circle cx="66" cy="52" r="22" fill="#0b0b0d"/>'
    +'<circle cx="66" cy="52" r="9.5" fill="'+rims+'"/>'
-   +'<circle cx="66" cy="52" r="4" fill="rgba(0,0,0,.5)"/>'
    +'<circle cx="228" cy="52" r="22" fill="#0b0b0d"/>'
    +'<circle cx="228" cy="52" r="9.5" fill="'+rims+'"/>'
-   +'<circle cx="228" cy="52" r="4" fill="rgba(0,0,0,.5)"/>'
    +'</svg>';
 }
 
@@ -14937,8 +14980,10 @@ function apexPaintGarage(){
   +'<div class="gchip"><span class="gname"><b>'
   +apexEsc(c?(c.team||'Custom livery'):'Custom livery')+'</b>'
   +'<i>'+(c?('Season '+(c.season||1)):'Livery 01')+'</i></span></div>'
-  +apexCarSide(style)
+  +'<div class="gview"></div>'
   +'<button type="button" class="gfull">Open the livery <i>&rsaquo;</i></button>';
+  const view=setup.querySelector('.gview');
+  if(!apexCarView(view)) view.innerHTML=apexCarSide(style);
   setup.querySelector('.gfull').onclick=()=>openCustomizer();
 }
 

@@ -1123,3 +1123,188 @@ body.customizer-open #netbtn{display:none}
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
   clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);
 }
+
+/* ==========================================================================
+   CAREER, IN THE SAME GAME
+   The season screen was built before the front end and still looked it: soft
+   whites, an orange accent, rounded buttons and a lot of air. It is the same
+   product, so it gets the same language -- red, mono labels, cut corners and
+   the glitch. Overrides only; the structure underneath is untouched.
+   ========================================================================== */
+/* The picture goes on #career itself. A :before plus `#career>*{position:
+   relative}` would have been the tidy way to layer it, except that rule is
+   more specific than the absolute positioning on the wallet chips and the
+   close cross -- it dropped them back into the flow and piled them on top of
+   the wordmark. Painting the background directly changes no stacking at all. */
+#career{
+  font-family:var(--apex-mono);
+  color:var(--apex-ink);
+  background:
+    linear-gradient(90deg,rgba(7,6,10,.97) 0%,rgba(7,6,10,.88) 30%,rgba(7,6,10,.6) 64%,rgba(7,6,10,.34) 100%),
+    repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px),
+    url('assets/career/driver-garage.png') center right/cover no-repeat,
+    #07060a;
+}
+
+/* headings */
+#career .overlay-kicker{
+  font-family:var(--apex-mono);font-size:9px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--apex-red);
+}
+#career h2,#career h3{
+  font-family:var(--apex-display);font-style:italic;text-transform:uppercase;
+  letter-spacing:-.025em;color:#fff;
+}
+#career h2{font-size:clamp(34px,4.6vw,72px);line-height:.88}
+#career h3{font-size:clamp(20px,2vw,30px);line-height:.96}
+#career h2 em,#career h3 em{font-style:italic;color:var(--apex-red)!important}
+#career h4{
+  font-family:var(--apex-display);font-style:italic;font-size:17px;
+  text-transform:uppercase;color:#fff;letter-spacing:-.01em;
+}
+#career p,#career small{color:var(--apex-dim);letter-spacing:.02em}
+#career small{font-size:10px;line-height:1.7}
+
+/* the tab bar */
+#career .career-tabs{border-bottom:1px solid var(--apex-line);gap:clamp(14px,2.2vw,38px)}
+#career .career-tabs button{
+  background:none;border:0;cursor:pointer;padding:8px 2px 12px;position:relative;
+  font-family:var(--apex-display);font-style:italic;font-size:15px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--apex-dim);transition:color .2s;
+}
+#career .career-tabs button:after{
+  content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--apex-red);
+  box-shadow:0 0 12px rgba(255,31,45,.9);transform:scaleX(0);transform-origin:left;
+  transition:transform .28s cubic-bezier(.16,1,.3,1);
+}
+#career .career-tabs button:hover{color:var(--apex-ink)}
+#career .career-tabs button.selected{color:#fff}
+#career .career-tabs button.selected:after{transform:scaleX(1)}
+
+/* the numbers across the top */
+#career .career-stats>div b,#career .career-stats b{
+  font-family:var(--apex-display);font-style:italic;color:#fff;letter-spacing:-.02em;
+}
+#career .career-stats span{
+  font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-dim);
+}
+
+/* every panel gets the cut corner and the lining */
+#career .weekend-feature,#career .engineer-card,#career .career-col,
+#career #career-lastresult,#career .shop-card,#career .career-card,
+#career .season-card,#career .record-card{
+  border:0!important;border-radius:0!important;
+  background:linear-gradient(150deg,rgba(14,11,16,.92),rgba(10,8,12,.7))!important;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.13);
+  backdrop-filter:blur(7px);
+  clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);
+}
+#career .engineer-card{
+  box-shadow:inset 0 0 0 1px var(--apex-red),0 0 44px -18px rgba(255,31,45,.6);
+}
+
+/* the weekend step strip */
+#career .weekend-steps span{
+  font-family:var(--apex-mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--apex-faint);border-bottom:2px solid transparent;padding-bottom:5px;
+}
+#career .weekend-steps span.current{color:#fff;border-bottom-color:var(--apex-red)}
+
+#career .engineer-line{
+  border-bottom:1px solid rgba(255,255,255,.09);
+  font-size:11px;letter-spacing:.04em;color:var(--apex-dim);
+}
+#career .engineer-line b{color:var(--apex-red-hot);font-family:var(--apex-display);font-style:italic}
+#career .col-head{
+  font-size:9px;letter-spacing:.28em;text-transform:uppercase;color:var(--apex-dim);
+}
+#career .session-best{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--apex-red)}
+
+/* --------------------------------------------------------------- buttons */
+#career button:not(.career-tabs button):not(.overlay-close){
+  border:0!important;border-radius:0!important;
+  font-family:var(--apex-mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
+  padding:14px 22px;cursor:pointer;position:relative;overflow:hidden;
+  clip-path:polygon(11px 0,100% 0,100% calc(100% - 11px),calc(100% - 11px) 100%,0 100%,0 11px);
+  transition:transform .16s ease,box-shadow .16s ease,background .16s ease,color .16s ease;
+}
+/* the one that takes you forward */
+#career #career-primary,#career #career-race,#career #career-begin,
+#career .career-actions button:not(.ghost),#career button.primary{
+  background:linear-gradient(100deg,rgba(140,14,24,.96),rgba(255,31,45,.76))!important;
+  color:#fff!important;
+  box-shadow:0 0 46px -16px rgba(255,31,45,.95);
+}
+#career #career-primary:hover,#career #career-race:hover,
+#career .career-actions button:not(.ghost):hover{
+  transform:translateY(-2px);
+  background:linear-gradient(100deg,rgba(172,16,28,.98),rgba(255,62,72,.88))!important;
+  box-shadow:0 0 62px -12px rgba(255,31,45,1);
+}
+/* a scanline sweep, so the red buttons read as part of the glitch */
+#career #career-primary:after,#career .career-actions button:not(.ghost):after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.13) 0 1px,transparent 1px 3px);
+  opacity:.5;animation:btnScan 2.6s steps(6,end) infinite;
+}
+@keyframes btnScan{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
+/* the quieter ones */
+#career button.ghost{
+  background:rgba(255,255,255,.045)!important;color:var(--apex-dim)!important;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);
+}
+#career button.ghost:hover{
+  color:#fff!important;background:rgba(255,31,45,.22)!important;
+  box-shadow:inset 0 0 0 1px var(--apex-red);
+}
+#career button:disabled{opacity:.4;cursor:default;transform:none!important}
+
+/* the close cross */
+#career .overlay-close{
+  border:0;background:rgba(10,8,12,.8);color:var(--apex-dim);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.2);
+}
+#career .overlay-close:hover{color:#fff;box-shadow:inset 0 0 0 1px var(--apex-red)}
+
+/* tables and lists inside the season screen */
+#career table,#career .table-row,#career .standings-row{
+  font-family:var(--apex-mono);font-variant-numeric:tabular-nums;
+}
+#career .you,#career tr.you,#career .standings-row.you{color:var(--apex-red-hot)}
+#career a{color:var(--apex-red)}
+
+/* the save picker is gone; if anything still routes to it, it stays hidden */
+#career-slots{display:none!important}
+
+/* ------------------------------------------------- garage: the real car */
+.gview{
+  position:relative;margin:4px 0 2px;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.01) 62%,transparent),
+    radial-gradient(ellipse 60% 38% at 50% 86%,rgba(255,31,45,.24),transparent 70%);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+  clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);
+  min-height:96px;display:grid;place-items:center;
+}
+.gcar3d{width:100%!important;height:auto!important;display:block}
+
+/* Anything the season screen still paints in the old amber. */
+#career [class*="recognition"] b,#career .driver-number,#career .career-xp b,
+#career .wallet b,#career .career-wallet b{color:var(--apex-red)!important}
+#career *{--accent:var(--apex-red)}
+
+.gview{min-height:120px}
+/* The wallet chips in the season header, in the right colours. */
+#career .career-wallet>*,#career [class*="wallet"]>*,
+#career .career-currency,#career .currency-chip{
+  border:0!important;border-radius:0!important;
+  background:linear-gradient(150deg,rgba(46,8,13,.92),rgba(16,6,9,.78))!important;
+  box-shadow:inset 0 0 0 1px rgba(255,31,45,.5);
+  clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);
+}
+#career .career-wallet b,#career [class*="wallet"] b{
+  font-family:var(--apex-display);font-style:italic;color:#fff!important;
+}
+#career .career-wallet span,#career [class*="wallet"] span{
+  font-size:8.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-dim)!important;
+}
