@@ -14262,14 +14262,7 @@ document.getElementById('lapbook-delete').onclick=e=>{
 document.getElementById('lapbook-replay').onclick=()=>{
   if(!TTREC.best) return;
   closeLapBook();
-  if(booted){
-    /* Already loaded, so there is nothing to wait for -- but the screen still
-       marks the transition rather than cutting straight from a menu into a
-       moving car. It is dismissed the moment the replay has the car. */
-    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading your best lap',false);
-    setTimeout(replayStart, 260);
-  }
-  else { pendingReplay=true; startTrack('spa22'); }
+  replayGo();
 };
 
 function startTrack(id, opts){
@@ -14766,11 +14759,32 @@ function apexLapList(){
 /* Play one. TTREC.best is what replayStart reads, so the chosen lap is loaded
    into it -- the player is not duplicated, it is pointed somewhere else. */
 function apexWatch(lap){
-  if(!lap||!lap.f) return;
+  if(!lap||!lap.f||!lap.f.length) return;
   TTREC.best={ t:lap.t, f:lap.f, capturedAt:lap.at,
                conditions:lap.conditions, livery:lap.livery };
+  replayGo();
+}
+/* The one way into a replay, from the home screen or from the lap book.
+   enterCircuit only uncovers a circuit that is already built, so using it from
+   a cold home screen left the track un-built: a black screen, a timer on zero
+   and a tab that loaded for ever. Only startTrack builds one. */
+function replayGo(){
+  if(!TTREC.best||!TTREC.best.f||!TTREC.best.f.length) return;
   window._autoReplay=true; pendingReplay=true;
-  if(booted) replayStart(); else enterCircuit();
+  const b=document.getElementById('boot'); if(b) b.classList.add('gone');
+  /* booted is not the question. It goes true once the home screen has a scene,
+     with no circuit in it at all -- and replayStart runs perfectly happily
+     against nothing: ttBuild returns early without trackRoot, so the replay bar
+     comes up over an empty black world and the loader never finishes. What
+     matters is whether a circuit has actually been built. */
+  if(booted && trackRoot && TT.curve){
+    /* Already loaded, so there is nothing to wait for -- but the screen still
+       marks the transition rather than cutting straight from a menu into a
+       moving car. It is dismissed the moment the replay has the car. */
+    if(typeof qualifyingLoadShow==='function') qualifyingLoadShow('Loading your best lap',false);
+    setTimeout(replayStart, 260);
+  }
+  else startTrack('spa22');
 }
 function apexPaintLaps(){
   const host=document.getElementById('apex-laps');
