@@ -431,96 +431,476 @@
 }
 .lap-slot .watch.off:hover{background:none;border-color:var(--apex-line);color:var(--apex-faint)}
 
-/* ------------------------------------------------- the championship board */
-/* Sits where the two duplicate cards used to be. A standings table is data,
-   not navigation, so it earns the space rather than repeating the nav. */
-#apex-standings{max-width:560px}
-.apex-board{
-  border:1px solid var(--apex-line);
-  border-left:2px solid var(--apex-red);
-  background:linear-gradient(100deg,rgba(8,7,9,.86),rgba(8,7,9,.52));
-  backdrop-filter:blur(5px);
-  padding:6px 0 8px;
-  font-family:var(--apex-mono);
-  font-variant-numeric:tabular-nums;
-  animation:boardIn .5s cubic-bezier(.2,.7,.3,1) both;
-}
-@keyframes boardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.apex-board .brow{
-  display:grid;
-  grid-template-columns:34px 3px 1fr auto;
-  align-items:center;
-  gap:10px;
-  padding:5px 16px;
-  font-size:12.5px;
-  letter-spacing:.06em;
-  color:var(--apex-dim);
-}
-.apex-board .brow+.brow{border-top:1px solid rgba(255,255,255,.05)}
-.apex-board .bhead{
-  grid-template-columns:1fr auto auto;
-  gap:16px;
-  padding-bottom:9px;
-  margin-bottom:3px;
-  border-bottom:1px solid var(--apex-line);
-  color:var(--apex-faint);
-  font-size:10.5px;
-  letter-spacing:.22em;
-  text-transform:uppercase;
-}
-.apex-board .bhead .bp{color:var(--apex-ink);letter-spacing:.26em}
-.apex-board .bp{color:var(--apex-faint)}
-.apex-board .bc{align-self:stretch;min-height:15px}      /* the car's colour */
-.apex-board .bn{
-  color:var(--apex-ink);
-  text-transform:uppercase;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-.apex-board .bn em{font-style:normal;color:var(--apex-faint);letter-spacing:.18em;font-size:10px}
-.apex-board .bv{color:var(--apex-ink);font-weight:700}
 
-/* Your row, and only your row, is red -- currentColor feeds the stripe too. */
-.apex-board .brow.you{
-  color:var(--apex-red);
-  background:linear-gradient(90deg,rgba(255,31,45,.16),transparent 70%);
-}
-.apex-board .brow.you .bp,
-.apex-board .brow.you .bn,
-.apex-board .brow.you .bv{color:var(--apex-red-hot)}
-.apex-board .brow.you .bn em{color:rgba(255,90,82,.6)}
+/* ==========================================================================
+   APEX Ø — the six-section front end
+   Layout: a full-bleed photograph per section, a centred nav across the top,
+   a driver badge in the corner, the lockup and the big glitched title down
+   the left, and the section's own instrument panel below or beside it.
+   ========================================================================== */
 
-.apex-board.empty{padding:18px 18px 16px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
-.apex-board.empty .bhead{
-  border:0;padding:0;margin:0;display:block;
-  color:var(--apex-faint);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
-}
-.apex-board.empty p{margin:0;color:var(--apex-dim);font-size:13px;line-height:1.5;max-width:38ch}
-.apex-board.empty .bgo{
-  border:1px solid var(--apex-line);background:none;cursor:pointer;
-  color:var(--apex-red);font-family:var(--apex-mono);font-size:11px;
-  letter-spacing:.18em;text-transform:uppercase;padding:8px 14px;
-  transition:background .18s,border-color .18s;
-}
-.apex-board.empty .bgo:hover{background:rgba(255,31,45,.12);border-color:var(--apex-red)}
+/* ------------------------------------------------------- picture per section */
+#boot:before{background-image:url('assets/home/hero-red.webp')}
+#boot[data-bg="race"]:before{background-image:url('assets/home/race-pitlane.webp')}
+#boot[data-bg="garage"]:before{background-image:url('assets/home/garage-bay.webp')}
 
-/* -------------------------------------------------------- erasing a career */
-.apex-erase{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:18px}
-.apex-erase-btn{
-  border:1px solid var(--apex-line);background:none;cursor:pointer;
-  color:var(--apex-dim);font-family:var(--apex-mono);font-size:11px;
-  letter-spacing:.18em;text-transform:uppercase;padding:9px 15px;
-  transition:color .18s,border-color .18s,background .18s;
+/* ------------------------------------------------------------------ header */
+.apex-header{
+  position:relative;z-index:4;display:flex;align-items:center;gap:clamp(18px,4vw,64px);
+  padding:clamp(14px,1.8vw,24px) clamp(20px,3vw,48px) 0;
 }
-.apex-erase-btn:hover{color:var(--apex-ink);border-color:rgba(255,255,255,.3)}
-.apex-erase-btn.armed{
-  color:#fff;border-color:var(--apex-red);background:rgba(255,31,45,.22);
-  animation:erasePulse 1s ease-in-out infinite;
+#apexnav{display:flex;gap:clamp(16px,2.6vw,46px);flex-wrap:wrap;margin-left:clamp(8px,6vw,110px)}
+#apexnav button{
+  position:relative;background:none;border:0;cursor:pointer;padding:6px 2px 10px;
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(12px,1.05vw,16px);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--apex-dim);
+  transition:color .2s ease;
 }
-@keyframes erasePulse{50%{background:rgba(255,31,45,.34)}}
-.apex-erase-note{color:var(--apex-faint);font-family:var(--apex-mono);font-size:11px;line-height:1.6;max-width:46ch}
+#apexnav button:after{
+  content:"";position:absolute;left:0;right:0;bottom:2px;height:2px;
+  background:var(--apex-red);box-shadow:0 0 12px rgba(255,31,45,.9);
+  transform:scaleX(0);transform-origin:left;transition:transform .28s cubic-bezier(.16,1,.3,1);
+}
+#apexnav button:hover{color:var(--apex-ink)}
+#apexnav button.on{color:#fff}
+#apexnav button.on:after{transform:scaleX(1)}
+
+.apex-driver{
+  margin-left:auto;display:flex;align-items:stretch;gap:0;
+  border:1px solid rgba(255,31,45,.55);background:rgba(8,6,9,.62);backdrop-filter:blur(6px);
+}
+.apex-driver .helm{display:grid;place-items:center;width:38px;color:var(--apex-ink);padding-left:8px}
+.apex-driver .helm svg{width:24px;height:24px}
+.apex-driver .who{display:flex;flex-direction:column;justify-content:center;padding:7px 16px 7px 8px;min-width:96px}
+.apex-driver .who b{font-size:13px;color:#fff;font-weight:600;letter-spacing:.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:16ch}
+.apex-driver .who i{font-style:normal;font-size:10px;color:var(--apex-dim);letter-spacing:.06em}
+.apex-driver .lvl{
+  display:grid;place-items:center;min-width:44px;padding:0 12px;
+  border-left:1px solid rgba(255,31,45,.55);
+  font-family:var(--apex-display);font-style:italic;font-size:19px;color:#fff;
+}
+
+/* ------------------------------------------------------------- the lockup */
+.apex-brand{
+  position:absolute;z-index:4;left:clamp(20px,3vw,48px);top:clamp(64px,8vh,104px);
+  pointer-events:none;
+}
+.apex-brand .mark{
+  display:block;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(26px,2.5vw,38px);letter-spacing:.04em;color:#fff;
+  text-shadow:0 0 26px rgba(0,0,0,.8);
+}
+.apex-brand .mark b{color:var(--apex-red);font-weight:inherit;
+  text-shadow:0 0 18px rgba(255,31,45,.85)}
+.apex-brand small{
+  display:block;margin-top:3px;font-size:8.5px;letter-spacing:.42em;
+  text-transform:uppercase;color:var(--apex-dim);
+}
+
+/* ------------------------------------------------- the words down the edge */
+.apex-vert{
+  position:absolute;z-index:4;right:clamp(16px,2vw,34px);top:22vh;
+  display:flex;flex-direction:column;gap:7px;text-align:right;pointer-events:none;
+}
+.apex-vert span{
+  font-size:9.5px;letter-spacing:.4em;text-transform:uppercase;color:var(--apex-dim);
+}
+
+/* ------------------------------------------------------------------- stage */
+.apex-stage{
+  position:relative;z-index:4;display:grid;align-content:end;
+  padding:0 clamp(20px,3vw,48px) clamp(10px,1.4vw,18px);
+  padding-top:clamp(88px,14vh,150px);
+  min-height:0;
+}
+.apex-panel{
+  grid-area:1/1;display:flex;flex-direction:column;gap:clamp(8px,1vw,14px);
+  min-height:0;
+  opacity:0;visibility:hidden;transform:translateY(14px);
+  transition:opacity .34s ease,transform .46s cubic-bezier(.16,1,.3,1),visibility .34s;
+}
+.apex-panel.on{opacity:1;visibility:visible;transform:none}
+
+/* ----------------------------------------------------------- the big title */
+.apex-title{
+  margin:0;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(42px,6.4vw,104px);line-height:.84;letter-spacing:-.035em;
+  text-transform:uppercase;color:#fff;white-space:nowrap;
+  text-shadow:0 14px 60px rgba(0,0,0,.75);
+}
+.apex-title em{
+  display:block;font-style:italic;color:var(--apex-red);
+  font-size:.46em;letter-spacing:-.02em;margin-top:.06em;
+  text-shadow:0 0 34px rgba(255,31,45,.55);
+}
+.apex-meta{
+  font-size:9.5px;letter-spacing:.36em;text-transform:uppercase;color:var(--apex-faint);
+}
+.apex-sub{
+  margin:0;max-width:46ch;font-size:10.5px;line-height:1.9;letter-spacing:.26em;
+  text-transform:uppercase;color:var(--apex-dim);
+}
+
+/* ------------------------------------------------------------------ footer */
+.apex-footer{
+  position:relative;z-index:4;display:flex;align-items:center;gap:18px;
+  padding:0 clamp(20px,3vw,48px) clamp(12px,1.6vw,20px);
+  font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:var(--apex-faint);
+}
+.apex-motto{margin-left:auto;letter-spacing:.34em}
+.apex-fhf{
+  position:absolute;right:clamp(20px,3vw,48px);bottom:clamp(40px,6vh,72px);
+  display:flex;flex-direction:column;gap:3px;text-align:right;
+  font-size:8.5px;letter-spacing:.3em;text-transform:uppercase;color:var(--apex-dim);
+}
+#boot #bar{width:min(200px,22vw)}
+
+/* ============================================================ shared panel */
+.hlabel,.rlabel,.slabel{
+  font-size:9.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--apex-dim);
+}
+.hcard,.ccard,.gtile,.gsetup,.rbox,.rcard,.sbox{
+  position:relative;border:1px solid rgba(255,255,255,.12);
+  background:linear-gradient(150deg,rgba(14,11,16,.9),rgba(10,8,12,.66));
+  backdrop-filter:blur(7px);
+}
+
+/* ================================================================ 1. HOME */
+.hgrid{
+  display:grid;gap:clamp(8px,.9vw,14px);
+  grid-template-columns:minmax(210px,1fr) minmax(210px,1.15fr) minmax(200px,1.05fr) minmax(200px,1.1fr);
+  align-items:stretch;margin-top:clamp(6px,1vw,14px);
+}
+.hcard{padding:13px 16px 14px;display:flex;flex-direction:column;gap:7px;overflow:hidden;
+  animation:cardIn .5s cubic-bezier(.16,1,.3,1) both}
+.hcard:nth-child(2){animation-delay:.06s}
+.hcard:nth-child(3){animation-delay:.12s}
+.hcard:nth-child(4){animation-delay:.18s}
+@keyframes cardIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+/* the position card, the one that shouts */
+.hcard.hpos{
+  border-color:var(--apex-red);
+  background:linear-gradient(150deg,rgba(66,10,16,.88),rgba(24,6,10,.72));
+  box-shadow:0 0 40px -12px rgba(255,31,45,.6), inset 0 0 60px -30px rgba(255,31,45,.9);
+}
+.hbig{display:flex;align-items:baseline;gap:4px;margin-top:2px}
+.hbig b{font-family:var(--apex-display);font-style:italic;font-size:clamp(46px,4.4vw,72px);
+  line-height:.82;color:#fff;text-shadow:0 0 40px rgba(255,255,255,.28)}
+.hbig i{font-style:italic;font-family:var(--apex-display);font-size:clamp(16px,1.4vw,22px);color:#fff}
+.hpts{font-family:var(--apex-display);font-style:italic;font-size:clamp(20px,1.9vw,30px);color:#fff}
+.hpts span{font-size:.45em;letter-spacing:.16em;color:var(--apex-dim)}
+.hfoot{
+  margin-top:auto;padding-top:9px;border-top:1px solid rgba(255,255,255,.14);
+  font-size:9px;letter-spacing:.22em;text-transform:uppercase;color:var(--apex-dim);
+}
+.hfoot em{display:block;font-style:normal;color:var(--apex-red-hot);margin-top:3px}
+.hhelm{
+  position:absolute;right:-14px;top:50%;transform:translateY(-52%);
+  width:150px;color:rgba(255,31,45,.5);pointer-events:none;
+}
+.hhelm svg{width:100%;height:auto;filter:drop-shadow(0 0 18px rgba(255,31,45,.55))}
+
+/* progress */
+.hcount{display:flex;align-items:baseline;gap:7px}
+.hcount b{font-family:var(--apex-display);font-style:italic;font-size:clamp(28px,2.7vw,42px);color:#fff;line-height:1}
+.hcount i{font-style:normal;font-family:var(--apex-display);font-size:clamp(16px,1.3vw,21px);color:var(--apex-faint)}
+.hcount span{font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-dim);margin-left:2px}
+.hbar{height:6px;background:rgba(255,255,255,.1);overflow:hidden}
+.hbar i{display:block;height:100%;background:linear-gradient(90deg,var(--apex-red),var(--apex-red-hot));
+  box-shadow:0 0 14px rgba(255,31,45,.8);animation:barIn .8s cubic-bezier(.16,1,.3,1) both;transform-origin:left}
+@keyframes barIn{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.hstat{display:flex;align-items:center;gap:9px;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--apex-dim)}
+.hstat svg{width:15px;height:15px;color:var(--apex-faint);flex:0 0 auto}
+.hstat span{flex:1}
+.hstat b{color:#fff;font-size:12.5px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+
+/* last race */
+.hres{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.hrname{font-family:var(--apex-display);font-style:italic;font-size:clamp(15px,1.3vw,20px);
+  text-transform:uppercase;color:#fff}
+.hrname span{display:block;font-family:var(--apex-mono);font-style:normal;font-size:9px;
+  letter-spacing:.24em;color:var(--apex-dim);margin-top:2px}
+.hrpos{font-family:var(--apex-display);font-style:italic;font-size:clamp(24px,2.3vw,36px);color:#fff}
+.hnone{margin:0;font-size:11px;line-height:1.7;color:var(--apex-dim);letter-spacing:.04em}
+
+/* standings */
+.hrows{display:flex;flex-direction:column;gap:1px}
+.hrow{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;
+  padding:4px 6px;font-size:11.5px;color:var(--apex-dim);font-variant-numeric:tabular-nums}
+.hrow span{color:var(--apex-faint)}
+.hrow b{color:var(--apex-ink);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow i{font-style:normal;color:#fff}
+.hrow.you{border:1px solid var(--apex-red);background:rgba(255,31,45,.16)}
+.hrow.you span,.hrow.you b,.hrow.you i{color:var(--apex-red-hot)}
+.hrow.you b{font-weight:700}
+.hrow.out{margin-top:4px}
+.hmore,.hgo{
+  margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  border:0;border-top:1px solid rgba(255,255,255,.14);background:none;cursor:pointer;
+  padding:9px 2px 0;font-family:var(--apex-mono);font-size:9.5px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--apex-dim);transition:color .18s;
+}
+.hmore:hover,.hgo:hover{color:var(--apex-red-hot)}
+.hcard.wide{grid-column:1/-1;max-width:520px;gap:12px}
+.hcard.empty p{margin:0;font-size:12px;line-height:1.7;color:var(--apex-dim);letter-spacing:.03em}
+.hgo{border-top:0;padding:10px 16px;border:1px solid var(--apex-line);color:var(--apex-red);
+  justify-content:center;margin-top:0;align-self:flex-start}
+
+/* the full table */
+#apex-full{position:fixed;inset:0;z-index:40;display:none;place-items:center;
+  background:rgba(4,3,5,.86);backdrop-filter:blur(8px)}
+#apex-full.on{display:grid}
+#apex-full .fullwrap{position:relative;width:min(460px,90vw);max-height:80vh;overflow:auto;
+  padding:22px 24px;border:1px solid var(--apex-line);border-top:2px solid var(--apex-red);
+  background:rgba(11,9,13,.96);display:flex;flex-direction:column;gap:12px}
+#apex-full .fullx{position:absolute;right:12px;top:8px;background:none;border:0;color:var(--apex-dim);
+  font-size:22px;cursor:pointer;line-height:1}
+#apex-full .fullx:hover{color:#fff}
+
+/* ============================================================== 2. CAREER */
+.cgrid{display:grid;gap:clamp(10px,1.1vw,16px);grid-template-columns:repeat(auto-fit,minmax(250px,320px));
+  margin-top:clamp(6px,1vw,14px)}
+.ccard{padding:16px 18px 0;display:flex;flex-direction:column;gap:8px;overflow:hidden;
+  animation:cardIn .5s cubic-bezier(.16,1,.3,1) both}
+.ccard.live{border-color:var(--apex-red);
+  background:linear-gradient(150deg,rgba(58,9,14,.9),rgba(20,6,9,.74));
+  box-shadow:0 0 44px -14px rgba(255,31,45,.65)}
+.ccard.ghost{animation-delay:.08s}
+.ctag{display:flex;justify-content:space-between;align-items:center;
+  font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--apex-dim)}
+.ctag i{font-style:normal;color:var(--apex-red);letter-spacing:.1em}
+.ccard h2{margin:0;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(24px,2.3vw,34px);text-transform:uppercase;color:#fff;line-height:1}
+.csub{font-size:9.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--apex-dim)}
+.cpct{display:flex;align-items:center;gap:10px;margin:2px 0 4px}
+.cpct b{font-size:12px;color:#fff;font-variant-numeric:tabular-nums}
+.cpct span{flex:1;height:5px;background:rgba(255,255,255,.12);overflow:hidden}
+.cpct i{display:block;height:100%;background:var(--apex-red);box-shadow:0 0 12px rgba(255,31,45,.85);
+  animation:barIn .8s cubic-bezier(.16,1,.3,1) both;transform-origin:left}
+.crow{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--apex-dim);letter-spacing:.03em}
+.crow svg{width:15px;height:15px;color:var(--apex-faint);flex:0 0 auto}
+.cplus{display:grid;place-items:center;flex:1;min-height:86px;font-size:44px;
+  color:var(--apex-faint);font-weight:200;line-height:1}
+.cnote{margin:0;font-size:11px;line-height:1.7;color:var(--apex-dim);letter-spacing:.02em;flex:1}
+.cgo{
+  margin:14px -18px 0;padding:12px 18px;border:0;border-top:1px solid rgba(255,255,255,.16);
+  background:rgba(255,255,255,.04);cursor:pointer;
+  font-family:var(--apex-mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;
+  color:var(--apex-ink);transition:background .2s,color .2s;
+}
+.ccard.live .cgo{background:rgba(255,31,45,.24);color:#fff}
+.cgo:hover{background:rgba(255,31,45,.34);color:#fff}
+.cgo.danger{color:var(--apex-dim)}
+.cgo.danger:hover{color:#fff;background:rgba(255,31,45,.3)}
+.cgo.danger.armed{background:rgba(255,31,45,.5);color:#fff;animation:erasePulse 1s ease-in-out infinite}
+@keyframes erasePulse{50%{background:rgba(255,31,45,.7)}}
+
+/* ============================================================== 3. GARAGE */
+.ggrid{display:grid;gap:clamp(10px,1.1vw,16px);grid-template-columns:1fr minmax(240px,330px);
+  align-items:end;margin-top:clamp(6px,1vw,14px)}
+.gtiles{display:grid;gap:clamp(7px,.8vw,12px);grid-template-columns:repeat(4,minmax(0,1fr))}
+.gtile{
+  padding:14px 14px 13px;display:flex;flex-direction:column;gap:6px;cursor:pointer;
+  text-align:left;color:var(--apex-dim);transition:border-color .2s,background .2s,transform .2s;
+}
+.gtile svg{width:30px;height:30px;color:var(--apex-ink);margin-bottom:2px}
+.gtile b{font-family:var(--apex-display);font-style:italic;font-size:16px;
+  text-transform:uppercase;color:#fff;letter-spacing:.01em}
+.gtile span{font-size:9px;letter-spacing:.2em;text-transform:uppercase}
+.gmark{position:absolute;right:10px;top:9px;font-style:normal;font-size:9px;
+  letter-spacing:.08em;color:var(--apex-faint)}
+.gtile:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.3)}
+.gtile.on{
+  border-color:var(--apex-red);background:linear-gradient(150deg,rgba(70,10,17,.92),rgba(26,6,10,.76));
+  box-shadow:0 0 38px -14px rgba(255,31,45,.7);
+}
+.gtile.on .gmark{color:var(--apex-red)}
+.gsetup{padding:14px 16px 0;display:flex;flex-direction:column;gap:9px}
+.gchip{display:flex;align-items:center;gap:11px;padding-bottom:3px}
+.gswatch{width:34px;height:34px;border:1px solid rgba(255,255,255,.28);flex:0 0 auto;
+  box-shadow:inset 0 0 14px rgba(0,0,0,.6)}
+.gname b{display:block;font-family:var(--apex-display);font-style:italic;font-size:15px;
+  text-transform:uppercase;color:#fff}
+.gname i{font-style:normal;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--apex-red)}
+.grow{display:grid;grid-template-columns:78px 1fr 28px;align-items:center;gap:10px;
+  font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--apex-dim)}
+.grow i{height:6px;background:rgba(255,255,255,.1);display:block;overflow:hidden}
+.grow i b{display:block;height:100%;background:linear-gradient(90deg,var(--apex-red),var(--apex-red-hot));
+  box-shadow:0 0 12px rgba(255,31,45,.75);animation:barIn .8s cubic-bezier(.16,1,.3,1) both;transform-origin:left}
+.grow em{font-style:normal;text-align:right;color:#fff;font-size:11.5px;font-variant-numeric:tabular-nums}
+.gfull{
+  margin:12px -16px 0;padding:11px 16px;border:0;border-top:1px solid rgba(255,255,255,.16);
+  background:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+  font-family:var(--apex-mono);font-size:9.5px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--apex-dim);transition:color .2s,background .2s;
+}
+.gfull:hover{color:#fff;background:rgba(255,31,45,.18)}
+
+/* ================================================================ 4. RACE */
+.rpane{
+  position:absolute;right:clamp(20px,3vw,48px);top:clamp(96px,15vh,150px);
+  width:min(46vw,620px);display:flex;flex-direction:column;gap:clamp(8px,.9vw,13px);
+  animation:cardIn .5s cubic-bezier(.16,1,.3,1) both;
+}
+.rbox{padding:13px 18px}
+.rlight .rlabel{margin-bottom:14px;display:block}
+.rtrack{position:relative;display:flex;justify-content:space-between;padding:0 4px 2px}
+.rline{position:absolute;left:10px;right:10px;top:6px;height:1px;background:rgba(255,255,255,.22)}
+.rpip{background:none;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;
+  gap:10px;padding:0;color:var(--apex-dim);transition:color .2s}
+.rpip i{width:13px;height:13px;border-radius:50%;border:1.5px solid rgba(255,255,255,.45);
+  background:rgba(8,6,9,.9);transition:all .22s}
+.rpip span{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase}
+.rpip:hover{color:var(--apex-ink)}
+.rpip:hover i{border-color:#fff}
+.rpip.on{color:#fff}
+.rpip.on i{background:var(--apex-red);border-color:var(--apex-red);
+  box-shadow:0 0 0 3px rgba(255,31,45,.25),0 0 18px rgba(255,31,45,.9)}
+
+.rcard{padding:0;overflow:hidden;border-color:var(--apex-red);
+  box-shadow:0 0 44px -16px rgba(255,31,45,.7)}
+.rshot{
+  height:clamp(150px,20vh,230px);
+  background:url('home-race.webp') center/cover no-repeat,#140a0c;
+}
+.rname{
+  position:absolute;left:0;right:0;bottom:0;padding:14px 18px 15px;
+  background:linear-gradient(0deg,rgba(6,4,7,.94),rgba(6,4,7,.55) 60%,transparent);
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(22px,2.2vw,34px);
+  text-transform:uppercase;color:#fff;line-height:1;
+}
+.rname span{display:block;margin-top:6px;font-family:var(--apex-mono);font-style:normal;
+  font-size:9.5px;letter-spacing:.24em;color:var(--apex-dim)}
+
+.rrow{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,.9vw,13px)}
+.rstep{display:flex;align-items:center;gap:12px}
+.rstep svg{width:24px;height:24px;color:var(--apex-ink);flex:0 0 auto}
+.rstep .rlabel{flex:1}
+.rstep b{font-family:var(--apex-display);font-style:italic;font-size:20px;color:#fff}
+.rstepper{display:flex;align-items:center;gap:12px}
+.rstepper button{background:none;border:0;cursor:pointer;color:var(--apex-dim);
+  font-size:17px;line-height:1;padding:2px 4px;transition:color .18s}
+.rstepper button:hover{color:var(--apex-red-hot)}
+.rstep.fixed b{margin-left:auto}
+
+.rgo{
+  margin-top:4px;padding:16px 20px;cursor:pointer;
+  border:1px solid var(--apex-red);
+  background:linear-gradient(100deg,rgba(140,14,24,.94),rgba(255,31,45,.72));
+  box-shadow:0 0 50px -14px rgba(255,31,45,.95), inset 0 0 30px -14px rgba(255,255,255,.5);
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(20px,2vw,30px);
+  letter-spacing:.02em;text-transform:uppercase;color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:14px;
+  transition:transform .18s,box-shadow .18s,background .18s;
+}
+.rgo i{font-style:normal;color:rgba(255,255,255,.75)}
+.rgo:hover{transform:translateY(-2px);
+  background:linear-gradient(100deg,rgba(170,16,28,.96),rgba(255,60,70,.85));
+  box-shadow:0 0 66px -12px rgba(255,31,45,1)}
+
+/* ============================================================ 5. SETTINGS */
+.sgrid{display:grid;gap:clamp(10px,1.1vw,16px);grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  max-width:900px;margin-top:clamp(6px,1vw,14px)}
+.sbox{padding:15px 18px 17px;display:flex;flex-direction:column;gap:10px}
+.skeys{display:flex;flex-direction:column;gap:5px}
+#controller-status{font-size:11.5px;color:var(--apex-dim);line-height:1.6}
+#controller-map{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;
+  font-size:10px;letter-spacing:.06em;color:var(--apex-dim)}
+#controller-map b{color:#fff;font-weight:400}
+#controller-close{align-self:flex-start;margin-top:2px;padding:8px 14px;cursor:pointer;
+  border:1px solid var(--apex-line);background:none;color:var(--apex-dim);
+  font-family:var(--apex-mono);font-size:9.5px;letter-spacing:.24em;text-transform:uppercase}
+#controller-close:hover{color:#fff;border-color:var(--apex-red)}
+
+/* ============================================================== responsive */
+@media (max-width:1180px){
+  .hgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rpane{position:static;width:auto;margin-top:12px}
+  .ggrid{grid-template-columns:1fr}
+  .apex-vert{display:none}
+}
+@media (max-width:720px){
+  .hgrid{grid-template-columns:1fr}
+  .gtiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .apex-title{font-size:clamp(30px,9vw,52px);white-space:normal}
+  .apex-brand{display:none}
+  #apexnav{margin-left:0;gap:14px}
+  .apex-fhf{display:none}
+}
 @media (prefers-reduced-motion:reduce){
-  .apex-board{animation:none}
-  .apex-erase-btn.armed{animation:none}
+  .hcard,.ccard,.rpane,.hbar i,.cpct i,.grow i b{animation:none}
+  .cgo.danger.armed{animation:none}
 }
+
+/* --------------------------------------------------------------- geometry
+   #boot is a rows-only grid and .apex-stage is one stacked cell, so both
+   implicit columns size to their content -- the nowrap title. Everything that
+   wants the width of the screen (the four home cards, the race pane pinned to
+   the right) was laid out inside an 800px box instead. Both need a real
+   full-width column, and the panel needs to be the positioning context for
+   anything pinned inside it. */
+#boot{grid-template-columns:minmax(0,1fr)}
+.apex-stage{grid-template-columns:minmax(0,1fr)}
+.apex-panel{position:relative}
+.rpane{right:0}
+
+/* Home: the instrument row is the bottom third of the screen, not a strip. */
+.hcard{min-height:clamp(168px,25vh,232px);padding:15px 18px 16px;gap:8px}
+.hgrid{gap:clamp(9px,1vw,15px)}
+.hbig i{text-transform:uppercase}
+.hrpos{text-transform:uppercase}
+.apex-sub{max-width:none;white-space:nowrap}
+.hhelm{width:min(190px,46%);right:-18px;color:rgba(255,31,45,.55)}
+.hstat{gap:10px;font-size:10.5px}
+.hstat svg{width:16px;height:16px}
+.hrow{padding:5px 7px;font-size:12px}
+
+/* Leave the right margin free for the vertical words -- the start button was
+   running underneath them. */
+.rpane{right:clamp(38px,4.4vw,86px);width:min(44vw,580px)}
+/* The garage photograph is the bay, so the picture sits further right and the
+   type keeps the dark half of it. */
+#boot[data-bg="garage"]:before{background-position:center center}
+/* The home picture is a dark action shot and wants the heavy wash. The garage
+   and the pit lane are the subject, not a backdrop, so they get a lighter one
+   -- enough for the type on the left, nothing over the car. */
+#boot[data-bg="garage"]:after,
+#boot[data-bg="race"]:after{
+  background:
+    linear-gradient(90deg,rgba(7,6,10,.96) 0%,rgba(7,6,10,.74) 24%,rgba(7,6,10,.22) 52%,rgba(7,6,10,.06) 100%),
+    linear-gradient(180deg,rgba(7,6,10,.82) 0%,rgba(7,6,10,0) 28%,rgba(7,6,10,0) 68%,rgba(7,6,10,.8) 100%),
+    repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px);
+}
+
+/* A little more room for the instrument row, and a helmet you can read. */
+.hcard{min-height:clamp(180px,27vh,252px)}
+.hhelm{width:min(200px,50%);right:-16px;color:rgba(255,45,56,.72)}
+.hhelm svg{filter:drop-shadow(0 0 26px rgba(255,31,45,.8))}
+
+/* Replays, in the same language as the rest of the front end. */
+.lap-strip{gap:clamp(9px,1vw,15px);max-height:none;overflow:visible;flex-wrap:wrap}
+.lap-slot{
+  min-width:172px;padding:13px 15px 14px;gap:3px;
+  border:1px solid rgba(255,255,255,.12);
+  background:linear-gradient(150deg,rgba(14,11,16,.9),rgba(10,8,12,.66));
+  backdrop-filter:blur(7px);
+}
+.lap-slot:first-child{
+  border-color:var(--apex-red);
+  background:linear-gradient(150deg,rgba(62,9,15,.9),rgba(22,6,10,.72));
+  box-shadow:0 0 38px -14px rgba(255,31,45,.65);
+}
+.lap-slot .pos{font-size:9px;letter-spacing:.3em;color:var(--apex-faint)}
+.lap-slot .t{font-size:26px;color:#fff}
+.lap-slot:first-child .t{color:#fff}
+.lap-slot .when{font-size:9px;letter-spacing:.16em;color:var(--apex-dim);text-transform:uppercase}
+.lap-slot .watch{
+  margin-top:10px;padding:9px 10px;border:1px solid rgba(255,255,255,.2);background:none;
+  font-family:var(--apex-mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--apex-ink);cursor:pointer;transition:background .18s,border-color .18s;
+}
+.lap-slot .watch:hover{background:rgba(255,31,45,.28);border-color:var(--apex-red);color:#fff}
+.lap-slot .watch.off{border-color:transparent;color:var(--apex-faint);cursor:default}

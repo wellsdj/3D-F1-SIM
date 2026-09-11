@@ -1106,124 +1106,125 @@ if('serviceWorker' in navigator){
   <div class="apex-sweep" aria-hidden="true"></div>
 
   <header class="apex-header">
-    <div class="apex-wordmark">APEX <i>/</i> 26<small>Drive beyond limits</small></div>
     <nav id="apexnav" aria-label="Main menu">
       <button type="button" data-sec="home" class="on">Home</button>
       <button type="button" data-sec="career">Career</button>
-      <button type="button" data-sec="race">Race</button>
-      <button type="button" data-sec="garage">Garage</button>
       <button type="button" data-sec="replays">Replays</button>
+      <button type="button" data-sec="garage">Garage</button>
+      <button type="button" data-sec="race">Race</button>
+      <button type="button" data-sec="settings">Settings</button>
     </nav>
-    <span class="edition-label">3D F1 SIM &middot; Spa 2022</span>
+    <!-- Who is driving. The name is your team, the number is the season you
+         have reached -- both real, both from the one career. -->
+    <div class="apex-driver">
+      <span class="helm" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linejoin="round"><path d="M16 5c6.1 0 10 4.3 10 10.4 0 2-.4 3.6-1 4.9
+             l-8.6 1.3c-5.4 0-9.4-2.6-9.4-6.6C7 9.4 10.4 5 16 5Z"/>
+             <path d="M9.6 18.8h13.8"/><path d="M24.8 20.3l2.6.9c.9.3 1 1.6.1 2l-9 3.4
+             c-1 .4-2-.4-1.8-1.4l.7-3.7"/></svg>
+      </span>
+      <span class="who"><b id="apex-drivername">No career</b><i id="apex-driverteam">Rookie</i></span>
+      <span class="lvl" id="apex-driverlvl">1</span>
+    </div>
   </header>
 
-  <div id="home-settings">
-    <button class="cog" id="home-settings-toggle" aria-label="Settings" aria-expanded="false">
-      <!-- A ring, a hub and eight teeth, set out by geometry rather than drawn
-           by hand so the teeth are exactly even. Round caps, because a square
-           end on a 1.7px stroke reads as a burr at this size. -->
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"
-           fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-        <circle cx="12" cy="12" r="6.6"/>
-        <circle cx="12" cy="12" r="2.6"/>
-        <path d="M18.60 12.00L21.30 12.00 M16.67 16.67L18.58 18.58 M12.00 18.60L12.00 21.30 M7.33 16.67L5.42 18.58 M5.40 12.00L2.70 12.00 M7.33 7.33L5.42 5.42 M12.00 5.40L12.00 2.70 M16.67 7.33L18.58 5.42"/>
-      </svg>
-    </button>
-    <div class="settings-menu">
-      <div class="menu-kicker">Session settings</div>
-      <div class="settings-item" id="home-controls-item">
-        <button class="settings-toggle" id="home-controls-toggle" aria-expanded="false">Controls &rsaquo;</button>
-        <div class="limit-dropdown" id="home-controls-dropdown">
-          <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
-          <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
-          <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV</span></div>
-          <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
-          <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
-          <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
-          <div class="ctrl-row"><kbd>J</kbd><span>Start a race</span></div>
-          <div class="ctrl-row"><kbd>G</kbd><span>Barrier editor</span></div>
-          <div class="ctrl-row"><kbd>L</kbd><span>Racing line editor</span></div>
-          <div class="ctrl-row"><span class="ctrl-note">Drag to look around &middot; scroll to zoom</span></div>
-        </div>
-      </div>
-    </div>
+  <!-- The lockup, in the same place on every screen. -->
+  <div class="apex-brand" aria-hidden="true">
+    <span class="mark">APEX <b>&Oslash;</b></span>
+    <small>Drive beyond limits</small>
   </div>
+  <div class="apex-vert" id="apex-vert" aria-hidden="true"><span>Speed</span><span>drives</span><span>progress</span></div>
 
   <main class="apex-stage">
+    <!-- ============================================================ HOME -->
     <section class="apex-panel on" data-sec="home">
-      <div class="apex-kicker">The next chapter is yours</div>
-      <h1 class="apex-title" data-glitch="Built to race.">Built to race.<em>Born to win.</em></h1>
-      <p class="apex-sub">From your first contract to the final chequered flag.</p>
-      <!-- Career and Race are both a word away in the nav; repeating them here
-           as cards was the same door twice. The space shows the championship
-           instead: where your season actually stands. -->
-      <div id="apex-standings"></div>
+      <h1 class="apex-title" data-glitch="Home">Home<em>Drivers championship</em></h1>
+      <div class="apex-meta" id="apex-homemeta">No career yet</div>
+      <p class="apex-sub">Your progress. A bigger tomorrow.</p>
+      <div class="hgrid" id="apex-home"></div>
     </section>
 
+    <!-- ========================================================== CAREER -->
     <section class="apex-panel" data-sec="career">
-      <div class="apex-kicker">Your journey starts here</div>
-      <h1 class="apex-title" data-glitch="Career"><em>Career</em></h1>
-      <p class="apex-sub">One career at a time. Pick up where you left off.</p>
-      <div class="apex-cards" id="apex-slots"></div>
+      <h1 class="apex-title" data-glitch="Career">Career<em>Mode</em></h1>
+      <p class="apex-sub">Your journey starts here.</p>
+      <div class="cgrid" id="apex-slots"></div>
     </section>
 
-    <section class="apex-panel" data-sec="race">
-      <div class="apex-kicker">One race, ten cars</div>
-      <h1 class="apex-title" data-glitch="Race"><em>Race</em></h1>
-      <p class="apex-sub">Spa-Francorchamps &middot; 7.00 km &middot; three laps.</p>
-      <div class="apex-cards">
-        <button type="button" class="apex-card" data-go="quick">
-          <span class="art" style="background-image:url('assets/career/pitlane-hero.png')"></span>
-          <span class="slot">Quick</span><span class="name">Quick race</span>
-          <span class="meta">No season, no consequences. Just the lap.</span>
-          <span class="go">Drive &rarr;</span>
-        </button>
-        <button type="button" class="apex-card" data-go="career">
-          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
-          <span class="slot">Season</span><span class="name">Career race</span>
-          <span class="meta">Counts for points, prize money and the table.</span>
-          <span class="go">Season &rarr;</span>
-        </button>
-      </div>
-    </section>
-
-    <section class="apex-panel" data-sec="garage">
-      <div class="apex-kicker">Build your line</div>
-      <h1 class="apex-title" data-glitch="Garage"><em>Garage</em></h1>
-      <p class="apex-sub">Body, halo, wing and rims. It carries into every session.</p>
-      <div class="apex-cards">
-        <button type="button" class="apex-card" data-go="garage">
-          <span class="art" style="background-image:url('assets/career/driver-garage.png')"></span>
-          <span class="slot">Livery</span><span class="name">Open the garage</span>
-          <span class="meta">Turn the car and set the colours</span>
-          <span class="go">Open &rarr;</span>
-        </button>
-        <button type="button" class="apex-card" data-go="controller">
-          <span class="slot">Input</span><span class="name">Controller</span>
-          <span class="meta">PS5 / Xbox &middot; shoulder controls</span>
-          <span class="go">Connect &rarr;</span>
-        </button>
-      </div>
-      <div id="controller-panel" aria-hidden="true">
-        <div class="controller-kicker">Controller link</div>
-        <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
-        <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick &larr;</b> steer left</span><span><b>Left stick &rarr;</b> steer right</span></div>
-        <button id="controller-close" type="button">Close</button>
-      </div>
-    </section>
-
+    <!-- ========================================================= REPLAYS -->
     <section class="apex-panel" data-sec="replays">
-      <div class="apex-kicker">Driver archive</div>
-      <h1 class="apex-title" data-glitch="Replays"><em>Replays</em></h1>
+      <h1 class="apex-title" data-glitch="Replays">Replays<em>Driver archive</em></h1>
       <p class="apex-sub">Your quickest runs, from every camera.</p>
       <div id="apex-laps"></div>
+    </section>
+
+    <!-- ========================================================== GARAGE -->
+    <section class="apex-panel" data-sec="garage">
+      <h1 class="apex-title" data-glitch="Garage">Garage<em>Build your machine</em></h1>
+      <p class="apex-sub">Customise. Optimise. Compete. Your car, your way.</p>
+      <div class="ggrid">
+        <div class="gtiles" id="apex-gtiles"></div>
+        <div class="gsetup" id="apex-gsetup"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ RACE -->
+    <section class="apex-panel" data-sec="race">
+      <h1 class="apex-title" data-glitch="Race">Race<em>Set the scene</em></h1>
+      <p class="apex-sub">Choose your conditions and hit the track.</p>
+      <div class="rpane">
+        <div class="rbox rlight">
+          <div class="rlabel">Time of day</div>
+          <div class="rtrack" id="race-light"></div>
+        </div>
+        <div class="rcard" id="race-track">
+          <div class="rshot"></div>
+          <div class="rname">Spa-Francorchamps<span>Seven kilometres through the Ardennes</span></div>
+        </div>
+        <div class="rrow">
+          <div class="rbox rstep" id="race-weather"></div>
+          <div class="rbox rstep" id="race-laps"></div>
+        </div>
+        <button type="button" class="rgo" id="race-go">Start race <i>&raquo;</i></button>
+      </div>
+    </section>
+
+    <!-- ======================================================== SETTINGS -->
+    <section class="apex-panel" data-sec="settings">
+      <h1 class="apex-title" data-glitch="Settings">Settings<em>Cockpit setup</em></h1>
+      <p class="apex-sub">Controls, controller and session preferences.</p>
+      <div class="sgrid">
+        <div class="sbox">
+          <div class="slabel">Controller</div>
+          <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
+          <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick &larr;</b> steer left</span><span><b>Left stick &rarr;</b> steer right</span></div>
+          <button id="controller-close" type="button">Close</button>
+        </div>
+        <div class="sbox">
+          <div class="slabel">Keyboard</div>
+          <div class="skeys">
+            <div class="ctrl-row"><kbd>W</kbd><kbd>S</kbd><span>Throttle and brake</span></div>
+            <div class="ctrl-row"><kbd>A</kbd><kbd>D</kbd><span>Steering</span></div>
+            <div class="ctrl-row"><kbd>C</kbd><span>Camera &mdash; nose, chase, TV</span></div>
+            <div class="ctrl-row"><kbd>Q</kbd><span>Detail &mdash; full, balanced, fast</span></div>
+            <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
+            <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
+            <div class="ctrl-row"><kbd>J</kbd><span>Start a race</span></div>
+            <div class="ctrl-row"><kbd>G</kbd><span>Barrier editor</span></div>
+            <div class="ctrl-row"><kbd>L</kbd><span>Racing line editor</span></div>
+          </div>
+        </div>
+      </div>
+      <div id="controller-panel" aria-hidden="true"></div>
     </section>
   </main>
 
   <footer class="apex-footer">
     <p id="bootmsg">System ready // Spa 2022</p>
-    <div class="keys"><span><b>Enter</b> select</span><span><b>&larr; &rarr;</b> move</span></div>
     <div id="bar"><i></i></div>
+    <div class="apex-motto">Racing unites us</div>
+    <div class="apex-fhf"><span>Faster</span><span>Higher</span><span>Further</span></div>
   </footer>
 
   <!-- Kept because scripts elsewhere still reach for these by id. Hidden. -->
@@ -11762,7 +11763,7 @@ function aiPlace(d, i, flying){
    it steps, so there is one release and both of them answer to it. */
 const RACE={ on:false, phase:'', t:0, hold:0, ready:false };
 const RACE_CARS=10;   // you and nine others, on the ten painted slots
-const RACE_LAPS=3;    // the distance
+let RACE_LAPS=3;      // the distance -- set from the Race page
 /* One lap, so the line is the finish. Everyone's race time runs from lights out
    and stops when they cross it; the penalty is added to yours afterwards, which
    is the whole point of it -- five seconds is only a punishment if somebody is
@@ -13852,9 +13853,12 @@ function closeCustomizer(){
   if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
 }
 
+/* The floating cog is gone: settings are a section in the menu now, which is
+   where the controller lives too. Kept null-safe rather than deleted outright
+   because the markup may come back. */
 const homeSettings=document.getElementById('home-settings');
 const homeSettingsToggle=document.getElementById('home-settings-toggle');
-homeSettingsToggle.onclick=e=>{
+if(homeSettingsToggle) homeSettingsToggle.onclick=e=>{
   e.stopPropagation(); const on=homeSettings.classList.toggle('open');
   homeSettingsToggle.setAttribute('aria-expanded',String(on));
 };
@@ -13865,7 +13869,7 @@ if(homeControlsToggle) homeControlsToggle.onclick=e=>{
   homeControlsToggle.setAttribute('aria-expanded',String(on));
 };
 addEventListener('pointerdown',e=>{
-  if(homeSettings&&!homeSettings.contains(e.target)){
+  if(homeSettings&&homeSettingsToggle&&!homeSettings.contains(e.target)){
     homeSettings.classList.remove('open'); homeSettingsToggle.setAttribute('aria-expanded','false');
   }
 });
@@ -14679,7 +14683,20 @@ function apexShow(sec){
   apexPanels.forEach(p=>p.classList.toggle('on',p.dataset.sec===sec));
   if(sec==='career') apexPaintSlots();
   if(sec==='replays') apexPaintLaps();
-  if(sec==='home') apexPaintStandings();
+  if(sec==='home'){ apexPaintHome(); apexDriverBadge(); }
+  if(sec==='garage') apexPaintGarage();
+  if(sec==='race') apexPaintRace();
+  /* Each section brings its own picture. One element, one attribute, so there
+     is no stack of backgrounds fading over each other. */
+  const boot=document.getElementById('boot');
+  if(boot) boot.dataset.bg = (sec==='race'||sec==='garage') ? sec : 'home';
+  const vert=document.getElementById('apex-vert');
+  if(vert){
+    const words = sec==='garage' ? ['Same','drive','bigger','tomorrow']
+                : sec==='race'   ? ['Set','the','scene']
+                :                  ['Speed','drives','progress'];
+    vert.innerHTML=words.map(w=>'<span>'+w+'</span>').join('');
+  }
   /* The panel is what changed, so that is what a screen reader should land on. */
   const live=document.querySelector('.apex-panel.on .apex-title');
   if(live){ live.tabIndex=-1; }
@@ -14709,57 +14726,171 @@ document.addEventListener('keydown',e=>{
    that can disagree. Clicking one selects it and opens the career on that
    save, which is the shortcut the mock-up is really promising: the front door
    should get you into the season you were already playing. */
+/* Drawn, not fetched. The page has to work offline, so every mark on it is a
+   path in this file. */
+const APEX_SVG=d=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+  +'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
+const APEX_ICON={
+  check:APEX_SVG('<circle cx="12" cy="12" r="8.4"/><path d="M8.3 12.2l2.6 2.6 4.8-5.2"/>'),
+  cup:APEX_SVG('<path d="M7.5 4h9v5a4.5 4.5 0 0 1-9 0z"/><path d="M7.5 5.4H5.2a2.6 2.6 0 0 0 2.6 2.9"/>'
+    +'<path d="M16.5 5.4h2.3a2.6 2.6 0 0 1-2.6 2.9"/><path d="M12 13.5V17m-3 3h6"/>'),
+  flag:APEX_SVG('<path d="M6 20V4"/><path d="M6 5h11l-2.2 3.6L17 12H6z"/>'),
+  bars:APEX_SVG('<path d="M5 19V13m4.7 6V8m4.6 11v-8m4.7 8V5"/>'),
+  clock:APEX_SVG('<circle cx="12" cy="12" r="8.4"/><path d="M12 7.4V12l3 1.8"/>'),
+  sun:APEX_SVG('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4'
+    +'M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>'),
+  chequer:APEX_SVG('<rect x="4" y="4" width="16" height="16" rx="1.4"/>'
+    +'<path d="M4 12h8V4m0 8h8m-8 0v8" stroke-width="1.4"/>'),
+  paint:APEX_SVG('<path d="M15.5 4h4.2v4.2h-4.2z"/><path d="M15.5 6.1H8.4a2 2 0 0 0-2 2v1.6"/>'
+    +'<rect x="4.6" y="9.7" width="3.6" height="5.2" rx="1"/><path d="M6.4 14.9V20"/>'),
+  livery:APEX_SVG('<path d="M3 14.4l2.6-4.2a3 3 0 0 1 2.6-1.5h7.6a3 3 0 0 1 2.6 1.5L21 14.4"/>'
+    +'<path d="M3 14.4h18v2.2H3z"/><circle cx="7" cy="17.6" r="1.9"/><circle cx="17" cy="17.6" r="1.9"/>'),
+  wing:APEX_SVG('<path d="M3.4 16h17.2"/><path d="M6 16c3.4-6.4 8.6-6.4 12 0"/><path d="M9.4 16v-4M14.6 16v-4"/>'),
+  gauge:APEX_SVG('<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-4.6"/><circle cx="12" cy="17" r="1.3"/>'),
+  helmetSm:APEX_SVG('<path d="M12 4.6c5 0 8.4 3.6 8.4 8.8 0 1.6-.3 3-.9 4.1l-7.3 1.3"/><path d="M12 4.6C7 4.6 4.2 8 4.2 13.4c0 3.4 3.4 5.4 7.5 5.4"/><path d="M6.7 15.4h10.6"/><path d="M19.7 17l2.1.7c.8.3.9 1.4.1 1.8l-7.2 2.7c-.8.3-1.7-.3-1.5-1.2l.6-3"/>'),
+  /* A filled silhouette, not an outline: at this size a 2px stroke reads as a
+     wire sketch rather than a helmet. Dome, visor, chin bar. */
+  helmet:'<svg viewBox="0 0 104 92" aria-hidden="true">'
+    +'<path fill="currentColor" opacity=".2" d="M50 4c23 0 37 15.5 37 37 0 7.2-1.5 13.4-4.2 18.2'
+    +'L49 65C25.5 65 12 54.6 12 39 12 19.4 27 4 50 4Z"/>'
+    +'<path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"'
+    +' d="M50 4c23 0 37 15.5 37 37 0 7.2-1.5 13.4-4.2 18.2L49 65C25.5 65 12 54.6 12 39 12 19.4 27 4 50 4Z"/>'
+    +'<path fill="currentColor" opacity=".55" d="M27.5 25.5c10.5-8.4 25-9.4 35.4-4.2 5.2 2.6 8.4 6.4 9.9 10.3'
+    +'l-34.6 4.6c-6.6 0-10.7-2.6-10.7-6.6Z"/>'
+    +'<path fill="none" stroke="currentColor" stroke-width="2.2" d="M19 50h62"/>'
+    +'<path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"'
+    +' d="M83 55.5l14.5 5.2c4.2 1.5 4.4 7.3.4 9l-39.4 15.6c-4.6 1.8-9.4-1.9-8.6-6.7l3.2-16.6"/>'
+    +'</svg>',
+};
+
+/* ----------------------------------------------------------------- career */
 function apexPaintSlots(){
   const host=document.getElementById('apex-slots');
   if(!host || typeof CAREER_SLOTS==='undefined') return;
   const c=CAREER_SLOTS[0], used=!!c.used, rounds=c.rounds||8;
-  const pct=used?Math.round(Math.min(1,((c.round||1)-1)/rounds)*100):0;
-  host.innerHTML='';
-  const b=document.createElement('button');
-  b.type='button'; b.className='apex-card';
-  b.innerHTML=
-     '<span class="art" style="background-image:url(\'assets/career/'
-    +(used?'driver-garage.png':'pitlane-hero.png')+'\')"></span>'
-    +'<span class="slot">'+(used?'Season '+(c.season||1):'New')+'</span>'
-    +'<span class="name">'+(used?apexEsc(c.team||'Continue'):'Start your career')+'</span>'
-    +(used?'<span class="bar"><i style="width:'+pct+'%"></i></span>':'')
-    +'<span class="meta">'
-    +(used ? 'Round '+Math.min(c.round||1,rounds)+' of '+rounds+' &middot; '+(c.points||0)
-             +' pts &middot; '+(c.coins||0).toLocaleString()+' credits'
-           : 'Name your team, build your car, race a championship')
-    +'</span>'
-    +'<span class="go">'+(used?'Continue &rarr;':'Begin &rarr;')+'</span>';
-  b.onclick=()=>{ CAREER_AT=0; careerOpen(); };
-  host.appendChild(b);
+  const round=Math.min(c.round||1,rounds);
+  const pct=used?Math.round((round-1)/rounds*100):0;
+  const row=(icon,text)=>'<div class="crow">'+APEX_ICON[icon]+'<span>'+text+'</span></div>';
 
-  /* Erasing is the only way to a new career now, so it gets said plainly
-     rather than hidden in a corner of the card. Two presses, no modal --
-     the same shape as deleting a lap. */
-  if(used){
-    const wrap=document.createElement('div');
-    wrap.className='apex-erase';
-    const btn=document.createElement('button');
-    btn.type='button'; btn.className='apex-erase-btn';
-    btn.textContent='Erase this career';
+  host.innerHTML=
+   '<div class="ccard'+(used?' live':' fresh')+'">'
+  +'<div class="ctag">'+(used?'Your career':'New career')+'<i>///</i></div>'
+  +'<h2>'+(used?'Continue':'New career')+'</h2>'
+  +'<div class="csub">'+(used?'Season '+(c.season||1):'Start your journey')+'</div>'
+  +(used
+     ? '<div class="cpct"><b>'+pct+'%</b><span><i style="width:'+pct+'%"></i></span></div>'
+       +row('helmetSm', apexEsc(c.team||'Driver')+' · driver career')
+       +row('chequer','Season '+(c.season||1)+' · Round '+round+' of '+rounds)
+       +row('gauge',(c.points||0)+' pts · '+(c.coins||0).toLocaleString()+' credits')
+     : '<div class="cplus" aria-hidden="true">+</div>')
+  +'<button type="button" class="cgo">'+(used?'Continue':'Create a new save')+'</button>'
+  +'</div>'
+  /* The one save is the only save, so erasing is the way to a new team. It is
+     said out loud here rather than tucked into a corner of the card. */
+  +(used
+     ? '<div class="ccard ghost">'
+       +'<div class="ctag">Start again<i>///</i></div>'
+       +'<h2>Erase</h2>'
+       +'<div class="csub">One career at a time</div>'
+       +'<p class="cnote">A career is a single save. Erasing '+apexEsc(c.team||'it')
+       +' frees the slot for a new team — there is no undo.</p>'
+       +'<button type="button" class="cgo danger">Erase this career</button>'
+       +'</div>'
+     : '');
+
+  host.querySelector('.ccard .cgo').onclick=()=>{ CAREER_AT=0; careerOpen(); };
+  const del=host.querySelector('.cgo.danger');
+  if(del){
     let armed=false, t=0;
-    btn.onclick=()=>{
+    del.onclick=()=>{
       if(!armed){
-        armed=true; btn.classList.add('armed');
-        btn.textContent='Press again to erase '+(c.team||'this career');
-        clearTimeout(t); t=setTimeout(()=>{
-          armed=false; btn.classList.remove('armed'); btn.textContent='Erase this career'; },4000);
+        armed=true; del.classList.add('armed');
+        del.textContent='Press again to erase';
+        clearTimeout(t); t=setTimeout(()=>{ armed=false; del.classList.remove('armed');
+          del.textContent='Erase this career'; },4000);
         return;
       }
       clearTimeout(t);
       CAREER_SLOTS[0]=CAREER_BLANK(); CAREER.active=false; careerSave();
-      apexPaintSlots(); apexPaintStandings();
+      apexPaintSlots(); apexPaintHome(); apexDriverBadge();
     };
-    wrap.appendChild(btn);
-    wrap.insertAdjacentHTML('beforeend',
-      '<span class="apex-erase-note">A career is a single save. Erasing it frees the slot '
-      +'for a new team &mdash; there is no undo.</span>');
-    host.appendChild(wrap);
   }
+}
+
+/* ----------------------------------------------------------------- garage */
+const APEX_TILES=[
+  {k:'livery', icon:'livery', name:'Livery',  meta:'Change design'},
+  {k:'paint',  icon:'paint',  name:'Paint',   meta:'Colours & finish'},
+  {k:'aero',   icon:'wing',   name:'Aero',    meta:'Wings & parts'},
+  {k:'power',  icon:'gauge',  name:'Power',   meta:'Engine & drive'},
+];
+function apexPaintGarage(){
+  const tiles=document.getElementById('apex-gtiles');
+  const setup=document.getElementById('apex-gsetup');
+  if(!tiles||!setup) return;
+  const c=apexCareer();
+  tiles.innerHTML=APEX_TILES.map((t,i)=>
+     '<button type="button" class="gtile'+(i===0?' on':'')+'" data-k="'+t.k+'">'
+    +'<i class="gmark">///</i>'+APEX_ICON[t.icon]
+    +'<b>'+t.name+'</b><span>'+t.meta+'</span></button>').join('');
+  Array.prototype.forEach.call(tiles.querySelectorAll('.gtile'),b=>{
+    b.onclick=()=>{
+      Array.prototype.forEach.call(tiles.querySelectorAll('.gtile'),x=>x.classList.remove('on'));
+      b.classList.add('on');
+      /* Livery and paint are the customiser -- the real car, in 3D, that you
+         can turn. Aero and power are things you buy, so they go to the shop. */
+      if(b.dataset.k==='aero'||b.dataset.k==='power'){
+        if(c){ CAREER_AT=0; careerOpen(); if(typeof careerPage==='function') setTimeout(()=>careerPage('shop'),80); }
+        else apexShow('career');
+      } else openCustomizer();
+    };
+  });
+
+  /* Numbers you actually have: pace from the parts fitted, grip from aero. */
+  const pw=c?(c.power||0):0, ae=c?(c.aero||0):0;
+  const bar=(label,v)=>'<div class="grow"><span>'+label+'</span>'
+    +'<i><b style="width:'+v+'%"></b></i><em>'+Math.round(v)+'</em></div>';
+  const style=(typeof carStyle!=='undefined')?carStyle:{body:'#c8102e'};
+  setup.innerHTML=
+   '<div class="hlabel">Current setup</div>'
+  +'<div class="gchip"><span class="gswatch" style="background:'+(style.body||'#c8102e')+'"></span>'
+  +'<span class="gname"><b>'+apexEsc(c?(c.team||'Custom livery'):'Custom livery')+'</b>'
+  +'<i>'+(c?('Season '+(c.season||1)):'No career')+'</i></span></div>'
+  +bar('Speed',      60+pw*8)
+  +bar('Downforce',  58+ae*8)
+  +bar('Handling',   55+(pw+ae)*4)
+  +'<button type="button" class="gfull">Open the garage <i>&rsaquo;</i></button>';
+  setup.querySelector('.gfull').onclick=openCustomizer;
+}
+
+/* ------------------------------------------------------------------- race */
+const APEX_LIGHT=[
+  {k:'midday', label:'Day'},
+  {k:'sunset', label:'Sunset'},
+  {k:'night',  label:'Night'},
+];
+let apexLight=1, apexLaps=3;
+function apexPaintRace(){
+  const light=document.getElementById('race-light');
+  const wx=document.getElementById('race-weather');
+  const lp=document.getElementById('race-laps');
+  if(!light||!wx||!lp) return;
+  light.innerHTML='<span class="rline"></span>'+APEX_LIGHT.map((o,i)=>
+     '<button type="button" class="rpip'+(i===apexLight?' on':'')+'" data-i="'+i+'">'
+    +'<i></i><span>'+o.label+'</span></button>').join('');
+  Array.prototype.forEach.call(light.querySelectorAll('.rpip'),b=>{
+    b.onclick=()=>{ apexLight=+b.dataset.i; apexPaintRace(); };
+  });
+  /* One weather. Saying "clear" and offering nothing else would be a control
+     that does not control anything, so it reads as a fact instead. */
+  wx.innerHTML=APEX_ICON.sun+'<span class="rlabel">Weather</span><b>Clear</b>';
+  wx.classList.add('fixed');
+  lp.innerHTML=APEX_ICON.chequer+'<span class="rlabel">Laps</span>'
+    +'<div class="rstepper"><button type="button" data-d="-1">&lsaquo;</button>'
+    +'<b>'+apexLaps+'</b><button type="button" data-d="1">&rsaquo;</button></div>';
+  Array.prototype.forEach.call(lp.querySelectorAll('button'),b=>{
+    b.onclick=()=>{ apexLaps=Math.max(1,Math.min(10,apexLaps+ +b.dataset.d)); apexPaintRace(); };
+  });
 }
 /* THE TOP TEN, ON THE PAGE.
 
@@ -14815,41 +14946,131 @@ function replayGo(){
   }
   else startTrack('spa22');
 }
-/* The championship for the one career, straight from CareerSeason.standings --
-   the same table the season is scored against, not a second copy of it. Team
-   colours come from CAREER_TEAMS, so the stripe down each row is the car. */
-function apexPaintStandings(){
-  const host=document.getElementById('apex-standings');
-  if(!host) return;
+/* ==========================================================================
+   THE FRONT DOOR
+   Six sections, one career, and every number on screen read from that career
+   rather than invented for the picture. Anything the game does not have --
+   a calendar of named circuits, a driver level, a decal editor -- is not
+   faked: the space goes to something that is real instead.
+   ========================================================================== */
+function apexCareer(){
   const c=(typeof CAREER_SLOTS!=='undefined') && CAREER_SLOTS[0];
-  if(!c || !c.used || typeof CareerSeason==='undefined'){
-    host.innerHTML='<div class="apex-board empty">'
-      +'<span class="bhead">Championship</span>'
-      +'<p>No career yet. Name a team and the table starts filling in.</p>'
-      +'<button type="button" class="bgo" data-go="career">Start a career &rarr;</button>'
-      +'</div>';
-    const g=host.querySelector('.bgo'); if(g) g.onclick=()=>apexShow('career');
+  return (c && c.used) ? c : null;
+}
+const APEX_ORD=n=>['th','st','nd','rd'][(n%100-n%10!=10)*(n%10<4)*n%10]||'th';
+
+/* The badge in the corner: your team, and the season you have reached. */
+function apexDriverBadge(){
+  const c=apexCareer();
+  const n=document.getElementById('apex-drivername');
+  const t=document.getElementById('apex-driverteam');
+  const l=document.getElementById('apex-driverlvl');
+  if(!n||!t||!l) return;
+  n.textContent = c ? (c.team||'Driver') : 'No career';
+  t.textContent = c ? ('Season '+(c.season||1)) : 'Rookie';
+  l.textContent = c ? (c.season||1) : '–';
+}
+
+/* ------------------------------------------------------------------- home */
+function apexPaintHome(){
+  const host=document.getElementById('apex-home');
+  const meta=document.getElementById('apex-homemeta');
+  if(!host) return;
+  const c=apexCareer();
+  if(!c || typeof CareerSeason==='undefined'){
+    if(meta) meta.textContent='No career yet';
+    host.innerHTML='<div class="hcard wide empty">'
+      +'<div class="hlabel">Drivers championship</div>'
+      +'<p>Name a team and every number on this page starts filling in: your '
+      +'position, your points, the table you are climbing.</p>'
+      +'<button type="button" class="hgo">Start a career &rarr;</button></div>';
+    const g=host.querySelector('.hgo'); if(g) g.onclick=()=>apexShow('career');
     return;
   }
-  let rows=[];
-  try{ rows=CareerSeason.standings(c)||[]; }catch(e){ rows=[]; }
   const rounds=c.rounds||8, round=Math.min(c.round||1,rounds);
-  const colour=n=>{ const t=(typeof CAREER_TEAMS!=='undefined')
-                      && CAREER_TEAMS.find(x=>x.name===n);
-                    return t?t.body:'#e8402a'; };
-  host.innerHTML='<div class="apex-board">'
-    +'<div class="brow bhead"><span class="bp">Championship</span>'
-    +'<span class="bn">Season '+(c.season||1)+'</span>'
-    +'<span class="bv">Round '+round+' / '+rounds+'</span></div>'
-    +rows.map((r,i)=>
-       '<div class="brow'+(r.you?' you':'')+'">'
-      +'<span class="bp">'+String(i+1).padStart(2,'0')+'</span>'
-      +'<span class="bc" style="background:'+(r.you?'currentColor':colour(r.name))+'"></span>'
-      +'<span class="bn">'+apexEsc(r.name||'\u2014')+(r.you?' <em>you</em>':'')+'</span>'
-      +'<span class="bv">'+(r.points||0)+'</span>'
-      +'</div>').join('')
-    +'</div>';
+  if(meta) meta.textContent='Season '+(c.season||1)+' · Round '+round+' of '+rounds;
+
+  let table=[];
+  try{ table=CareerSeason.standings(c)||[]; }catch(e){ table=[]; }
+  const pos=Math.max(1,table.findIndex(r=>r.you)+1);
+  const done=(c.history||[]).filter(h=>h.season===(c.season||1));
+  const wins=done.filter(h=>h.pos===1).length;
+  const podiums=done.filter(h=>h.pos<=3).length;
+  const avg=done.length ? (done.reduce((t,h)=>t+h.pos,0)/done.length).toFixed(1) : '–';
+  const pct=Math.round((round-1)/rounds*100);
+  const last=c.last;
+  /* Your quickest lap, from the same store the Replays page reads. */
+  let bestLap='–';
+  try{ const laps=apexLapList(); if(laps.length) bestLap=ttFmt(laps[0].t); }catch(e){}
+
+  const stat=(icon,label,val)=>'<div class="hstat">'+APEX_ICON[icon]
+    +'<span>'+label+'</span><b>'+val+'</b></div>';
+
+  host.innerHTML=
+  /* 1 -- where you stand */
+   '<div class="hcard hpos">'
+  +'<div class="hlabel">Championship position</div>'
+  +'<div class="hbig"><b>'+pos+'</b><i>'+APEX_ORD(pos)+'</i></div>'
+  +'<div class="hpts">'+(c.points||0)+' <span>pts</span></div>'
+  +'<div class="hfoot">Season '+(c.season||1)+'<em>'
+  +(pos===1?'Leading the championship':pos<=3?'Fighting for more':'Climbing the order')
+  +'</em></div>'
+  +'<span class="hhelm" aria-hidden="true">'+APEX_ICON.helmet+'</span>'
+  +'</div>'
+  /* 2 -- how far through */
+  +'<div class="hcard hprog">'
+  +'<div class="hlabel">Season progress</div>'
+  +'<div class="hcount"><b>'+(round-1)+'</b><i>/ '+rounds+'</i><span>rounds</span></div>'
+  +'<div class="hbar"><i style="width:'+pct+'%"></i></div>'
+  +stat('check','Wins',wins)
+  +stat('cup','Podiums',podiums)
+  +stat('flag','Points',c.points||0)
+  +stat('bars','Average finish',avg)
+  +'</div>'
+  /* 3 -- the round just gone */
+  +'<div class="hcard hlast">'
+  +'<div class="hlabel">Last race</div>'
+  +(last
+     ? '<div class="hres"><div class="hrname">Round '+last.round
+       +'<span>Season '+last.season+'</span></div>'
+       +'<b class="hrpos">'+(last.dsq?'DSQ':last.dnf?'DNF':last.pos+APEX_ORD(last.pos))+'</b></div>'
+       +stat('cup','Started',last.grid?last.grid+APEX_ORD(last.grid):'–')
+       +stat('flag','Points scored',last.points||0)
+       +stat('clock','Fastest lap',bestLap)
+     : '<p class="hnone">No round finished yet. Your first result lands here.</p>')
+  +'</div>'
+  /* 4 -- the table */
+  +'<div class="hcard hstand">'
+  +'<div class="hlabel">Drivers standings</div>'
+  +'<div class="hrows">'
+  +table.slice(0,5).map((r,i)=>
+     '<div class="hrow'+(r.you?' you':'')+'"><span>'+(i+1)+'</span>'
+    +'<b>'+apexEsc(r.name||'—')+'</b><i>'+(r.points||0)+'</i></div>').join('')
+  +(pos>5 ? '<div class="hrow you out"><span>'+pos+'</span><b>'+apexEsc(c.team||'You')
+            +'</b><i>'+(c.points||0)+'</i></div>' : '')
+  +'</div>'
+  +'<button type="button" class="hmore">Full standings <i>&rsaquo;</i></button>'
+  +'</div>';
+  const more=host.querySelector('.hmore');
+  if(more) more.onclick=()=>apexStandingsOpen(c,table);
 }
+
+/* The whole table, when five rows is not enough. */
+function apexStandingsOpen(c,table){
+  let el=document.getElementById('apex-full');
+  if(!el){ el=document.createElement('div'); el.id='apex-full'; document.body.appendChild(el); }
+  el.innerHTML='<div class="fullwrap"><button type="button" class="fullx" aria-label="Close">&times;</button>'
+    +'<div class="hlabel">Drivers standings &middot; Season '+(c.season||1)+'</div>'
+    +'<div class="hrows">'
+    +table.map((r,i)=>'<div class="hrow'+(r.you?' you':'')+'"><span>'+(i+1)+'</span>'
+      +'<b>'+apexEsc(r.name||'—')+'</b><i>'+(r.points||0)+'</i></div>').join('')
+    +'</div></div>';
+  el.classList.add('on');
+  const close=()=>el.classList.remove('on');
+  el.querySelector('.fullx').onclick=close;
+  el.onclick=e=>{ if(e.target===el) close(); };
+}
+
 function apexPaintLaps(){
   const host=document.getElementById('apex-laps');
   if(!host) return;
@@ -14875,6 +15096,19 @@ function apexPaintLaps(){
 }
 const apexEsc=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 /* One place that knows what a card means. */
+/* Start race: the lighting and the distance chosen on the page are what the
+   session actually gets, rather than a picture of a choice. */
+(function(){
+  const go=document.getElementById('race-go');
+  if(!go) return;
+  go.onclick=()=>{
+    if(typeof CAREER!=='undefined') CAREER.active=false;
+    RACE_LAPS=apexLaps;
+    const kind=(APEX_LIGHT[apexLight]||{}).k||'midday';
+    try{ qualifyingWeatherChoice=kind; }catch(e){}
+    goRacing('spa22');
+  };
+})();
 document.querySelectorAll('.apex-card[data-go]').forEach(card=>{
   card.addEventListener('click',()=>{
     switch(card.dataset.go){
@@ -14909,6 +15143,8 @@ function careerHomeRefresh(){
     meta.innerHTML=live+' save'+(live>1?'s':'')+' &middot; pick up where you left off';
   }
   if(typeof apexPaintSlots==='function') apexPaintSlots();
+  if(typeof apexPaintHome==='function') apexPaintHome();
+  if(typeof apexDriverBadge==='function') apexDriverBadge();
 }
 try{
  const legacy=localStorage.getItem(CAREER_KEY);
