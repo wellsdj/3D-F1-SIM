@@ -1114,7 +1114,17 @@ if('serviceWorker' in navigator){
   </header>
 
   <div id="home-settings">
-    <button class="cog" id="home-settings-toggle" aria-label="Open settings" aria-expanded="false">Settings</button>
+    <button class="cog" id="home-settings-toggle" aria-label="Settings" aria-expanded="false">
+      <!-- A ring, a hub and eight teeth, set out by geometry rather than drawn
+           by hand so the teeth are exactly even. Round caps, because a square
+           end on a 1.7px stroke reads as a burr at this size. -->
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <circle cx="12" cy="12" r="6.6"/>
+        <circle cx="12" cy="12" r="2.6"/>
+        <path d="M18.60 12.00L21.30 12.00 M16.67 16.67L18.58 18.58 M12.00 18.60L12.00 21.30 M7.33 16.67L5.42 18.58 M5.40 12.00L2.70 12.00 M7.33 7.33L5.42 5.42 M12.00 5.40L12.00 2.70 M16.67 7.33L18.58 5.42"/>
+      </svg>
+    </button>
     <div class="settings-menu">
       <div class="menu-kicker">Session settings</div>
       <div class="settings-item" id="home-controls-item">
