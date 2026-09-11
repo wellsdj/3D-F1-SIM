@@ -379,3 +379,54 @@
 .lap-cell.noplay .lap-go{color:var(--apex-faint)}
 .lap-cell.noplay:hover{transform:none;border-color:var(--apex-line);background:rgba(8,7,9,.72)}
 .lap-cell.noplay:hover:before{transform:scaleY(0)}
+
+
+/* =============================================================== LAP STRIP
+   The top ten across the panel, left to right, wrapping down -- timing-screen
+   order, so reading order is finishing order. Each slot is a position, a time
+   and the button that plays it. */
+#apex-laps{min-height:0;overflow:hidden}
+.lap-strip{
+  display:flex;flex-wrap:wrap;gap:9px;
+  max-height:min(38vh,300px);overflow-y:auto;padding:3px 4px 6px;margin:-3px -4px -6px;
+  scrollbar-width:thin;scrollbar-color:var(--apex-red) transparent;
+}
+.lap-strip::-webkit-scrollbar{width:5px}
+.lap-strip::-webkit-scrollbar-thumb{background:var(--apex-red)}
+.lap-slot{
+  flex:0 0 auto;min-width:126px;display:flex;flex-direction:column;gap:2px;
+  padding:11px 13px 10px;background:rgba(8,7,9,.66);border:1px solid var(--apex-line);
+  backdrop-filter:blur(8px);
+  transition:transform .3s cubic-bezier(.16,1,.3,1),border-color .25s ease,background .25s ease;
+}
+.lap-strip:hover .lap-slot{opacity:.6}
+.lap-slot:hover,.lap-slot:focus-within{
+  opacity:1;transform:translateY(-4px);border-color:var(--apex-red);background:rgba(24,6,9,.8);
+}
+.lap-slot .pos{font-size:8px;letter-spacing:.3em;color:var(--apex-faint)}
+.lap-slot.best .pos{color:var(--apex-red)}
+.lap-slot .t{
+  font-family:var(--apex-display);font-style:italic;font-size:21px;line-height:1.05;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums;
+}
+.lap-slot.best .t{color:var(--apex-red)}
+.lap-slot .when{font-size:8px;letter-spacing:.12em;color:var(--apex-dim);text-transform:uppercase}
+/* The button sits under the time, which is what makes the slot read as one
+   thing: the lap, and what you can do with it. */
+.lap-slot .watch{
+  margin-top:8px;padding:7px 9px;width:100%;
+  font-family:var(--apex-mono);font-size:8px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--apex-ink);background:rgba(255,255,255,.07);
+  border:1px solid var(--apex-line);cursor:pointer;text-align:center;
+  transition:background .2s ease,border-color .2s ease,color .2s ease;
+}
+.lap-slot .watch:hover,.lap-slot .watch:focus-visible{
+  background:var(--apex-red);border-color:var(--apex-red);color:#fff;outline:none;
+}
+/* A lap with no recording says so rather than offering a button that does
+   nothing. */
+.lap-slot .watch.off{
+  cursor:default;color:var(--apex-faint);background:none;
+  display:block;
+}
+.lap-slot .watch.off:hover{background:none;border-color:var(--apex-line);color:var(--apex-faint)}

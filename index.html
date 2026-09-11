@@ -1226,13 +1226,7 @@ if('serviceWorker' in navigator){
       <div class="apex-kicker">Driver archive</div>
       <h1 class="apex-title" data-glitch="Replays"><em>Replays</em></h1>
       <p class="apex-sub">Your quickest runs, from every camera.</p>
-      <div class="apex-cards">
-        <button type="button" class="apex-card" data-go="replays">
-          <span class="slot">Best</span><span class="name">Watch a lap</span>
-          <span class="meta">Nose, chase and the TV director</span>
-          <span class="go">Open &rarr;</span>
-        </button>
-      </div>
+      <div id="apex-laps"></div>
     </section>
   </main>
 
@@ -13785,24 +13779,11 @@ function lapBookRefresh(){
      the deleted laps back off the disk. */
   if(!TTREC.best && !(TTREC.history&&TTREC.history.length)) recLoad();
   const list=document.getElementById('lapbook-list'), empty=document.getElementById('lapbook-empty'), play=document.getElementById('lapbook-replay');
-  /* The best lap belongs in the list. It is stored separately -- TTREC.best is
-     the one the replay button has always played -- so without this it was
-     either missing from the grid or duplicated in it. Matched on time to two
-     decimals, which is the precision both are rounded to. */
-  let laps=(TTREC.history||[]).slice();
-  if(TTREC.best){
-    const t=+TTREC.best.t.toFixed(2);
-    const row=laps.find(l=>+l.t.toFixed(2)===t);
-    if(row){ if(!row.f) row.f=TTREC.best.f; }
-    else laps.push({t, at:TTREC.best.capturedAt, conditions:TTREC.best.conditions,
-                    livery:TTREC.best.livery, f:TTREC.best.f});
-  }
-  laps.sort((a,b)=>a.t-b.t);
-  laps=laps.slice(0,LAP_KEEP);
+  /* One list, shared with the Replays panel -- see apexLapList. This used to
+     reconcile TTREC.best against the history itself, which was the same
+     reasoning written twice and two places for it to go wrong. */
+  const laps=apexLapList();
   if(!list||!empty) return;
-  /* Left to right, then down and left again -- the way a line of text wraps.
-     It is a grid that fills by row, so the quickest lap is the top left and
-     reading order is finishing order. */
   list.innerHTML=laps.map((lap,i)=>
      '<button type="button" class="lap-cell'+(i===0?' best':'')
     +(lap.f?'':' noplay')+'" data-lap="'+i+'">'
@@ -13812,19 +13793,9 @@ function lapBookRefresh(){
     +'<span class="lap-meta">'+lapConditionsLabel(lap)+'</span>'
     +'<span class="lap-go">'+(lap.f?'Watch &rarr;':'No recording')+'</span>'
     +'</button>').join('');
-  /* Clicking a lap plays THAT lap. TTREC.best is what replayStart reads, so
-     the chosen one is loaded into it first -- the player is not duplicated,
-     it is pointed at a different recording. */
   Array.prototype.forEach.call(list.querySelectorAll('.lap-cell'),btn=>{
-    btn.onclick=()=>{
-      const lap=laps[+btn.dataset.lap];
-      if(!lap||!lap.f) return;
-      TTREC.best={ t:lap.t, f:lap.f, capturedAt:lap.at,
-                   conditions:lap.conditions, livery:lap.livery };
-      closeLapBook();
-      window._autoReplay=true; pendingReplay=true;
-      if(booted) replayStart(); else enterCircuit();
-    };
+    btn.onclick=()=>{ const lap=laps[+btn.dataset.lap];
+      if(!lap||!lap.f) return; closeLapBook(); apexWatch(lap); };
   });
   empty.style.display=laps.length?'none':'';
   /* A disabled button that says nothing is a button that looks broken. A lap
@@ -14713,6 +14684,7 @@ function apexShow(sec){
   Array.prototype.forEach.call(apexNav.children,b=>b.classList.toggle('on',b.dataset.sec===sec));
   apexPanels.forEach(p=>p.classList.toggle('on',p.dataset.sec===sec));
   if(sec==='career') apexPaintSlots();
+  if(sec==='replays') apexPaintLaps();
   /* The panel is what changed, so that is what a screen reader should land on. */
   const live=document.querySelector('.apex-panel.on .apex-title');
   if(live){ live.tabIndex=-1; }
@@ -14765,6 +14737,62 @@ function apexPaintSlots(){
       +'<span class="go">'+(used?'Continue &rarr;':'Create a save &rarr;')+'</span>';
     b.onclick=()=>{ if(typeof CAREER_AT!=='undefined') CAREER_AT=i; careerOpen(); };
     host.appendChild(b);
+  });
+}
+/* THE TOP TEN, ON THE PAGE.
+
+   One list, built once, used by the panel and by the lap book -- the best lap
+   is kept apart from the history (TTREC.best is what the replay player reads),
+   so anything that shows laps has to reconcile the two or it will either miss
+   the quickest one or show it twice. Matched on time to two decimals, the
+   precision both are rounded to.
+
+   Frames are what make a lap watchable. Every lap in the top ten keeps its
+   own; a lap set before that was true has a time and nothing behind it, and
+   says so rather than offering a button that does nothing. */
+function apexLapList(){
+  if(typeof TTREC==='undefined') return [];
+  if(!TTREC.best && !(TTREC.history&&TTREC.history.length)) { try{ recLoad(); }catch(e){} }
+  let laps=(TTREC.history||[]).slice();
+  if(TTREC.best){
+    const t=+TTREC.best.t.toFixed(2);
+    const row=laps.find(l=>+l.t.toFixed(2)===t);
+    if(row){ if(!row.f) row.f=TTREC.best.f; }
+    else laps.push({t, at:TTREC.best.capturedAt, conditions:TTREC.best.conditions,
+                    livery:TTREC.best.livery, f:TTREC.best.f});
+  }
+  return laps.sort((a,b)=>a.t-b.t).slice(0, typeof LAP_KEEP==='number'?LAP_KEEP:10);
+}
+/* Play one. TTREC.best is what replayStart reads, so the chosen lap is loaded
+   into it -- the player is not duplicated, it is pointed somewhere else. */
+function apexWatch(lap){
+  if(!lap||!lap.f) return;
+  TTREC.best={ t:lap.t, f:lap.f, capturedAt:lap.at,
+               conditions:lap.conditions, livery:lap.livery };
+  window._autoReplay=true; pendingReplay=true;
+  if(booted) replayStart(); else enterCircuit();
+}
+function apexPaintLaps(){
+  const host=document.getElementById('apex-laps');
+  if(!host) return;
+  const laps=apexLapList();
+  if(!laps.length){
+    host.innerHTML='<p class="apex-sub" style="max-width:40ch">'
+      +'No laps yet. Set one in a race or a quick run and it will appear here.</p>';
+    return;
+  }
+  host.innerHTML='<div class="lap-strip">'+laps.map((lap,i)=>
+     '<div class="lap-slot'+(i===0?' best':'')+'">'
+    +'<span class="pos">'+String(i+1).padStart(2,'0')+'</span>'
+    +'<b class="t">'+ttFmt(lap.t)+'</b>'
+    +'<span class="when">'+lapDateLabel(lap.at||lap.capturedAt)+'</span>'
+    +(lap.f
+       ? '<button type="button" class="watch" data-lap="'+i+'">'
+         +(i===0?'Watch your best lap':'Watch this lap')+'</button>'
+       : '<span class="watch off">No recording</span>')
+    +'</div>').join('')+'</div>';
+  Array.prototype.forEach.call(host.querySelectorAll('.watch[data-lap]'),b=>{
+    b.onclick=()=>apexWatch(laps[+b.dataset.lap]);
   });
 }
 const apexEsc=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
