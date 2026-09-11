@@ -10780,12 +10780,14 @@ function aiApplyAdj(lo, hi){
   }
   AI.k=aiCurvature(AI_WIN);
   AI.ks=aiSigned(AI_WIN);
-  AI.firstApex=null;
+  AI.firstApex=null;AI.lastApex=null;
   if(TRACK&&/spa/i.test(TRACK.glb||'')&&TT.gates.length){
     const gate=TT.gates[0];let start=0,best=Infinity;
     for(let i=0;i<n;i++){const dist=(AI.x[i]-gate.x)**2+(AI.z[i]-gate.z)**2;if(dist<best){best=dist;start=i;}}
     let peak=0;
     for(let m=Math.round(80/AI.ds);m<Math.round(650/AI.ds);m++){const i=(start+m)%n,k=Math.abs(AI.ks[i]);if(k>peak){peak=k;AI.firstApex=i;}}
+    peak=0;
+    for(let m=Math.round(100/AI.ds);m<Math.round(650/AI.ds);m++){const i=(start-m+n)%n,k=Math.abs(AI.ks[i]);if(k>peak){peak=k;AI.lastApex=i;}}
   }
   AI.v=aiProfile(AI.k, AI._margin||AI_MARGIN);
   aiBuildLines(AI._margin||AI_MARGIN);
@@ -11388,16 +11390,19 @@ function aiRoomAhead(d, side, metres){
 function aiTraffic(d,dt){
   const base=d.field?d.field.race[d.i]:0;
   const first=aiFirstProgress(d),span=first>-180&&first<90?55:30;
-  const left=Math.max(0,aiRoomNear(d,d.i,-1,span)-.6);
-  const right=Math.max(0,aiRoomNear(d,d.i,1,span)-.6);
+  const left=Math.max(0,aiRoomNear(d,d.i,-1,span)-.9);
+  const right=Math.max(0,aiRoomNear(d,d.i,1,span)-.9);
   const obstacles=[];
   const add=(x,z,speed)=>{const r=aiRelTo(d,x,z,speed*3.6);if(r&&r.gap>-6&&r.gap<55)obstacles.push(r);};
   add(carState.wx,carState.wz,carState.speed);
   for(const o of AIS)if(o!==d&&o.on&&o.car)add(o.car.st.wx,o.car.st.wz,o.car.st.speed);
   const candidates=[base,d.lat||base,base-2.5,base+2.5].map(x=>clamp(x,-left,right));
-  let want=candidates[0],best=Infinity;
+  const current=d.lat||0;
+  let want=clamp(current,-left,right),best=Infinity;
   for(const lat of candidates){
-    let score=Math.abs(lat-base)*.3+Math.abs(lat-(d.lat||0))*.12;
+    // Do not sweep across a car alongside or immediately ahead.
+    if(Math.abs(lat-current)>.15&&obstacles.some(o=>o.gap<12&&o.gap>-6&&o.lat>Math.min(current,lat)-2.4&&o.lat<Math.max(current,lat)+2.4))continue;
+    let score=Math.abs(lat-base)*.3+Math.abs(lat-(d.lat||0))*.5;
     for(const o of obstacles){const overlap=Math.max(0,2.3-Math.abs(lat-o.lat));score+=overlap*overlap*(o.gap<16?12:4);}
     if(score<best){best=score;want=lat;}
   }
@@ -11405,7 +11410,7 @@ function aiTraffic(d,dt){
   d.line='race';d.mode=Math.abs(want-base)>.4?'pass':'clear';d.want=want;
   d.speedK=1;d.capV=Infinity;d.vAct=d.v;d.pinned=false;
   const grid=d._gridT===undefined?1:clamp(.25+d._gridT/2,.25,1);
-  d.lat+=clamp(want-d.lat,-2.8*grid*dt,2.8*grid*dt);
+  d.lat+=clamp(want-d.lat,-1.8*grid*dt,1.8*grid*dt);
   d.lat=clamp(d.lat,-aiRoom(d.i,-1),aiRoom(d.i,1));
   d._spare=aiRoom(d.i,(d.off||0)>=0?1:-1)-Math.abs(d.off||0);
 }
@@ -11509,6 +11514,10 @@ function aiPedals(d, C){
   // never its throttle, braking target or reference speed profile.
   const v=C.st.speed,K=d.paceMul||1,V=d.v;
   const target=q=>Math.min(V[q],aiFirstLimit(d,q))*K;
+  let finalProgress=AI.lastApex==null?Infinity:(d.i-AI.lastApex)*d.ds;
+  if(finalProgress>d.len/2)finalProgress-=d.len;
+  if(finalProgress<-d.len/2)finalProgress+=d.len;
+  const finalApproach=finalProgress>=-220&&finalProgress<-40;
   const BRAKE=44; // small reserve below the physical 46 m/s² limit
   const offset=clamp(d.brakeOffset||0,-1,4); // metres: positive brakes earlier
   let capMin=Infinity,need=0;
@@ -11522,10 +11531,12 @@ function aiPedals(d, C){
   else if(v<capMin-.5)d._onBrakes=false;
   if(d._onBrakes){
     const required=need||Math.max(0,(v-(capMin-.5))*4);
-    d._brkS=(d._brkS||0)+(clamp(required/46,0,1)-(d._brkS||0))*.5;
+    const demand=clamp(required/46,0,1);
+    d._brkS=finalApproach?demand:(d._brkS||0)+(demand-(d._brkS||0))*.5;
     return {thr:0,brk:clamp(d._brkS,0,1)};
   }
   d._brkS=0;
+  if(finalApproach)return {thr:1,brk:0};
   const la=Math.max(3,v*.35),j=(d.i+Math.round(la/d.ds))%d.n;
   let tgt=target(j);
   const first=aiFirstProgress(d);
@@ -11624,7 +11635,7 @@ function collisionWall(C,dt){
 }
 function carsTouch(A,B,dt){
  if(!A||!B||Math.abs((A.groundY||0)-(B.groundY||0))>1.5)return false;
- const a=A.st,b=B.st;let hit=CollisionPhysics.solve(A,B);
+ const a=A.st,b=B.st;let hit=CollisionPhysics.solve(A,B,dt>0);
  if(!hit&&dt>0&&A._collisionPrev&&B._collisionPrev){
   const pa=A._collisionPrev,pb=B._collisionPrev,ea={...a},eb={...b};
   const travel=Math.hypot(ea.wx-pa.wx,ea.wz-pa.wz)+Math.hypot(eb.wx-pb.wx,eb.wz-pb.wz);

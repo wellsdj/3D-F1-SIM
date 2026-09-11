@@ -32,11 +32,13 @@
   const tx=-nz,tz=nx,at=cross(ra.x,ra.z,tx,tz),bt=cross(rb.x,rb.z,tx,tz);
   const slide=(va.x-vb.x)*tx+(va.z-vb.z)*tz;
   const friction=Math.max(-j*.18,Math.min(j*.18,slide/(mass+(at*at+(b?bt*bt:0))/inertia)));
-  const ix=nx*j+tx*friction,iz=nz*j+tz*friction;
+  // Halve car-to-car impulse and yaw; static barrier impacts keep full response.
+  const strength=b?.5:1;
+  const ix=(nx*j+tx*friction)*strength,iz=(nz*j+tz*friction)*strength;
   const av=velocity(a);setVelocity(a,av.x-ix,av.z-iz);a.impactYaw=(a.impactYaw||0)-cross(ra.x,ra.z,ix,iz)/inertia;
   if(b){const bv=velocity(b);setVelocity(b,bv.x+ix,bv.z+iz);b.impactYaw=(b.impactYaw||0)+cross(rb.x,rb.z,ix,iz)/inertia;}
   return closing;
  }
- function solve(a,b){const hit=overlap(a.st,b.st);if(!hit)return null;hit.closing=impulse(a,b,hit);const correction=Math.max(0,hit.depth-.002)*.5;a.st.wx-=hit.nx*correction;a.st.wz-=hit.nz*correction;b.st.wx+=hit.nx*correction;b.st.wz+=hit.nz*correction;return hit;}
+ function solve(a,b,respond=true){const hit=overlap(a.st,b.st);if(!hit)return null;hit.closing=respond?impulse(a,b,hit):0;const correction=Math.max(0,hit.depth-.002)*.5;a.st.wx-=hit.nx*correction;a.st.wz-=hit.nz*correction;b.st.wx+=hit.nx*correction;b.st.wz+=hit.nz*correction;return hit;}
  return {halfWidth,halfLength,velocity,setVelocity,support,overlap,impulse,solve};
 });
