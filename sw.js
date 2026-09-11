@@ -13,16 +13,16 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='f1sim-finish-tv-dsq-v27';
+const CACHE='f1sim-gear-audio-v28';
 const SHELL=[
-  './collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
+  './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/home/helmet-red.webp',
   './assets/home/race-pitlane.webp',
   './assets/home/garage-bay.webp','./career-season.js','./retirement-route.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
   './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
-  './idle.mp3','./accel.mp3','./coast.mp3','./brake.mp3',
+  './idle.mp3','./accel.mp3','./coast-lift.mp3','./brake.mp3',
   './home-hero.png','./home-race.webp','./home-best-laps.webp',
   './home-controller.webp','./home-customise.webp'
 ];
