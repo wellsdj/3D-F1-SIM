@@ -14837,17 +14837,30 @@ function apexPaintStandings(){
   const colour=n=>{ const t=(typeof CAREER_TEAMS!=='undefined')
                       && CAREER_TEAMS.find(x=>x.name===n);
                     return t?t.body:'#e8402a'; };
+  /* Every row carries a bar as wide as its share of the leader's points, so the
+     shape of the season reads before any of the numbers do -- a runaway leader
+     and a close fight look different from across the room. */
+  const top=Math.max(1,...rows.map(r=>r.points||0));
+  const you=rows.findIndex(r=>r.you);
+  const lead=you>0 ? (rows[0].points||0)-(rows[you].points||0) : 0;
   host.innerHTML='<div class="apex-board">'
     +'<div class="brow bhead"><span class="bp">Championship</span>'
     +'<span class="bn">Season '+(c.season||1)+'</span>'
     +'<span class="bv">Round '+round+' / '+rounds+'</span></div>'
     +rows.map((r,i)=>
-       '<div class="brow'+(r.you?' you':'')+'">'
+       '<div class="brow'+(r.you?' you':'')+(i===0?' lead':'')+'"'
+      +' style="--p:'+Math.round((r.points||0)/top*100)+'%;--d:'+(60+i*38)+'ms">'
       +'<span class="bp">'+String(i+1).padStart(2,'0')+'</span>'
       +'<span class="bc" style="background:'+(r.you?'currentColor':colour(r.name))+'"></span>'
       +'<span class="bn">'+apexEsc(r.name||'\u2014')+(r.you?' <em>you</em>':'')+'</span>'
       +'<span class="bv">'+(r.points||0)+'</span>'
       +'</div>').join('')
+    +'<div class="bfoot">'
+    +(you===0 ? 'Leading the championship'
+      : you>0 ? apexEsc(String(lead))+' points off the lead'
+              : 'Championship')
+    +'<span>'+Math.max(0,rounds-round+1)+' round'+(rounds-round+1===1?'':'s')+' remaining</span>'
+    +'</div>'
     +'</div>';
 }
 function apexPaintLaps(){

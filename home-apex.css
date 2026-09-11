@@ -506,7 +506,8 @@
 .apex-board.empty .bgo:hover{background:rgba(255,31,45,.12);border-color:var(--apex-red)}
 
 /* -------------------------------------------------------- erasing a career */
-.apex-erase{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:18px}
+.apex-erase{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:18px;
+  flex:1 0 100%}          /* its own line: #apex-slots is a flex row of cards */
 .apex-erase-btn{
   border:1px solid var(--apex-line);background:none;cursor:pointer;
   color:var(--apex-dim);font-family:var(--apex-mono);font-size:11px;
@@ -524,3 +525,111 @@
   .apex-board{animation:none}
   .apex-erase-btn.armed{animation:none}
 }
+
+/* ==========================================================================
+   THE FRONT DOOR, CENTRED
+   Only the home panel. Every other section keeps its left-aligned column --
+   home is the one screen you arrive at rather than navigate within, and it
+   earns the symmetry. Scoped by [data-sec] so nothing else shifts.
+   ========================================================================== */
+.apex-panel[data-sec="home"]{
+  align-items:center;
+  text-align:center;
+  gap:clamp(16px,2vw,30px);
+}
+.apex-panel[data-sec="home"] .apex-kicker{justify-content:center}
+/* A rule each side, not just the one: centred type wants closing as well as
+   opening, or it reads as left-aligned text that slipped. */
+.apex-panel[data-sec="home"] .apex-kicker:after{
+  content:"";width:34px;height:2px;background:var(--apex-red);
+  box-shadow:0 0 14px rgba(255,31,45,.85);
+}
+.apex-panel[data-sec="home"] .apex-title{text-align:center}
+.apex-panel[data-sec="home"] .apex-sub{
+  max-width:none;text-align:center;
+}
+/* The car lives on the right of the hero and the type now crosses it, so the
+   centre gets its own ground -- a soft ellipse of dark, not a flat panel. */
+.apex-panel[data-sec="home"]:before{
+  content:"";position:absolute;inset:-8% -12%;z-index:-1;pointer-events:none;
+  background:radial-gradient(ellipse 62% 70% at 50% 48%,
+    rgba(6,5,7,.82) 0%, rgba(6,5,7,.66) 42%, rgba(6,5,7,0) 78%);
+}
+.apex-panel[data-sec="home"]{position:relative}
+
+/* The board, centred and given the room to be the centrepiece. */
+#apex-standings{max-width:none;width:100%;display:flex;justify-content:center}
+#apex-standings .apex-board{width:min(660px,100%);text-align:left}
+
+/* --------------------------------------------------- board, second pass */
+.apex-board{
+  border-left-width:1px;
+  border-top:2px solid var(--apex-red);
+  box-shadow:0 30px 80px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05);
+}
+.apex-board .brow{position:relative;overflow:hidden}
+/* Share of the leader's points, drawn behind the row. */
+.apex-board .brow:not(.bhead):before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:var(--p,0%);
+  background:linear-gradient(90deg,rgba(255,255,255,.07),rgba(255,255,255,.015));
+  transform-origin:left;
+  animation:barGrow .75s cubic-bezier(.16,1,.3,1) both;
+  animation-delay:var(--d,0ms);
+  pointer-events:none;
+}
+@keyframes barGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.apex-board .brow:not(.bhead){
+  animation:rowIn .5s cubic-bezier(.16,1,.3,1) both;
+  animation-delay:var(--d,0ms);
+  transition:background .2s ease;
+}
+@keyframes rowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+.apex-board .brow:not(.bhead):hover{background:rgba(255,255,255,.045)}
+.apex-board .brow>*{position:relative}
+
+.apex-board .brow.lead .bp,
+.apex-board .brow.lead .bn,
+.apex-board .brow.lead .bv{color:#fff}
+.apex-board .brow.you:before{
+  background:linear-gradient(90deg,rgba(255,31,45,.3),rgba(255,31,45,.06));
+}
+/* A marker in the gutter so your row is findable without reading it. */
+.apex-board .brow.you:after{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--apex-red);box-shadow:0 0 12px rgba(255,31,45,.9);
+}
+
+.apex-board .bfoot{
+  display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  margin-top:7px;padding:10px 16px 2px;
+  border-top:1px solid var(--apex-line);
+  font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--apex-red);
+  animation:rowIn .5s cubic-bezier(.16,1,.3,1) both;animation-delay:.5s;
+}
+.apex-board .bfoot span{color:var(--apex-faint)}
+
+.apex-board.empty{align-items:center;text-align:center}
+.apex-board.empty p{max-width:34ch}
+
+@media (prefers-reduced-motion:reduce){
+  .apex-board .brow:not(.bhead),
+  .apex-board .brow:not(.bhead):before,
+  .apex-board .bfoot{animation:none}
+}
+@media (max-width:760px){
+  .apex-panel[data-sec="home"]:before{inset:-14% -20%}
+  .apex-board .bfoot{flex-direction:column;gap:4px;align-items:flex-start}
+}
+
+/* The stage is a one-cell grid with every panel stacked in it. Left to itself
+   that implicit column sizes to content -- the nowrap headline -- so a centred
+   panel centred inside an 800px box on a 1600px screen and looked left-aligned
+   with a stray table under it. The column has to be the full width for
+   "centre" to mean the middle of the screen.
+
+   #boot needs the same treatment for the same reason: it is a rows-only grid,
+   so its implicit column was content-sized too, and a stage that can shrink
+   made the whole thing collapse to a ribbon. */
+#boot{grid-template-columns:minmax(0,1fr)}
+.apex-stage{grid-template-columns:minmax(0,1fr)}
