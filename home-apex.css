@@ -39,13 +39,18 @@
 /* The picture, and the three things sitting on top of it: a wash so type
    stays readable, a scanline weave, and a slow drift so the screen is never
    completely still. */
+/* display:block is load-bearing. career-menu.css carries
+   `#boot:before,#boot:after{display:none}` from the old front door, and this
+   rule never declared display -- so the picture was there, correct, cached and
+   invisible, and the screen was black. A later rule only wins the properties
+   it actually names. */
 #boot:before{
-  content:"";position:absolute;inset:-3% -3% -3% -3%;z-index:0;
+  content:"";display:block;position:absolute;inset:-3% -3% -3% -3%;z-index:0;
   background:url('assets/home/hero-red.webp') center right/cover no-repeat;
   animation:apexDrift 26s ease-in-out infinite alternate;
 }
 #boot:after{
-  content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  content:"";display:block;position:absolute;inset:0;z-index:1;pointer-events:none;
   background:
     linear-gradient(90deg,rgba(7,6,10,.97) 0%,rgba(7,6,10,.9) 26%,rgba(7,6,10,.45) 58%,rgba(7,6,10,.15) 100%),
     linear-gradient(180deg,rgba(7,6,10,.85) 0%,rgba(7,6,10,0) 26%,rgba(7,6,10,0) 62%,rgba(7,6,10,.92) 100%),
@@ -302,3 +307,60 @@
   .apex-title{font-size:clamp(32px,6vw,54px)}
   .apex-card{min-height:118px}
 }
+
+
+/* ===================================================================== LAPS
+   The archive reads like a page of text: quickest at the top left, filling
+   across and wrapping down. Reading order is finishing order, which means the
+   grid needs no numbering to be understood -- though it has it anyway, because
+   a lap time without a position beside it is just a number. */
+#lapbook{
+  background:linear-gradient(120deg,rgba(7,6,10,.96),rgba(10,5,7,.9)),
+             url('assets/home/hero-red.webp') center right/cover no-repeat !important;
+}
+#lapbook-list{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fill,minmax(184px,1fr));
+  gap:10px !important;
+  width:min(100%,880px) !important;
+  max-height:min(52vh,440px);overflow-y:auto;padding-right:6px;
+  scrollbar-width:thin;scrollbar-color:var(--apex-red) transparent;
+}
+#lapbook-list::-webkit-scrollbar{width:6px}
+#lapbook-list::-webkit-scrollbar-thumb{background:var(--apex-red)}
+#lapbook-list::-webkit-scrollbar-track{background:rgba(255,255,255,.06)}
+.lap-cell{
+  position:relative;display:flex;flex-direction:column;gap:3px;
+  padding:13px 15px 12px;text-align:left;cursor:pointer;
+  font-family:var(--apex-mono);color:var(--apex-ink);
+  background:rgba(8,7,9,.72);border:1px solid var(--apex-line);
+  transition:transform .3s cubic-bezier(.16,1,.3,1),border-color .25s ease,background .25s ease;
+}
+.lap-cell:before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--apex-red);
+  transform:scaleY(0);transform-origin:top;transition:transform .3s cubic-bezier(.16,1,.3,1);
+}
+#lapbook-list:hover .lap-cell{opacity:.55}
+.lap-cell:hover,.lap-cell:focus-visible{
+  opacity:1;transform:translateY(-4px);border-color:var(--apex-red);
+  background:rgba(24,6,9,.84);outline:none;
+}
+.lap-cell:hover:before,.lap-cell:focus-visible:before{transform:scaleY(1)}
+.lap-cell .rank{font-size:8px;letter-spacing:.3em;color:var(--apex-faint)}
+.lap-cell.best .rank{color:var(--apex-red)}
+.lap-cell .lap-time{
+  font-family:var(--apex-display);font-style:italic;font-size:23px;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;line-height:1.05;
+}
+.lap-cell.best .lap-time{color:var(--apex-red)}
+.lap-cell .lap-meta{font-size:8.5px;letter-spacing:.12em;color:var(--apex-dim);text-transform:uppercase}
+.lap-cell .lap-go{
+  margin-top:7px;padding-top:7px;border-top:1px solid var(--apex-line);
+  font-size:8px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-red);
+}
+/* A lap with no recording behind it says so rather than looking clickable and
+   doing nothing. */
+.lap-cell.noplay{cursor:default}
+.lap-cell.noplay .lap-go{color:var(--apex-faint)}
+.lap-cell.noplay:hover{transform:none;border-color:var(--apex-line);background:rgba(8,7,9,.72)}
+.lap-cell.noplay:hover:before{transform:scaleY(0)}

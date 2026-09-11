@@ -5827,13 +5827,44 @@ function recKeep(lapTime,meta){
   try{ localStorage.setItem(REPLAY_KEY, JSON.stringify(TTREC.best)); }catch(e){}
   replayBtn();
 }
+/* EVERY LAP IN THE TOP TEN KEEPS ITS RECORDING, not just the quickest.
+
+   The history used to hold times only -- a list of numbers with nothing behind
+   them -- so "watch this one" could only ever mean the single best, which is
+   what TTREC.best is for. Ten laps of frames is about 1.4 MB (a 2:10 lap at
+   30 Hz, six numbers a frame, is ~148 KB of JSON) against a 5 MB budget, so
+   they fit with room to spare.
+
+   Ten, and the slow ones are dropped. Sorted on time, sliced at ten, and what
+   falls off the end is gone -- times and frames together, because a time with
+   no recording is a row that cannot do the one thing this page is for.
+
+   If the browser refuses the write anyway -- a smaller quota, or other data on
+   the origin -- the frames are shed from the slowest lap upward until it fits,
+   and the times are always saved. Losing a video is a disappointment; losing
+   the lap times is losing the record. */
+const LAP_KEEP=10;
 function recHistory(lapTime,meta){
   if(!(lapTime>0)) return;
   const snap=meta||lapSnapshot();
-  TTREC.history=[...(TTREC.history||[]),{t:+lapTime.toFixed(2),at:snap.capturedAt,
-    conditions:snap.conditions,livery:snap.livery}]
-    .sort((a,b)=>a.t-b.t).slice(0,8);
-  try{ localStorage.setItem(LAPS_KEY,JSON.stringify(TTREC.history)); }catch(e){}
+  const row={ t:+lapTime.toFixed(2), at:snap.capturedAt,
+              conditions:snap.conditions, livery:snap.livery,
+              f:TTREC.frames.length?TTREC.frames.slice():null,
+              schema:snap.schema, track:snap.track };
+  TTREC.history=[...(TTREC.history||[]), row]
+    .sort((a,b)=>a.t-b.t).slice(0,LAP_KEEP);
+  recSaveHistory();
+}
+function recSaveHistory(){
+  const rows=TTREC.history||[];
+  for(let drop=0; drop<=rows.length; drop++){
+    /* drop=0 writes everything; each further step strips the recording from
+       one more of the slowest laps. */
+    const out=rows.map((r,i)=> (i>=rows.length-drop) ? {...r, f:null} : r);
+    try{ localStorage.setItem(LAPS_KEY, JSON.stringify(out)); return true; }
+    catch(e){ /* quota: try again with one more recording dropped */ }
+  }
+  return false;
 }
 function recLoad(){
   try{ const d=JSON.parse(localStorage.getItem(REPLAY_KEY)||'null');
@@ -5842,7 +5873,9 @@ function recLoad(){
        if(Array.isArray(h)) TTREC.history=h.filter(x=>x&&x.t>0).map(x=>({
          ...x,t:+x.t,conditions:x.conditions&&TIME_OF_DAY[x.conditions.lighting]?{
            lighting:x.conditions.lighting,label:TIME_OF_DAY[x.conditions.lighting].label,weather:'dry'}:null,
-         livery:liveryNormalise(x.livery)})).sort((a,b)=>a.t-b.t).slice(0,8); }catch(e){}
+         livery:liveryNormalise(x.livery),
+         f:Array.isArray(x.f)&&x.f.length>4?x.f:null
+       })).sort((a,b)=>a.t-b.t).slice(0,LAP_KEEP); }catch(e){}
   if(!TTREC.history.length&&TTREC.best) TTREC.history=[{t:+TTREC.best.t,at:TTREC.best.capturedAt||0,
     conditions:TTREC.best.conditions,livery:TTREC.best.livery}];
   replayBtn();
@@ -13738,15 +13771,47 @@ function lapBookRefresh(){
      the deleted laps back off the disk. */
   if(!TTREC.best && !(TTREC.history&&TTREC.history.length)) recLoad();
   const list=document.getElementById('lapbook-list'), empty=document.getElementById('lapbook-empty'), play=document.getElementById('lapbook-replay');
-  const laps=(TTREC.history&&TTREC.history.length?TTREC.history:(TTREC.best?[{t:TTREC.best.t,at:0}]:[])).slice(0,8);
+  /* The best lap belongs in the list. It is stored separately -- TTREC.best is
+     the one the replay button has always played -- so without this it was
+     either missing from the grid or duplicated in it. Matched on time to two
+     decimals, which is the precision both are rounded to. */
+  let laps=(TTREC.history||[]).slice();
+  if(TTREC.best){
+    const t=+TTREC.best.t.toFixed(2);
+    const row=laps.find(l=>+l.t.toFixed(2)===t);
+    if(row){ if(!row.f) row.f=TTREC.best.f; }
+    else laps.push({t, at:TTREC.best.capturedAt, conditions:TTREC.best.conditions,
+                    livery:TTREC.best.livery, f:TTREC.best.f});
+  }
+  laps.sort((a,b)=>a.t-b.t);
+  laps=laps.slice(0,LAP_KEEP);
   if(!list||!empty) return;
-  list.innerHTML=laps.map((lap,i)=>'<div class="lap-row '+(i===0?'best':'')+'">'
+  /* Left to right, then down and left again -- the way a line of text wraps.
+     It is a grid that fills by row, so the quickest lap is the top left and
+     reading order is finishing order. */
+  list.innerHTML=laps.map((lap,i)=>
+     '<button type="button" class="lap-cell'+(i===0?' best':'')
+    +(lap.f?'':' noplay')+'" data-lap="'+i+'">'
     +'<span class="rank">'+String(i+1).padStart(2,'0')+'</span>'
-    +'<span class="lap-label">'+(i===0?'Fastest lap':'Recorded lap')
-    +'<small>'+lapDateLabel(lap.at||lap.capturedAt)+'</small>'
-    +'<small>'+lapConditionsLabel(lap)+'</small>'
-    +'<small>'+lapLiveryLabel(lap)+'</small></span>'
-    +'<b class="lap-time">'+ttFmt(lap.t)+'</b></div>').join('');
+    +'<b class="lap-time">'+ttFmt(lap.t)+'</b>'
+    +'<span class="lap-meta">'+lapDateLabel(lap.at||lap.capturedAt)+'</span>'
+    +'<span class="lap-meta">'+lapConditionsLabel(lap)+'</span>'
+    +'<span class="lap-go">'+(lap.f?'Watch &rarr;':'No recording')+'</span>'
+    +'</button>').join('');
+  /* Clicking a lap plays THAT lap. TTREC.best is what replayStart reads, so
+     the chosen one is loaded into it first -- the player is not duplicated,
+     it is pointed at a different recording. */
+  Array.prototype.forEach.call(list.querySelectorAll('.lap-cell'),btn=>{
+    btn.onclick=()=>{
+      const lap=laps[+btn.dataset.lap];
+      if(!lap||!lap.f) return;
+      TTREC.best={ t:lap.t, f:lap.f, capturedAt:lap.at,
+                   conditions:lap.conditions, livery:lap.livery };
+      closeLapBook();
+      window._autoReplay=true; pendingReplay=true;
+      if(booted) replayStart(); else enterCircuit();
+    };
+  });
   empty.style.display=laps.length?'none':'';
   /* A disabled button that says nothing is a button that looks broken. A lap
      time set before laps were being recorded has no replay to show, so say
