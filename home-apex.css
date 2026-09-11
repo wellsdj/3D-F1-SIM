@@ -120,14 +120,23 @@
 }
 
 /* --------------------------------------------------------------- the stage */
+/* THE STAGE CANNOT SPILL INTO THE FOOTER.
+
+   Every panel is stacked in the same grid cell, and a hidden panel still takes
+   up room -- visibility:hidden reserves its box. So the row was as tall as the
+   TALLEST panel, the title wrapped to five lines at 132px, and the overflow
+   ran straight through the footer: the keyboard hints landed in the middle of
+   the headline and the strapline ended up underneath it. Nothing was moved to
+   fix that; the row is simply given a ceiling and told to clip. */
 .apex-stage{
   position:relative;z-index:4;display:grid;align-content:center;
-  padding:0 clamp(22px,4vw,64px);min-height:0;
+  padding:0 clamp(22px,4vw,64px);min-height:0;overflow:hidden;
 }
 /* Every section is stacked in the same place and faded between, so switching
    is a cut on the same picture rather than a page change. */
 .apex-panel{
-  grid-area:1/1;display:flex;flex-direction:column;gap:clamp(14px,1.8vw,26px);
+  grid-area:1/1;display:flex;flex-direction:column;gap:clamp(10px,1.4vw,20px);
+  max-height:100%;min-height:0;
   opacity:0;visibility:hidden;transform:translateY(18px);
   transition:opacity .38s ease,transform .5s cubic-bezier(.16,1,.3,1),visibility .38s;
 }
@@ -145,10 +154,17 @@
    apart. Each is clipped to a horizontal band and shifted, and the bands jump
    about -- which is what makes it read as a broken signal rather than a drop
    shadow. */
+/* Sized off the SHORTER of the two axes, which is what actually runs out.
+   8.4vw on a wide screen gave 132px, and "BUILT TO RACE." at 132px wrapped to
+   three lines on its own, plus two more for the second half -- five lines of
+   display type where the design has two. min() against vh keeps it honest on
+   a laptop, and the max-width stops a long word from setting the measure. */
 .apex-title{
   position:relative;margin:0;font-family:var(--apex-display);font-style:italic;
-  font-size:clamp(44px,8.4vw,132px);line-height:.84;letter-spacing:-.035em;
+  font-size:min(clamp(34px,5.4vw,86px), 13vh);
+  line-height:.86;letter-spacing:-.035em;max-width:16ch;
   text-transform:uppercase;text-shadow:0 12px 60px rgba(0,0,0,.7);
+  text-wrap:balance;
 }
 .apex-title em{font-style:italic;color:var(--apex-red);display:block}
 .apex-title[data-glitch]:before,
@@ -189,7 +205,8 @@
 /* ---------------------------------------------------------------- the cards
    One shape for everything a section offers, so a save slot, a race mode and
    the garage all read as the same kind of object. */
-.apex-cards{display:flex;gap:clamp(10px,1.2vw,16px);flex-wrap:wrap}
+.apex-cards{display:flex;gap:clamp(10px,1.2vw,16px);flex-wrap:wrap;
+  min-height:0;overflow-y:auto;padding:4px 4px 6px;margin:-4px -4px -6px}
 .apex-card{
   position:relative;overflow:hidden;flex:1 1 210px;max-width:300px;min-height:150px;
   display:flex;flex-direction:column;justify-content:flex-end;gap:6px;
@@ -245,25 +262,52 @@
 
 /* ------------------------------------------------------- controller + cog */
 #home-settings{position:absolute;right:clamp(22px,4vw,64px);top:clamp(18px,2.4vw,30px);z-index:6}
+/* A cog, and it turns. No label: the shape is the label, and a word in a box
+   beside it was the only thing on this screen that looked like a form. */
 #home-settings .cog{
-  background:rgba(8,7,9,.6);border:1px solid var(--apex-line);border-radius:0;
-  color:var(--apex-ink);font-family:var(--apex-mono);font-size:9px;letter-spacing:.24em;
-  text-transform:uppercase;padding:10px 14px;cursor:pointer;transition:all .28s ease;
+  display:grid;place-items:center;width:42px;height:42px;padding:0;
+  background:none;border:0;color:var(--apex-dim);cursor:pointer;
+  transition:color .28s ease;
 }
-#home-settings .cog:hover{border-color:var(--apex-red);color:#fff}
+#home-settings .cog svg{width:22px;height:22px;display:block;
+  animation:apexCog 9s linear infinite;transform-origin:50% 50%}
+#home-settings .cog:hover,#home-settings .cog:focus-visible{color:var(--apex-red);outline:none}
+/* Faster under the pointer, so it answers before the menu arrives. */
+#home-settings:hover .cog svg{animation-duration:1.6s}
+@keyframes apexCog{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){#home-settings .cog svg{animation:none}}
+
+/* OPENS ON HOVER, no click. The gap between the cog and the panel would break
+   the hover the moment the pointer crossed it, so the padding closes it and
+   the panel sits inside the same hover target. */
+#home-settings{padding-bottom:2px}
 #home-settings .settings-menu{
-  display:none;width:min(340px,calc(100vw - 48px));margin-top:9px;padding:15px;
+  position:absolute;right:0;top:100%;
+  display:block;width:min(340px,calc(100vw - 48px));padding:15px;
   background:rgba(8,7,9,.94);border:1px solid var(--apex-line);backdrop-filter:blur(12px);
+  opacity:0;visibility:hidden;transform:translateY(-8px) scale(.98);transform-origin:top right;
+  transition:opacity .26s ease,transform .32s cubic-bezier(.16,1,.3,1),visibility .26s;
 }
-#home-settings.open .settings-menu{display:block}
+#home-settings:hover .settings-menu,
+#home-settings:focus-within .settings-menu,
+#home-settings.open .settings-menu{
+  opacity:1;visibility:visible;transform:none;
+}
 #home-settings .menu-kicker{font-size:8px;letter-spacing:.32em;text-transform:uppercase;
   color:var(--apex-red);margin-bottom:11px}
+/* The dropdown inside is always open now, so this is a heading rather than a
+   control. It keeps its button element for the keyboard path, and stops
+   looking like something that does anything. */
 #home-settings .settings-toggle{
-  width:100%;text-align:left;background:none;border:0;color:var(--apex-ink);cursor:pointer;
-  font-family:var(--apex-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;padding:8px 0;
+  width:100%;text-align:left;background:none;border:0;color:var(--apex-red);cursor:default;
+  font-family:var(--apex-mono);font-size:8px;letter-spacing:.3em;text-transform:uppercase;
+  padding:2px 0 4px;
 }
-#home-settings .limit-dropdown{display:none;margin-top:9px}
-#home-settings .settings-item.open .limit-dropdown{display:grid;gap:7px}
+#home-settings .settings-toggle i{display:none}
+/* And the one section in it is open. Hovering to reveal a panel and then
+   clicking inside it to reveal the only thing in the panel is two steps for
+   one piece of information. */
+#home-settings .limit-dropdown{display:grid;gap:7px;margin-top:9px}
 #home-settings .ctrl-row{display:flex;align-items:center;gap:8px;font-size:9px;
   letter-spacing:.08em;color:var(--apex-dim)}
 #home-settings kbd{
@@ -298,13 +342,13 @@
 @media (max-width:860px){
   .apex-header{flex-wrap:wrap;gap:12px}
   .edition-label{display:none}
-  .apex-title{font-size:clamp(38px,12vw,64px)}
+  .apex-title{font-size:min(clamp(30px,9vw,52px),11vh);max-width:none}
   .apex-cards{flex-direction:column}
   .apex-card{max-width:none}
 }
 @media (max-height:620px){
   .apex-stage{align-content:start;padding-top:10px}
-  .apex-title{font-size:clamp(32px,6vw,54px)}
+  .apex-title{font-size:min(clamp(26px,4.4vw,44px),12vh)}
   .apex-card{min-height:118px}
 }
 
