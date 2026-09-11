@@ -677,7 +677,7 @@
       text-transform:uppercase;margin-top:3px}
   /* Shown only in a career: outside one the garage is a place you look at the
      car, and there is nothing to go on to. */
-  #custom-next{display:none;margin-top:16px;font-family:var(--mono);font-size:11px;
+  #custom-next{display:block;margin-top:16px;font-family:var(--mono);font-size:11px;
       letter-spacing:.18em;text-transform:uppercase;color:#111;background:#ffb020;
       border:0;border-radius:9px;padding:15px 24px;cursor:pointer;width:100%}
   #custom-next:hover{filter:brightness(1.08)}
@@ -686,11 +686,6 @@
      the season rather than a cross that means "close this". The cross is
      hidden outright there: it went to the home screen, which in the middle of
      a career is not where anybody was trying to go. */
-  #custom-back{display:none;margin-top:9px;width:100%;font-family:var(--mono);font-size:10px;
-      letter-spacing:.16em;text-transform:uppercase;color:var(--paper);background:none;
-      border:1px solid rgba(255,255,255,.2);border-radius:9px;padding:13px 20px;cursor:pointer}
-  #custom-back:hover{border-color:#ffb020;color:#ffb020}
-  body.career-build #custom-back{display:block}
   body.career-build #customizer-close{display:none}
   #career{position:fixed;inset:0;z-index:40;display:none;padding:clamp(28px,6vw,80px);
       background:linear-gradient(120deg,rgba(3,7,12,.97),rgba(6,12,20,.92)),url('home-hero.png') center/cover;
@@ -1368,7 +1363,6 @@ if('serviceWorker' in navigator){
       <div class="style-group"><label>Rims <span id="style-rims-value">Satin silver</span></label><div class="style-row"><div class="style-swatches" data-style="rims"></div><input type="color" data-style-picker="rims" value="#b6babd" aria-label="Rim colour"></div></div>
     </div>
     <button id="custom-next" type="button">Take it to the season <i>&rsaquo;</i></button>
-    <button id="custom-back" type="button">&lsaquo; Back to the season</button>
   </div>
   <div class="custom-tag">Drag to turn &middot; changes save as you go</div>
 </section>
@@ -13838,6 +13832,12 @@ function openCustomizer(){
      chase it. Drag still works if you want another angle. */
   customizerOn=true; customSpin=false; customizerAngle=CUSTOM_POSE; customizerStage.visible=true;
   resetCustomizerPose();
+  /* Labelled at open time, not at load: whether you are in a career changes
+     while the page is alive, and the button has to say where it actually goes. */
+  const out=document.getElementById('custom-next');
+  if(out) out.innerHTML=(typeof CAREER!=='undefined' && CAREER.active)
+    ? 'Back to your career <i>&rsaquo;</i>'
+    : 'Back to the garage <i>&rsaquo;</i>';
   const el=document.getElementById('customizer'); if(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
   bootEl.classList.add('gone');
   document.body.classList.remove('cinema'); document.body.classList.add('customizer-open');
@@ -14052,6 +14052,8 @@ function careerPage(id){
     const el=document.getElementById(p);
     if(el) el.classList.toggle('on', p==='career-'+id);
   });
+  const wrap=document.getElementById('career');
+  if(wrap) wrap.dataset.page=id;
 }
 /* --------------------------------------------------------------- the slots */
 function careerPaintSlots(){
@@ -14154,9 +14156,17 @@ const ordSuffix=n=>(n%10===1&&n%100!==11)?'st':(n%10===2&&n%100!==12)?'nd'
 function careerPaintShop(){
  const c=CareerSeason.migrate(careerSlot());careerWallet(c);
  const page=document.getElementById('career-shop');
- page.innerHTML='<div class="overlay-kicker">R&D / Performance centre</div><h2>Engineered to <em>win.</em></h2><p class="section-note">Spend upgrade points to develop your car. Start with 500 UP; earn 50 for a clean practice lap and more for stronger race results.</p><div class="upgrade-balance"><span>AVAILABLE UPGRADE POINTS</span><strong>'+c.upgradePoints.toLocaleString()+' <small>UP</small></strong><p>Development credits: '+c.coins.toLocaleString()+' CR · Upgrades use UP only.</p></div><div class="rd-departments">'+['power','aero'].map(kind=>'<section class="rd-department"><div class="rd-heading"><h3>'+(kind==='power'?'Powertrain':'Aerodynamics')+'</h3><span>'+c[kind]+' / 5 developed</span></div><p>'+(kind==='power'?'Raise your top speed.':'Find more grip through the corners.')+'</p>'+CAREER_PARTS[kind].slice(1).map((part,j)=>{const level=j+1,cost=Math.ceil(part.cost/5),owned=c[kind]>=level,next=c[kind]+1===level;return '<article class="rd-part '+(owned?'fitted':'')+'">'+careerPartSVG(kind,level)+'<div><small>STAGE 0'+level+'</small><h4>'+part.name+'</h4><span>'+(kind==='power'?'Top-speed development':'Cornering-grip development')+'</span></div><div class="rd-price"><b>'+cost.toLocaleString()+' <small>UP</small></b><button data-upgrade="'+kind+':'+level+'" '+(owned||!next||c.upgradePoints<cost?'disabled':'')+'>'+(owned?'Installed':!next?'Locked':c.upgradePoints<cost?'Need '+(cost-c.upgradePoints)+' UP':'Develop →')+'</button></div></article>';}).join('')+'</section>').join('')+'</div><div class="career-actions"><button class="ghost" id="career-shopBack">Back to the season</button></div>';
+ /* A big way back at the top, in the middle, where you look for it. The page
+    is reached from one place, so there is one answer to "how do I get out" --
+    and the small cross in the corner is hidden here rather than competing
+    with it. The button at the bottom stays for anyone who reads to the end. */
+ page.innerHTML='<button type="button" class="rd-back" id="career-shopTop">'
+  +'<i>&lsaquo;</i> Back to the season</button>'
+  +'<div class="overlay-kicker">R&D / Performance centre</div><h2>Engineered to <em>win.</em></h2><p class="section-note">Spend upgrade points to develop your car. Start with 500 UP; earn 50 for a clean practice lap and more for stronger race results.</p><div class="upgrade-balance"><span>AVAILABLE UPGRADE POINTS</span><strong>'+c.upgradePoints.toLocaleString()+' <small>UP</small></strong><p>Development credits: '+c.coins.toLocaleString()+' CR · Upgrades use UP only.</p></div><div class="rd-departments">'+['power','aero'].map(kind=>'<section class="rd-department"><div class="rd-heading"><h3>'+(kind==='power'?'Powertrain':'Aerodynamics')+'</h3><span>'+c[kind]+' / 5 developed</span></div><p>'+(kind==='power'?'Raise your top speed.':'Find more grip through the corners.')+'</p>'+CAREER_PARTS[kind].slice(1).map((part,j)=>{const level=j+1,cost=Math.ceil(part.cost/5),owned=c[kind]>=level,next=c[kind]+1===level;return '<article class="rd-part '+(owned?'fitted':'')+'">'+careerPartSVG(kind,level)+'<div><small>STAGE 0'+level+'</small><h4>'+part.name+'</h4><span>'+(kind==='power'?'Top-speed development':'Cornering-grip development')+'</span></div><div class="rd-price"><b>'+cost.toLocaleString()+' <small>UP</small></b><button data-upgrade="'+kind+':'+level+'" '+(owned||!next||c.upgradePoints<cost?'disabled':'')+'>'+(owned?'Installed':!next?'Locked':c.upgradePoints<cost?'Need '+(cost-c.upgradePoints)+' UP':'Develop →')+'</button></div></article>';}).join('')+'</section>').join('')+'</div><div class="career-actions"><button class="ghost" id="career-shopBack">Back to the season</button></div>';
  page.querySelectorAll('[data-upgrade]').forEach(b=>b.onclick=()=>{const [kind,level]=b.dataset.upgrade.split(':');const cost=Math.ceil(CAREER_PARTS[kind][+level].cost/5);if(CareerSeason.buyUpgrade(c,kind,+level,cost)){careerSave();careerApply();careerPaintShop();}});
- document.getElementById('career-shopBack').onclick=()=>{careerPaintHub();careerPage('hub');};
+ const backToHub=()=>{careerPaintHub();careerPage('hub');};
+ document.getElementById('career-shopBack').onclick=backToHub;
+ const topBack=document.getElementById('career-shopTop'); if(topBack) topBack.onclick=backToHub;
 }
 /* ------------------------------------------------- what the upgrades DO
    The two numbers the rest of the game reads. Nothing else in the file needs
@@ -14241,8 +14251,10 @@ document.getElementById('customizer-close').onclick=closeCustomizer;
       if(el){ el.classList.add('on'); el.setAttribute('aria-hidden','false'); }
     }
   };
+  /* One way out, not two that did the same thing. It says where it goes,
+     which depends on where you came from. */
   const n=document.getElementById('custom-next'); if(n) n.onclick=toSeason;
-  const b=document.getElementById('custom-back'); if(b) b.onclick=toSeason;
+  const b=document.getElementById('custom-back'); if(b) b.remove();
 }
 /* Dragging the stage. The overlay's own panels keep their clicks -- only a
    drag that starts on the empty part of the screen turns the car. */
@@ -14901,11 +14913,15 @@ function apexCarView(host){
       apexShotS.add(new THREE.HemisphereLight(0x9fb4d8,0x0c0e13,1.15));
       const key=new THREE.DirectionalLight(0xfff2ea,2.5); key.position.set(3.2,4.4,3.0);
       apexShotS.add(key);
-      const rim=new THREE.DirectionalLight(0xff2230,3.2); rim.position.set(-4.2,1.5,-2.6);
+      /* A red rim light at full strength wrote red down the edge of whatever
+         you painted the car -- a blue livery came back magenta, which read as
+         the last livery bleeding through. It is a hint now, not a wash. */
+      const rim=new THREE.DirectionalLight(0xff5a60,.75); rim.position.set(-4.2,1.5,-2.6);
       apexShotS.add(rim);
       const fill=new THREE.DirectionalLight(0xffffff,.7); fill.position.set(-1.5,2,4);
       apexShotS.add(fill);
       apexShotC=new THREE.PerspectiveCamera(26,680/300,.05,120);
+      apexShotR.autoClear=true;
     }
     if(apexShotCar){ apexShotS.remove(apexShotCar); apexShotCar=null; }
     apexShotCar=carObj.clone(true);
@@ -14931,6 +14947,10 @@ function apexCarView(host){
     const dir=(alongZ ? new THREE.Vector3(1,.34,.30) : new THREE.Vector3(.30,.34,1)).normalize();
     apexShotC.position.copy(mid).addScaledVector(dir,d);
     apexShotC.lookAt(mid.x,mid.y+size.y*0.06,mid.z);
+    /* Explicitly, every time: the canvas keeps its pixels when it is pulled
+       out of the DOM and put back, so a stale car sits there until something
+       overwrites it. */
+    apexShotR.clear(true,true,true);
     apexShotR.render(apexShotS,apexShotC);
     host.appendChild(apexShotR.domElement);
     return true;

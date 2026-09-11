@@ -1308,3 +1308,20 @@ body.customizer-open #netbtn{display:none}
 #career .career-wallet span,#career [class*="wallet"] span{
   font-size:8.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--apex-dim)!important;
 }
+
+/* The way out of the development page: big, centred, at the top. */
+#career .rd-back{
+  display:block;margin:0 auto 22px;min-width:min(320px,70vw);
+  background:linear-gradient(100deg,rgba(140,14,24,.96),rgba(255,31,45,.76))!important;
+  color:#fff!important;box-shadow:0 0 46px -16px rgba(255,31,45,.95);
+  font-size:11px!important;letter-spacing:.26em!important;padding:15px 26px!important;
+  text-align:center;
+}
+#career .rd-back i{font-style:normal;margin-right:8px;color:rgba(255,255,255,.7)}
+#career .rd-back:hover{
+  transform:translateY(-2px);
+  background:linear-gradient(100deg,rgba(172,16,28,.98),rgba(255,62,72,.88))!important;
+  box-shadow:0 0 62px -12px rgba(255,31,45,1);
+}
+/* One way out per page: on development the big button is it. */
+#career[data-page="shop"] .overlay-close{display:none}
