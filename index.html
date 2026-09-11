@@ -1249,14 +1249,6 @@ if('serviceWorker' in navigator){
     <div class="load-word">Loading</div>
     <div class="load-status" id="qualifying-load-status">Preparing the circuit</div>
     <button id="qualifying-cancel" type="button">Cancel</button>
-    <div class="load-weather" id="qualifying-weather" aria-label="Choose session lighting">
-      <div class="weather-kicker">Choose session light</div>
-      <div class="weather-options">
-        <button type="button" class="weather-choice" data-weather="sunset" aria-pressed="false"><b>Sunset</b><span>Low amber light</span></button>
-        <button type="button" class="weather-choice" data-weather="midday" aria-pressed="false"><b>Midday</b><span>Clear track light</span></button>
-        <button type="button" class="weather-choice" data-weather="night" aria-pressed="false"><b>Night</b><span>Moonlit circuit</span></button>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -13659,8 +13651,8 @@ function qualifyingLoadCancel(){
   document.getElementById('racepick').focus();
 }
 qualifyingCancelEl.onclick=qualifyingLoadCancel;
-const qualifyingWeatherEl=document.getElementById('qualifying-weather');
-const qualifyingWeatherButtons=Array.from(document.querySelectorAll('.weather-choice'));
+const qualifyingWeatherEl=null;
+const qualifyingWeatherButtons=[];
 /* Nothing. This was ten seconds, held so an intro clip had room to play, then
    1.2 s so the screen would not flash. There is no clip, and a loading screen
    that lingers after the thing it was waiting for is just a slower game. The
@@ -13701,86 +13693,31 @@ function qualifyingBegin(){
      say so. */
   if(!careerTimedSession()) raceStart({keepIntro:true});
 }
-function qualifyingChooseWeather(kind){
-  if(CAREER.active&&!pendingReplay&&!window._autoReplay)return;
-  if(!qualifyingAllowsWeather||!TIME_OF_DAY[kind]||qualifyingStartQueued) return;
-  /* The answer is taken the moment you give it, and it can be given again.
-
-     The panel appeared while the circuit was still loading, so a press could
-     land before anything was ready to act on it and nothing visible happened --
-     you pressed again, and again. So the choice is recorded and acknowledged
-     first, and the loading carries on underneath; when it finishes it already
-     has your answer.
-
-     What it also used to do was fade the whole row out on that first press.
-     That made the light a question asked once: pick Night by accident and the
-     only way back was to reload the page. The row stays now, lit on whichever
-     you last pressed, and pressing another simply moves the light -- right up
-     until the circuit is ready and the session actually begins, which is what
-     qualifyingStartQueued above is guarding.
-
-     Setting the sky is the part that needs a loaded scene, so it goes last and
-     inside a guard: if it cannot run yet it is applied on the way in instead. */
-  qualifyingWeatherChoice=kind;
-  qualifyingWeatherButtons.forEach(btn=>{
-    const on=btn.dataset.weather===kind;
-    btn.classList.toggle('picked',on);
-    btn.setAttribute('aria-pressed',on?'true':'false');
-  });
-  try{ applyTimeOfDay(kind); }catch(e){ /* not built yet; qualifyingBegin does it */ }
-  if(qualifyingTrackReady) qualifyingBegin();
-  else qualifyingLoadSetStatus('Loading '+(TRACK&&TRACK.name||'the circuit'));
-}
 function qualifyingLoadReady(){
   if(!qualifyingLoadEl||!qualifyingLoadEl.classList.contains('active')) return;
   qualifyingTrackReady=true;
-  if(!qualifyingAllowsWeather){
-    if(qualifyingStartQueued) return;
-    qualifyingStartQueued=true;
-    qualifyingLoadHide(true);
-    setTimeout(()=>{ if(TTREC.best) replayStart(); },260);
-    return;
-  }
-  /* Replays are a review action, not a new qualifying session. Keep the
-     existing path instant with a neutral light while normal entries wait for
-     the driver's choice. */
-  if(!qualifyingWeatherChoice&&(window._autoReplay||pendingReplay)) qualifyingChooseWeather('midday');
-  /* THE LIGHT IS DRAWN, NOT CHOSEN.
-
-     Every race gets its own time of day at random, so a season is eight
-     different afternoons rather than the same one eight times, and a quick
-     race is never the same twice either. The row of buttons stays up and
-     still works -- pressing one overrides the draw right until the session
-     starts -- so this is a default that arrives instantly rather than a
-     choice taken away.
-
-     Drawn per race and not per career: a championship run entirely at sunset
-     would be a decision nobody made. */
-  if(!qualifyingWeatherChoice){
-    const kinds=Object.keys(TIME_OF_DAY);
-    qualifyingChooseWeather(kinds[(Math.random()*kinds.length)|0]);
-    return;
-  }
-  if(qualifyingWeatherChoice) qualifyingBegin();
-  else qualifyingLoadSetStatus('Choose session lighting');
+  /* Lighting is decided before loading: from the Race screen slider, the
+     saved career weekend, or neutral midday for a replay. The loading screen
+     is progress only and never asks the driver to choose it a second time. */
+  if(!TIME_OF_DAY[qualifyingWeatherChoice]) qualifyingWeatherChoice='midday';
+  qualifyingBegin();
 }
 function qualifyingLoadShow(text,allowWeather=true){
   if(!qualifyingLoadEl) return;
+  const selectedLight=TIME_OF_DAY[qualifyingWeatherChoice] ? qualifyingWeatherChoice : 'midday';
   qualifyingLoadGeneration++;
   if(qualifyingCancelPending){qualifyingCancelPending();qualifyingCancelPending=null;}
   qualifyingCancelEl.disabled=!!CAREER.active;
   qualifyingCancelEl.title=CAREER.active?'Career loading cannot be cancelled':'Return to home';
   clearTimeout(qualifyingLoadTimer);
-  qualifyingAllowsWeather=allowWeather;
+  qualifyingAllowsWeather=false;
   qualifyingTrackReady=false;
   qualifyingWeatherReset();
-  if(qualifyingWeatherEl){
-    const visible=allowWeather&&!CAREER.active;
-    qualifyingWeatherEl.style.display=visible?'':'none';
-    qualifyingWeatherEl.setAttribute('aria-hidden',visible?'false':'true');
-  }
+  if(window._autoReplay||pendingReplay) qualifyingWeatherChoice='midday';
+  else if(CAREER.active&&typeof CareerSeason!=='undefined') qualifyingWeatherChoice=CareerSeason.event(careerSlot()).lighting;
+  else qualifyingWeatherChoice=selectedLight;
   qualifyingLoadSince=performance.now();
-  qualifyingLoadSetStatus(text||'Choose session lighting');
+  qualifyingLoadSetStatus(text||'Preparing the circuit');
   qualifyingLoadEl.classList.add('active');
   qualifyingLoadEl.setAttribute('aria-hidden','false');
   document.body.classList.add('qualifying-loading');
@@ -14573,9 +14510,6 @@ Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
   const c=document.getElementById('modecareer');
   if(c) c.addEventListener('click',()=>careerOpen());
 }
-qualifyingWeatherButtons.forEach(btn=>{
-  btn.addEventListener('click',()=>qualifyingChooseWeather(btn.dataset.weather));
-});
 
 
 
