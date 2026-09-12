@@ -76,8 +76,12 @@ function score(c,rows){migrate(c);const w=c.weekend;if(w.stage!=='race'||w.score
  rows.forEach((r,i)=>{if(r.you)c.points+=pts;else{const t=(c.table||[]).find(t=>t.name===r.who);if(t)t.points+=r.dsq||r.dnf?0:(POINTS[i]||0);}});
  const prize=Math.round(2600*Math.pow(.88,mine))+300;const objective=!me.dsq&&!me.dnf&&mine+1<=c.contract.target;const bonus=objective?c.contract.bonus:0;
  const upgradePoints=me.dsq||me.dnf?0:80+(10-mine)*25+(objective?50:0);
- c.upgradePoints+=upgradePoints;c.coins+=prize+bonus;c.reputation=clamp(c.reputation+(objective?8:2)-(me.dsq?5:0),0,100);
- c.last={season:c.season,round:c.round,pos:mine+1,points:pts,prize,bonus,upgradePoints,objective,dsq:!!me.dsq,dnf:!!me.dnf,grid:w.gridPosition||10,rows:rows.map(r=>({who:r.who,you:!!r.you,dsq:!!r.dsq,dnf:!!r.dnf,total:r.total||null}))};
+ /* The engine's development share, paid every round. A slower engine is a
+    bigger cheque: that is the whole trade, and it has to arrive here or
+    choosing Braemar is just choosing to be slow. */
+ const engineDev=Math.round((Number(c.engineDev)||0)/Math.max(1,c.rounds||8));
+ c.upgradePoints+=upgradePoints+engineDev;c.coins+=prize+bonus;c.reputation=clamp(c.reputation+(objective?8:2)-(me.dsq?5:0),0,100);
+ c.last={season:c.season,round:c.round,pos:mine+1,points:pts,prize,bonus,upgradePoints:upgradePoints+engineDev,objective,dsq:!!me.dsq,dnf:!!me.dnf,grid:w.gridPosition||10,rows:rows.map(r=>({who:r.who,you:!!r.you,dsq:!!r.dsq,dnf:!!r.dnf,total:r.total||null}))};
  c.history.push(c.last);w.scored=true;w.stage='debrief';return true;
 }
 function standings(c){return [...(c.table||[]).map(t=>({...t,you:false})),{name:c.team,points:c.points,you:true}].sort((a,b)=>b.points-a.points||countback(c,a,b));}

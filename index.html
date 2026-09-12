@@ -15014,8 +15014,14 @@ let CAR_TOP=1, CAR_GRIP=1;
 function careerApply(){
   if(!CAREER.active){ CAR_TOP=1; CAR_GRIP=1; return; }
   const c=careerSlot();
-  CAR_TOP  = 0.90 + 0.10*(c.power/5);
+  /* The engine you chose is part of the car. It scales the top end the parts
+     build on, so a Voltaic car is quick from round one and a Braemar one has
+     to be developed into being quick -- which is the trade you took. */
+  const eng=(typeof c.engineTop==='number')?c.engineTop:1;
+  CAR_TOP  = (0.90 + 0.10*(c.power/5)) * eng;
   CAR_GRIP = 0.90 + 0.10*(c.aero/5);
+  /* And the race is the length you asked for. */
+  if(c.raceLaps) RACE_LAPS=c.raceLaps;
 }
 /* --------------------------------------------------------------- the flow */
 /* Straight into the season. Choosing a save was a page that existed to pick
@@ -15702,44 +15708,286 @@ function apexPaintSlots(){
 }
 
 /* Naming a new team, in the same window rather than the old overlay. */
+/* ==========================================================================
+   STARTING A CAREER
+   Six steps, one at a time, each one a decision you can see the consequence
+   of. Nothing here is a right answer: the engines trade speed against
+   development, the season length trades a long championship against a short
+   one, and the rest is what you want your team to look like.
+   ========================================================================== */
+
+/* Names to pick from. Invented, and deliberately in the same family as the
+   nine you race against so the grid reads as one series. */
+const TEAM_NAMES=['Northgate','Calder','Ravenna','Ostrava','Bellweather','Corvid',
+                  'Marrow','Sundown','Ardent','Vireo','Hollins','Pallas'];
+
+/* Engines. The trade is real and it is the point of the choice: the quick ones
+   cost you development through the season, the slow ones pay for themselves.
+   Balanced so the season total lands within a few per cent of the same number
+   whichever you take -- top is worth about 4 UP a round per 0.01 of pace, and
+   the development figures are set from that. Pick the one you want to drive. */
+const ENGINES=[
+  { id:'volt',   name:'Voltaic',   top:1.000, dev:0,   blurb:'Everything up top, nothing left over',
+    logo:'<path d="M15 3 L7 15h6l-2 10 9-13h-6z"/>' },
+  { id:'mer',    name:'Meridian Works', top:0.985, dev:60, blurb:'Quick, and it pays a little back',
+    logo:'<circle cx="15" cy="14" r="9"/><path d="M15 5v18M6 14h18"/>' },
+  { id:'kass',   name:'Kasson',    top:0.970, dev:120,  blurb:'Even-handed. Develops all season',
+    logo:'<rect x="6" y="7" width="18" height="14" rx="2"/><path d="M6 14h18M15 7v14"/>' },
+  { id:'brae',   name:'Braemar',   top:0.952, dev:192, blurb:'Down on power, long on budget',
+    logo:'<path d="M15 4l10 6v8l-10 6-10-6v-8z"/><path d="M15 12v8"/>' },
+];
+/* Simple outlines, tinted by the team colour. Drawn here because the game has
+   to work with nothing to fetch. */
+const TEAM_LOGOS=[
+  { id:'chev',  d:'<path d="M6 22l9-14 9 14-9-5z"/>' },
+  { id:'ring',  d:'<circle cx="15" cy="15" r="9"/><circle cx="15" cy="15" r="3.4"/>' },
+  { id:'bolt',  d:'<path d="M17 4L8 16h6l-1 10 9-13h-6z"/>' },
+  { id:'wing',  d:'<path d="M4 18h22"/><path d="M7 18c4-9 12-9 16 0"/><path d="M11 18v-5M19 18v-5"/>' },
+  { id:'shield',d:'<path d="M15 4l9 4v7c0 6-4 9-9 11-5-2-9-5-9-11V8z"/>' },
+  { id:'apex',  d:'<path d="M5 23L15 6l10 17"/><path d="M10 23h10"/>' },
+];
+const TEAM_COLOURS=['#c8102e','#123c78','#0f6f5c','#c8481e','#6b4f9e','#b8860b',
+                    '#2b2f36','#3b6ea5','#8c1327','#cfd6dc'];
+const SKIN_TONES=['#f2d3b8','#e4b48c','#c98c5f','#9c6236','#6f4223','#432616'];
+const HAIR_TONES=['#1b1512','#3f2a1c','#7a4a22','#b8802f','#d8d2c8','#8a1f1f'];
+
+/* THE TRADE, SOLVED RATHER THAN GUESSED.
+
+   Every engine is worth the same over a season. A hundredth of top speed is
+   priced at 40 development points, the slowest engine on offer is 0.95, so the
+   speed an engine gives is (top-0.95)*100*40 and its development is whatever
+   makes the two add to 200. Voltaic is all speed and no development, Braemar
+   is nearly all development, and the two in the middle sit where you would
+   expect. There is no best one, which is the entire point of asking. */
+const ENGINE_VALUE=200, ENGINE_BASE=0.95, ENGINE_K=40;
+function engineSpeedWorth(e){ return Math.round((e.top-ENGINE_BASE)*100*ENGINE_K); }
+function engineValue(e){ return engineSpeedWorth(e)+e.dev; }
+
+/* The whole thing is one object built up a step at a time and written once at
+   the end, so backing out half way leaves nothing behind. */
+let NEW=null;
+const SETUP_STEPS=['team','colours','engine','badge','driver','season'];
 function apexNewCareer(){
+  NEW={ step:0, team:TEAM_NAMES[0], body:TEAM_COLOURS[0], trim:'#15171b',
+        engine:ENGINES[1].id, logo:TEAM_LOGOS[0].id,
+        skin:SKIN_TONES[1], hair:HAIR_TONES[0],
+        rounds:8, laps:3 };
+  setupOpen();
+}
+function setupOpen(){
   let el=document.getElementById('apex-new');
   if(!el){ el=document.createElement('div'); el.id='apex-new'; document.body.appendChild(el); }
-  el.innerHTML=
-   '<div class="newwrap">'
-  +'<span class="cglitch" aria-hidden="true"></span>'
-  +'<button type="button" class="fullx" aria-label="Close">&times;</button>'
-  +'<div class="ctag">New career<i>///</i></div>'
-  +'<h2 class="newh">Name your <em>team</em></h2>'
-  +'<p class="newnote">Eight rounds, nine rivals and a car you build yourself. '
-  +'The name goes on the car and on the timing screens.</p>'
-  +'<input id="apex-newname" type="text" maxlength="18" placeholder="Northgate" '
-  +'autocomplete="off" spellcheck="false" aria-label="Team name">'
-  +'<div class="newerr" id="apex-newerr"></div>'
-  +'<button type="button" class="newgo" id="apex-newgo">Start the season <i>&rsaquo;</i></button>'
-  +'</div>';
   el.classList.add('on');
-  const input=el.querySelector('#apex-newname');
-  const err=el.querySelector('#apex-newerr');
-  const close=()=>el.classList.remove('on');
-  el.querySelector('.fullx').onclick=close;
-  el.onclick=e=>{ if(e.target===el) close(); };
-  const begin=()=>{
-    const name=(input.value||'').trim();
-    if(name.length<2){ err.textContent='Give the team a name first.'; input.focus(); return; }
-    /* Straight into the season with the name set, rather than handing off to
-       the old save-picker that only existed to choose between three slots. */
-    const c=CAREER_BLANK();
-    c.used=true; c.team=name; c.table=careerNewTable();
-    CAREER_SLOTS[0]=c; CAREER_AT=0; careerSave();
-    close();
-    apexPaintSlots(); apexPaintHome(); apexDriverBadge();
-    careerOpen();
+  setupDraw();
+}
+function setupClose(){
+  const el=document.getElementById('apex-new');
+  if(el) el.classList.remove('on');
+  NEW=null;
+}
+const setupEsc=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+/* One drawn logo, at whatever size and colour is asked for. */
+function teamLogoSVG(id, colour, px){
+  const L=TEAM_LOGOS.find(x=>x.id===id)||TEAM_LOGOS[0];
+  return '<svg viewBox="0 0 30 30" width="'+(px||30)+'" height="'+(px||30)+'" fill="none" '
+    +'stroke="'+(colour||'#fff')+'" stroke-width="2.1" stroke-linejoin="round" '
+    +'stroke-linecap="round" aria-hidden="true">'+L.d+'</svg>';
+}
+function engineLogoSVG(id, colour, px){
+  const E=ENGINES.find(x=>x.id===id)||ENGINES[0];
+  return '<svg viewBox="0 0 30 30" width="'+(px||30)+'" height="'+(px||30)+'" fill="none" '
+    +'stroke="'+(colour||'#fff')+'" stroke-width="2" stroke-linejoin="round" '
+    +'stroke-linecap="round" aria-hidden="true">'+E.logo+'</svg>';
+}
+function setupDraw(){
+  const el=document.getElementById('apex-new');
+  if(!el||!NEW) return;
+  const step=SETUP_STEPS[NEW.step];
+  const titles={ team:['Choose your','team'], colours:['Paint the','car'],
+                 engine:['Choose an','engine'], badge:['Your','badge'],
+                 driver:['Your','driver'], season:['The','season'] };
+  const T=titles[step];
+  let body='';
+
+  if(step==='team'){
+    body='<p class="newnote">Twelve names on the entry list. Pick the one you want on '
+        +'the car and on the timing screens.</p>'
+        +'<div class="setup-grid names">'
+        +TEAM_NAMES.map(n=>'<button type="button" class="sopt'+(n===NEW.team?' on':'')
+          +'" data-team="'+setupEsc(n)+'">'+setupEsc(n)+'</button>').join('')
+        +'</div>';
+  }
+  else if(step==='colours'){
+    body='<p class="newnote">The colour goes on the bodywork, the badge and your row in '
+        +'the standings. You can change it in the garage whenever you like.</p>'
+        +'<div class="setup-car">'+apexCarSide({body:NEW.body,wing:NEW.trim,ring:NEW.trim,rims:'#b6babd'})+'</div>'
+        +'<div class="slabel2">Body</div>'
+        +'<div class="setup-grid swatches">'
+        +TEAM_COLOURS.map(c=>'<button type="button" class="sw'+(c===NEW.body?' on':'')
+          +'" style="background:'+c+'" data-body="'+c+'" aria-label="'+c+'"></button>').join('')
+        +'</div>'
+        +'<div class="slabel2">Carbon and wings</div>'
+        +'<div class="setup-grid swatches">'
+        +['#15171b','#2b2f36','#5b6169','#b6babd','#8c1327'].map(c=>'<button type="button" class="sw'
+          +(c===NEW.trim?' on':'')+'" style="background:'+c+'" data-trim="'+c+'" aria-label="'+c+'"></button>').join('')
+        +'</div>';
+  }
+  else if(step==='engine'){
+    body='<p class="newnote">Every engine here is worth the same over a season. Speed now, '
+        +'or development points to spend as you go &mdash; there is no best one.</p>'
+        +'<div class="setup-list">'
+        +ENGINES.map(e=>{
+          const sp=engineSpeedWorth(e);
+          return '<button type="button" class="eopt'+(e.id===NEW.engine?' on':'')+'" data-eng="'+e.id+'">'
+            +'<span class="elogo">'+engineLogoSVG(e.id,NEW.body,30)+'</span>'
+            +'<span class="ename"><b>'+setupEsc(e.name)+'</b><i>'+setupEsc(e.blurb)+'</i></span>'
+            +'<span class="ebars">'
+            +'<span class="ebar"><em>Top end</em><i><b style="width:'+Math.round(sp/2)+'%"></b></i></span>'
+            +'<span class="ebar dev"><em>Development</em><i><b style="width:'+Math.round(e.dev/2)+'%"></b></i></span>'
+            +'</span></button>';
+        }).join('')
+        +'</div>';
+  }
+  else if(step==='badge'){
+    body='<p class="newnote">A badge for the car and the timing screens.</p>'
+        +'<div class="setup-grid badges">'
+        +TEAM_LOGOS.map(l=>'<button type="button" class="bopt'+(l.id===NEW.logo?' on':'')
+          +'" data-logo="'+l.id+'">'+teamLogoSVG(l.id,NEW.body,40)+'</button>').join('')
+        +'</div>';
+  }
+  else if(step==='driver'){
+    body='<p class="newnote">Your suit takes the team colour. The rest is you.</p>'
+        +'<div class="setup-driver">'+driverSVG(NEW)+'</div>'
+        +'<div class="slabel2">Skin</div>'
+        +'<div class="setup-grid swatches">'
+        +SKIN_TONES.map(c=>'<button type="button" class="sw'+(c===NEW.skin?' on':'')
+          +'" style="background:'+c+'" data-skin="'+c+'" aria-label="skin"></button>').join('')
+        +'</div>'
+        +'<div class="slabel2">Hair</div>'
+        +'<div class="setup-grid swatches">'
+        +HAIR_TONES.map(c=>'<button type="button" class="sw'+(c===NEW.hair?' on':'')
+          +'" style="background:'+c+'" data-hair="'+c+'" aria-label="hair"></button>').join('')
+        +'</div>';
+  }
+  else if(step==='season'){
+    const e=ENGINES.find(x=>x.id===NEW.engine)||ENGINES[0];
+    body='<p class="newnote">How long a championship, and how long a race.</p>'
+        +'<div class="slabel2">Rounds in the season</div>'
+        +'<div class="setup-grid pills">'
+        +[4,8,12,16].map(n=>'<button type="button" class="pill'+(n===NEW.rounds?' on':'')
+          +'" data-rounds="'+n+'">'+n+'</button>').join('')
+        +'</div>'
+        +'<div class="slabel2">Laps per race</div>'
+        +'<div class="setup-grid pills">'
+        +[1,2,3,4,5].map(n=>'<button type="button" class="pill'+(n===NEW.laps?' on':'')
+          +'" data-laps="'+n+'">'+n+'</button>').join('')
+        +'</div>'
+        +'<div class="setup-summary">'
+        +'<span>'+teamLogoSVG(NEW.logo,NEW.body,22)+setupEsc(NEW.team)+'</span>'
+        +'<span>'+setupEsc(e.name)+'</span>'
+        +'<span>'+NEW.rounds+' rounds &middot; '+NEW.laps+' lap'+(NEW.laps>1?'s':'')+'</span>'
+        +'</div>';
+  }
+
+  const last=NEW.step===SETUP_STEPS.length-1;
+  el.innerHTML='<div class="newwrap setup">'
+    +'<span class="cglitch" aria-hidden="true"></span>'
+    +'<button type="button" class="fullx" aria-label="Close">&times;</button>'
+    +'<div class="ctag">New career<i>'+(NEW.step+1)+' / '+SETUP_STEPS.length+'</i></div>'
+    +'<div class="setup-dots">'+SETUP_STEPS.map((_,i)=>'<i class="'
+      +(i<NEW.step?'done':i===NEW.step?'now':'')+'"></i>').join('')+'</div>'
+    +'<h2 class="newh">'+T[0]+' <em>'+T[1]+'</em></h2>'
+    +body
+    +'<div class="setup-nav">'
+    +(NEW.step?'<button type="button" class="sback">&lsaquo; Back</button>':'<span></span>')
+    +'<button type="button" class="newgo">'+(last?'Start the season':'Next')+' <i>&rsaquo;</i></button>'
+    +'</div></div>';
+
+  el.querySelector('.fullx').onclick=setupClose;
+  el.onclick=e=>{ if(e.target===el) setupClose(); };
+  const back=el.querySelector('.sback');
+  if(back) back.onclick=()=>{ NEW.step--; setupDraw(); };
+  el.querySelector('.newgo').onclick=()=>{
+    if(last) setupFinish();
+    else { NEW.step++; setupDraw(); }
   };
-  el.querySelector('#apex-newgo').onclick=begin;
-  input.onkeydown=e=>{ if(e.key==='Enter') begin();
-                       if(e.key==='Escape') close(); };
-  setTimeout(()=>input.focus(),60);
+  /* Every picker is the same shape: set a field, redraw. */
+  const pick=(sel,field,cast)=>Array.prototype.forEach.call(el.querySelectorAll(sel),b=>{
+    b.onclick=()=>{ NEW[field]=cast?cast(b.dataset[field]):b.dataset[field]; setupDraw(); };
+  });
+  pick('[data-team]','team'); pick('[data-body]','body'); pick('[data-trim]','trim');
+  pick('[data-eng]','engine'); pick('[data-logo]','logo');
+  pick('[data-skin]','skin'); pick('[data-hair]','hair');
+  pick('[data-rounds]','rounds',Number); pick('[data-laps]','laps',Number);
+  /* the dataset keys differ from the field names on two of them */
+  Array.prototype.forEach.call(el.querySelectorAll('[data-eng]'),b=>{
+    b.onclick=()=>{ NEW.engine=b.dataset.eng; setupDraw(); }; });
+  Array.prototype.forEach.call(el.querySelectorAll('[data-logo]'),b=>{
+    b.onclick=()=>{ NEW.logo=b.dataset.logo; setupDraw(); }; });
+  Array.prototype.forEach.call(el.querySelectorAll('[data-rounds]'),b=>{
+    b.onclick=()=>{ NEW.rounds=+b.dataset.rounds; setupDraw(); }; });
+  Array.prototype.forEach.call(el.querySelectorAll('[data-laps]'),b=>{
+    b.onclick=()=>{ NEW.laps=+b.dataset.laps; setupDraw(); }; });
+}
+/* THE SEASON OPENING.
+   Titles over the circuit, using the cameras and the track that already exist
+   rather than anything new. Skippable on any key or click, because the second
+   time you see it you will want it gone. */
+function seasonOpening(c){
+  const e=ENGINES.find(x=>x.id===c.engine)||ENGINES[0];
+  let el=document.getElementById('opening');
+  if(!el){ el=document.createElement('div'); el.id='opening'; document.body.appendChild(el); }
+  const cards=[
+    ['Season '+(c.season||1), 'A new season starts'],
+    [setupEsc(c.team), (c.rounds||8)+' rounds &middot; '+(c.raceLaps||3)+' lap'+((c.raceLaps||3)>1?'s':'')+' a race'],
+    [setupEsc(e.name), 'Engine supplier'],
+    ['Ardennes', 'Round one']
+  ];
+  el.innerHTML='<div class="op-shot"></div><div class="op-scrim"></div>'
+    +'<div class="op-badge">'+teamLogoSVG(c.logo,c.colour,64)+'</div>'
+    +cards.map((k,i)=>'<div class="op-card" style="--i:'+i+'">'
+      +'<b>'+k[0]+'</b><span>'+k[1]+'</span></div>').join('')
+    +'<button type="button" class="op-skip">Skip &rsaquo;</button>';
+  el.classList.add('on');
+  const done=()=>{ el.classList.remove('on');
+                   document.removeEventListener('keydown',done);
+                   setTimeout(()=>{ el.innerHTML=''; },700);
+                   careerOpen(); };
+  el.querySelector('.op-skip').onclick=done;
+  el.onclick=ev=>{ if(ev.target===el) done(); };
+  document.addEventListener('keydown',done,{once:true});
+  clearTimeout(el._t); el._t=setTimeout(done, 7600);
+}
+/* A driver, drawn. Helmet, visor and shoulders, with the suit in the team
+   colour -- a stand-in for the 3D model that will replace it. */
+function driverSVG(n){
+  return '<svg viewBox="0 0 120 130" aria-hidden="true">'
+    +'<path d="M26 130c0-24 15-36 34-36s34 12 34 36z" fill="'+n.body+'"/>'
+    +'<path d="M44 100c0 8 7 12 16 12s16-4 16-12" fill="'+n.skin+'"/>'
+    +'<ellipse cx="60" cy="62" rx="32" ry="36" fill="'+n.skin+'"/>'
+    +'<path d="M28 56c2-22 15-34 32-34s30 12 32 34z" fill="'+n.hair+'"/>'
+    +'<path d="M32 64h56v14a28 28 0 0 1-56 0z" fill="rgba(0,0,0,.22)"/>'
+    +'<rect x="34" y="62" width="52" height="15" rx="7" fill="#0d0f13" opacity=".85"/>'
+    +'<path d="M26 118h68" stroke="'+n.trim+'" stroke-width="7"/>'
+    +'</svg>';
+}
+/* Written once, at the end. */
+function setupFinish(){
+  const e=ENGINES.find(x=>x.id===NEW.engine)||ENGINES[0];
+  const c=CAREER_BLANK();
+  c.used=true; c.team=NEW.team; c.table=careerNewTable();
+  c.rounds=NEW.rounds; c.raceLaps=NEW.laps;
+  c.engine=NEW.engine; c.engineTop=e.top; c.engineDev=e.dev;
+  c.logo=NEW.logo; c.colour=NEW.body;
+  c.driver={ skin:NEW.skin, hair:NEW.hair };
+  c.livery={ body:NEW.body, ring:NEW.trim, wing:NEW.trim, rims:'#b6babd' };
+  CAREER_SLOTS[0]=c; CAREER_AT=0; careerSave();
+  /* The car you drive is the car you just painted. */
+  try{ Object.assign(carStyle,c.livery); if(typeof styleApply==='function') styleApply();
+       if(typeof styleSave==='function') styleSave(); }catch(err){}
+  setupClose();
+  apexPaintSlots(); apexPaintHome(); apexDriverBadge();
+  seasonOpening(c);
 }
 
 /* One tile. Paint, aero and power were three doors to things that either live
