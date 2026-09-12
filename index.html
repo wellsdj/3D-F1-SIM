@@ -10206,6 +10206,112 @@ function turnWheels(list, wl, wr, spinAng, steerAng){
    preview's markers and pure pursuit produce the same three numbers. */
 /* Retirement driving uses the same barrier response as the racing grid. */
 function aiWall(C,dt){return collisionWall(C,dt);}
+/* ==========================================================================
+   TYRE MARKS
+   Laid when a tyre is actually sliding: black on asphalt, green where the car
+   has cut a verge. A fixed pool of quads that is written round and round, so
+   the cost is decided once at load and never grows however long the race runs
+   -- no allocation, no garbage, and the oldest mark simply becomes the newest.
+   ========================================================================== */
+const MARK_MAX=520;            // about forty seconds of continuous sliding
+let markMesh=null, markAt=0, markGeo=null, markCol=null, markLast=new Map();
+function marksInit(){
+  if(markMesh) return;
+  const g=new THREE.PlaneGeometry(1,1);
+  markGeo=new THREE.InstancedBufferGeometry().copy(g);
+  markGeo.instanceCount=MARK_MAX;
+  const m=new THREE.MeshBasicMaterial({ transparent:true, opacity:0.5, depthWrite:false,
+                                        color:0xffffff, vertexColors:true });
+  markMesh=new THREE.InstancedMesh(g, m, MARK_MAX);
+  markMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  markCol=new THREE.InstancedBufferAttribute(new Float32Array(MARK_MAX*3),3);
+  markMesh.instanceColor=markCol;
+  markMesh.frustumCulled=false;
+  markMesh.renderOrder=-1;
+  /* Parked below the world until used, so an unwritten slot draws nothing. */
+  const hide=new THREE.Matrix4().makeTranslation(0,-1000,0);
+  for(let i=0;i<MARK_MAX;i++) markMesh.setMatrixAt(i,hide);
+  scene.add(markMesh);
+}
+const _mM=new THREE.Matrix4(), _mQ=new THREE.Quaternion(),
+      _mP=new THREE.Vector3(), _mS=new THREE.Vector3(),
+      _mE=new THREE.Euler();
+function markPut(x,y,z,hdg,len,wide,grass){
+  if(!markMesh) return;
+  _mE.set(-Math.PI/2, 0, -hdg);
+  _mQ.setFromEuler(_mE);
+  _mP.set(x, y+0.012, z);
+  _mS.set(wide, len, 1);
+  _mM.compose(_mP,_mQ,_mS);
+  markMesh.setMatrixAt(markAt,_mM);
+  if(grass) markCol.setXYZ(markAt, 0.16, 0.30, 0.11);
+  else      markCol.setXYZ(markAt, 0.05, 0.05, 0.055);
+  markAt=(markAt+1)%MARK_MAX;
+  markMesh.instanceMatrix.needsUpdate=true;
+  markCol.needsUpdate=true;
+}
+/* One call a frame per car. A mark goes down when the tyre is sliding -- the
+   back stepping out, or a wheel scrabbling on a verge -- and only every so
+   many metres, so a long slide is a dotted line rather than ten thousand
+   overlapping quads. */
+function marksStep(C, dt){
+  if(!markMesh||!C||!C.st) return;
+  const st=C.st, sp=Math.abs(st.speed);
+  if(sp<6) return;
+  const slide=Math.abs(C.spin||0);
+  const off=C.surf&&(C.surf.grass||C.surf.loose);
+  const scrub=off ? Math.min(1,Math.abs(C.steerAng||0)*2.2) : 0;
+  const strength=Math.max(slide>0.22?Math.min(1,slide*0.7):0, scrub>0.35?scrub:0);
+  if(strength<=0){ markLast.delete(C); return; }
+  const last=markLast.get(C);
+  if(last && (st.wx-last.x)**2+(st.wz-last.z)**2 < 2.6*2.6) return;
+  markLast.set(C,{x:st.wx,z:st.wz});
+  /* Both rear wheels, a metre and a bit either side of the centreline. */
+  const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
+  const rx= fz, rz=-fx;                              // the car's right
+  const back=1.5, half=0.78;
+  const y=(C.groundY||0)-(typeof RIDE==='number'?RIDE:0.1);
+  for(const sgn of [-1,1]){
+    markPut(st.wx - fx*back + rx*half*sgn,
+            y,
+            st.wz - fz*back + rz*half*sgn,
+            st.hdg, 3.0, 0.34, !!off);
+  }
+}
+/* ==========================================================================
+   SPINNING
+   ========================================================================== */
+const SPIN_SLACK=0.22;    // how far past the clamp before the back goes
+const SPIN_GAIN=2.5;      // how hard it lets go once it does
+const SPIN_DECAY=1.9;     // and how quickly it settles when you stop asking
+function spinStep(C, v, yawRate, dt){
+  const st=C.st, sp=Math.abs(v);
+  C.spin=C.spin||0;
+  if(sp<8){ C.spin*=Math.exp(-6*dt); if(Math.abs(C.spin)<1e-3) C.spin=0;
+            C.slipAng=C.spin*0.5; return; }
+  /* What the wheels were asked for, against what the tyres would give. */
+  const dTyre=-C.steerAng/STEER_RATIO;
+  const want=sp*Math.tan(dTyre)/WHEELBASE;
+  const over=Math.abs(want)-Math.abs(yawRate);          // the part that was clipped
+  const wet=(typeof WEATHER!=='undefined')?WEATHER.grip:1;
+  /* A wheel on the grass while the car is turning: far less to hold with. */
+  const offLine=(C.surf&&(C.surf.grass||C.surf.loose))
+    ? (C.surf.grassFrac||C.surf.looseFrac||0)*Math.min(1,Math.abs(yawRate)*3.2) : 0;
+  const slack=SPIN_SLACK*wet;
+  const push=Math.max(0, over-slack) + offLine*0.55;
+  if(push>0) C.spin += Math.sign(want||yawRate||1)*push*SPIN_GAIN*dt;
+  else       C.spin *= Math.exp(-SPIN_DECAY*dt);
+  /* Catching it: unwinding the lock, or lifting, brings it back. */
+  if(Math.sign(C.steerAng)!==Math.sign(C.spin) && Math.abs(C.steerAng)>0.02)
+    C.spin *= Math.exp(-3.4*dt);
+  C.spin=clamp(C.spin,-3.2,3.2);
+  if(Math.abs(C.spin)<1e-3){ C.spin=0; C.slipAng=0; return; }
+  st.hdg += C.spin*dt;
+  /* The car keeps going the way it was pointed while the nose comes round --
+     that is what a spin is -- and scrubs speed off doing it. */
+  st.speed -= Math.abs(C.spin)*sp*0.055*dt;
+  C.slipAng=C.spin*0.5;
+}
 function stepCar(C, inp, dt){
   const st=C.st;
   C._collisionPrev={wx:st.wx,wz:st.wz,hdg:st.hdg};
@@ -10221,6 +10327,21 @@ function stepCar(C, inp, dt){
   const yawRate=yawFor(v, C.steerAng, C.surf, _grip);
   surfaceDrag(st, C.surf, dt);
   st.hdg += yawRate*dt;
+  /* LETTING GO OF THE BACK END.
+
+     yawFor clamps the yaw to what the tyres can hold, so asking for more than
+     the grip allows used to do nothing but understeer -- the car ran wide and
+     that was the whole story. Now the amount you asked for over the clamp is
+     remembered: hold it and the back steps out, and once it is out it keeps
+     going until you stop asking.
+
+     Deliberately hard to provoke and recoverable when it happens. It takes a
+     real overstep, not a twitch -- and coming off the throttle or unwinding
+     the lock kills it, which is what a driver would do. Two ways in: too much
+     lock for the grip, and putting a wheel on the grass mid-corner, which is
+     the classic way to lose one. */
+  spinStep(C, v, yawRate, dt);
+  marksStep(C, dt);
   st.wx  += Math.sin(st.hdg)*v*dt;
   st.wz  += Math.cos(st.hdg)*v*dt;
   /* A shove from another car, carried as its own velocity so it moves the car
@@ -13438,6 +13559,9 @@ window.SIM={
      whether it is mid-recovery, and whether it has been shown the flag. */
   stuckSpots(){ return AI_STUCK_LOG.slice(); },
   /* Weather, from outside: read it, force it, or sample the roll. */
+  /* Spinning and marks, from outside. */
+  spinState(){ return {spin:+(PLAYER.spin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3),
+                       marks:markMesh?markAt:-1}; },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
                                  WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
               return {...WEATHER, rainShown:document.body.classList.contains('wet')}; },
@@ -14285,6 +14409,7 @@ function maybeStart(){
   if(booted || !assetsDone || !worldDone) return;
   booted=true;
   if(TRACK.scenery) makeTrees();
+  marksInit();
   if(!FREEROAM){ buildMap(); armStart(); }
   else { startPhase='go'; }
   applyDetail();
