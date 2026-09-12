@@ -23,6 +23,16 @@ test('upshift drops pitch; hysteresis prevents gear chatter',()=>{
  assert.equal(m.update(input(70,0),.02).gear,1);
  assert.equal(m.update(input(150,1,1),.02).mode,'brake');
 });
+test('high-speed coast keeps revs and a mechanical high-register layer',()=>{
+ const m=new Model(),on=settle(m,input(300)),off=settle(m,input(300,0));
+ assert.equal(off.mode,'coast');
+ assert.ok(Math.abs(off.hz-on.hz)<.001);
+ assert.equal(off.gear,on.gear);
+ assert.ok(off.layers.filter(l=>l.name.startsWith('on-')).reduce((s,l)=>s+l.volume*l.volume,0)>.20);
+ assert.ok(off.layers.some(l=>l.name.startsWith('off-')));
+ const braking=settle(m,input(200,0,1));
+ assert.ok(braking.hz<off.hz||braking.gear<off.gear);
+});
 test('sustained high revs remain stable and every layer matches target pitch',()=>{
  const m=new Model(),first=settle(m,input(340));
  for(let i=0;i<3000;i++){

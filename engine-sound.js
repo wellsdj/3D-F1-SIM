@@ -39,8 +39,12 @@
    if(idle)layers.push({name:'idle',rate:1,volume:.75});
    else{
     const dip=this.shiftLeft>0&&this.shift==='up'?.64:1;
-    blend(ON,this.hz,Math.sqrt(this.load)*dip,layers);
-    blend(OFF,this.hz,Math.sqrt(1-this.load)*.72,layers);
+    // Wheels still drive the engine on lift-off. Keep some mechanical high
+    // register instead of replacing it entirely with a low-rev decel take.
+    // Load changes tone/level, never the speed-derived acoustic RPM.
+    const presence=.16+.10*clamp((this.hz-180)/130,0,1);
+    blend(ON,this.hz,Math.sqrt(presence+(1-presence)*this.load)*dip,layers);
+    blend(OFF,this.hz,Math.sqrt(1-this.load)*.64,layers);
    }
    this.shiftLeft=Math.max(0,this.shiftLeft-dt);
    return {mode:this.mode,gear:this.gear+1,hz:this.hz,load:this.load,layers};

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "off-high",
+    "old_seconds": 0.845,
+    "seconds": 12.381,
+    "old_period_envelope_correlation": 0.071
+  },
+  {
+    "name": "off-low",
+    "old_seconds": 1.248,
+    "seconds": 12.755,
+    "old_period_envelope_correlation": 0.031
+  },
+  {
+    "name": "off-mid",
+    "old_seconds": 2.64,
+    "seconds": 13.112,
+    "old_period_envelope_correlation": -0.009
+  },
+  {
+    "name": "on-high",
+    "old_seconds": 0.747,
+    "seconds": 13.487,
+    "old_period_envelope_correlation": 0.213
+  },
+  {
+    "name": "on-low",
+    "old_seconds": 5.957,
+    "seconds": 13.851,
+    "old_period_envelope_correlation": 0.046
+  },
+  {
+    "name": "on-mid",
+    "old_seconds": 4.19,
+    "seconds": 14.228,
+    "old_period_envelope_correlation": -0.057
+  },
+  {
+    "name": "on-pull",
+    "old_seconds": 0.645,
+    "seconds": 14.61,
+    "old_period_envelope_correlation": 0.248
+  },
+  {
+    "name": "on-top",
+    "old_seconds": 0.349,
+    "seconds": 14.967,
+    "old_period_envelope_correlation": 0.001
+  }
+]
