@@ -1478,3 +1478,52 @@ body.wet #rain:after{
 }
 body:not(.driving) #rain{display:none!important}
 @media (prefers-reduced-motion:reduce){ #rain i{animation:none} }
+
+/* ------------------------------------------- the two cards that start things */
+.hcard.hstart,.hcard.hquick{
+  cursor:pointer;text-align:left;overflow:hidden;
+  transition:transform .2s ease,box-shadow .2s ease;
+}
+.hcard.hstart:hover,.hcard.hquick:hover{transform:translateY(-3px)}
+.hcard.hstart{
+  background:linear-gradient(150deg,rgba(58,9,14,.9),rgba(18,6,9,.72));
+  box-shadow:inset 0 0 0 1px rgba(255,31,45,.55);
+}
+.hcard.hstart:hover{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 44px -14px rgba(255,31,45,.8)}
+.hplus{
+  position:relative;z-index:1;display:block;font-size:40px;line-height:1;
+  color:var(--apex-red);font-weight:200;margin:2px 0 -2px;
+  text-shadow:0 0 26px rgba(255,31,45,.8);
+}
+.hbigword{
+  position:relative;z-index:1;
+  font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(19px,1.85vw,27px);line-height:1;text-transform:uppercase;color:#fff;
+}
+.hbigword em{display:block;font-style:italic;color:var(--apex-red);margin-top:2px}
+.hcard.hstart .hfoot,.hcard.hquick .hfoot{border-top-color:rgba(255,255,255,.14)}
+
+/* the quick race card carries the circuit */
+.qshot{
+  position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:url('assets/home/race-pitlane.webp') center/cover no-repeat;
+  opacity:.42;
+}
+.hcard.hquick:after{
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:linear-gradient(160deg,rgba(10,8,12,.86),rgba(10,8,12,.46) 55%,rgba(10,8,12,.8));
+}
+.hcard.hquick>*{position:relative;z-index:1}
+.hcard.hquick:hover .qshot{opacity:.58}
+.hcard.hquick:hover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.34)}
+/* the helmet on the start card, same treatment as the championship one */
+.hcard.hstart .hhelm{z-index:0}
+.hcard.hstart>*:not(.hhelm){position:relative;z-index:1}
+
+/* The scrim was heavy enough to hide the photograph it was there to make
+   readable over. Enough for the type, not enough to black it out. */
+.hcard.hquick:after{
+  background:linear-gradient(160deg,rgba(10,8,12,.62),rgba(10,8,12,.18) 52%,rgba(10,8,12,.72));
+}
+.qshot{opacity:.72}
+.hcard.hquick:hover .qshot{opacity:.9}

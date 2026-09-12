@@ -1118,10 +1118,10 @@ if('serviceWorker' in navigator){
   <header class="apex-header">
     <nav id="apexnav" aria-label="Main menu">
       <button type="button" data-sec="home" class="on">Home</button>
-      <button type="button" data-sec="career">Career</button>
-      <button type="button" data-sec="replays">Replays</button>
-      <button type="button" data-sec="garage">Garage</button>
       <button type="button" data-sec="race">Race</button>
+      <button type="button" data-sec="career">Career</button>
+      <button type="button" data-sec="garage">Garage</button>
+      <button type="button" data-sec="replays">Replays</button>
       <button type="button" data-sec="settings">Settings</button>
     </nav>
     <!-- Who is driving. The name is your team, the number is the season you
@@ -1215,8 +1215,6 @@ if('serviceWorker' in navigator){
             <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
             <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
             <div class="ctrl-row"><kbd>J</kbd><span>Start a race</span></div>
-            <div class="ctrl-row"><kbd>G</kbd><span>Barrier editor</span></div>
-            <div class="ctrl-row"><kbd>L</kbd><span>Racing line editor</span></div>
           </div>
         </div>
       </div>
@@ -5150,7 +5148,11 @@ addEventListener('keydown',e=>{
      circuit to move the line, and everything downstream -- curvature, the
      speed profile, the colours -- is rebuilt on the spot, so what is on screen
      is what the cars will do rather than a picture of it. */
-  if(k==='l' && FREEROAM && !TTREC.playing && !NET.watching){
+  /* The line and wall editors are development tools, not controls. A key that
+     drops the circuit into an editor mid-race is a way to ruin a race by
+     leaning on the wrong finger, so they have come off the keyboard. Both are
+     still reachable through SIM for the tooling that needs them. */
+  if(k==='l' && EDITOR_KEYS && FREEROAM && !TTREC.playing && !NET.watching){
     if(!m2On || m2Tool!=='line'){ m2SetTool('line'); if(!m2On) m2Show(true); }
     else m2Show(false);
     m2Draw(); m2Info();
@@ -5171,8 +5173,8 @@ addEventListener('keydown',e=>{
      to do this is set to display:none -- it was tidied off the screen as a tool
      rather than a control -- so until now there was no way to reach the paint at
      all, which is why it could not be found. */
-  if(k==='g' && FREEROAM && !TTREC.playing && !NET.watching){
-    if(!m2On){ m2Tool='wall'; wallEnd(); }   // G is the wall editor, nothing else
+  if(k==='g' && EDITOR_KEYS && FREEROAM && !TTREC.playing && !NET.watching){
+    if(!m2On){ m2Tool='wall'; wallEnd(); }
     m2Show(!m2On);
   }
   /* Delete removes the picked wall. The keyboard is where a delete belongs --
@@ -10423,6 +10425,8 @@ function playerRev(brk, thr, kph, dt){
   else if(!brk) playerRevHold=0;
   return playerRevHold>0.25;
 }
+/* Off. SIM.editorKeys(true) puts them back for anyone building the circuit. */
+let EDITOR_KEYS=false;
 function drive(dt){
   if(RETIRE.on){retirementDrive(dt);return;}
   /* The cool-down lap still drives -- it is the rival brain at the wheel, not
@@ -13578,6 +13582,7 @@ window.SIM={
   stuckSpots(){ return AI_STUCK_LOG.slice(); },
   /* Weather, from outside: read it, force it, or sample the roll. */
   /* Spinning and marks, from outside. */
+  editorKeys(on){ if(on!==undefined) EDITOR_KEYS=!!on; return EDITOR_KEYS; },
   spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3),
                        marks:markMesh?markAt:-1}; },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
@@ -15977,13 +15982,21 @@ function apexPaintHome(){
   if(!host) return;
   const c=apexCareer();
   if(!c || typeof CareerSeason==='undefined'){
+    /* No career is not a thing to apologise for, it is the start. Two cards in
+       the same shape as the rest of the row: the one that begins a season, and
+       the one that is always there whether you have a season or not. */
     if(meta) meta.textContent='No career yet';
-    host.innerHTML='<div class="hcard wide empty">'
+    host.innerHTML=
+       '<button type="button" class="hcard hstart">'
       +'<div class="hlabel">Drivers championship</div>'
-      +'<p>Name a team and every number on this page starts filling in: your '
-      +'position, your points, the table you are climbing.</p>'
-      +'<button type="button" class="hgo">Start a career &rarr;</button></div>';
-    const g=host.querySelector('.hgo'); if(g) g.onclick=()=>apexShow('career');
+      +'<span class="hplus" aria-hidden="true">+</span>'
+      +'<div class="hbigword">Start your<em>career</em></div>'
+      +'<div class="hfoot">Eight rounds<em>Name a team and go racing</em></div>'
+      +'<span class="hhelm" aria-hidden="true"></span>'
+      +'</button>'
+      +apexQuickCard();
+    host.querySelector('.hstart').onclick=()=>apexNewCareer();
+    apexWireQuick(host);
     return;
   }
   const rounds=c.rounds||8, round=Math.min(c.round||1,rounds);
@@ -16026,7 +16039,7 @@ function apexPaintHome(){
   +stat('flag','Points',c.points||0)
   +stat('bars','Average finish',avg)
   +'</div>'
-  /* 3 -- the round just gone */
+  /* 3 -- the round just gone, now sitting next to where you stand */
   +'<div class="hcard hlast">'
   +'<div class="hlabel">Last race</div>'
   +(last
@@ -16038,7 +16051,9 @@ function apexPaintHome(){
        +stat('clock','Fastest lap',bestLap)
      : '<p class="hnone">No round finished yet. Your first result lands here.</p>')
   +'</div>'
-  /* 4 -- the table */
+  /* 4 -- one click to a race, always there */
+  +apexQuickCard()
+  /* 5 -- the table */
   +'<div class="hcard hstand">'
   +'<div class="hlabel">Drivers standings</div>'
   +'<div class="hrows">'
@@ -16052,8 +16067,24 @@ function apexPaintHome(){
   +'</div>';
   const more=host.querySelector('.hmore');
   if(more) more.onclick=()=>apexStandingsOpen(c,table);
+  apexWireQuick(host);
 }
 
+/* One click to a race. On the home screen whether or not there is a career,
+   because a race you can start without deciding anything first is the reason
+   to open the game on a day you do not want to think about a season. */
+function apexQuickCard(){
+  return '<button type="button" class="hcard hquick">'
+    +'<span class="qshot" aria-hidden="true"></span>'
+    +'<div class="hlabel">Quick race</div>'
+    +'<div class="hbigword">Ardennes<em>Circuit</em></div>'
+    +'<div class="hfoot">Ten cars<em>Straight onto the circuit &rarr;</em></div>'
+    +'</button>';
+}
+function apexWireQuick(host){
+  const q=host.querySelector('.hquick');
+  if(q) q.onclick=()=>{ if(typeof CAREER!=='undefined') CAREER.active=false; apexShow('race'); };
+}
 /* The whole table, when five rows is not enough. */
 function apexStandingsOpen(c,table){
   let el=document.getElementById('apex-full');
