@@ -12373,12 +12373,12 @@ function raceFinish(){
    camera follows it, and the only thing on screen is where you finished.
    The table waits until you ask for it.
    ========================================================================== */
-const COOL={ on:false, t:0, v0:0, driver:null, card:null, done:false };
+const COOL={ on:false, t:0, v0:0, driver:null, card:null, scene:false, done:false };
 const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
 const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
 function coolStart(){
   if(COOL.on || !AI.x || !AI.x.length) return;
-  COOL.on=true; COOL.t=0; COOL.done=false;
+  COOL.on=true; COOL.t=0; COOL.done=false; COOL.scene=false;
   COOL.v0=Math.max(40, carState.speed);     // the speed you took the flag at
   /* A driver of its own, reading the shared line like any rival, but pointed
      at your car instead of one of theirs. */
@@ -12426,6 +12426,11 @@ function coolStep(dt){
   if(!COOL.on) return;
   COOL.t+=dt;
   if(!COOL.card && COOL.t>=COOL_CARD_T) coolCard();
+  /* The scene comes in behind the position, a beat after it. */
+  if(!COOL.scene && COOL.t>=COOL_CARD_T+1.6){
+    COOL.scene=true;
+    resultScene(Math.max(1,RESULT.rows.findIndex(r=>r.you)+1));
+  }
   if(COOL.card && !COOL.done && COOL.t>=COOL_CONT_T){
     COOL.done=true;
     const b=COOL.card.querySelector('.cool-go');
@@ -12451,8 +12456,80 @@ function coolCard(){
   el.querySelector('.cool-go').onclick=()=>{ if(COOL.done) coolEnd(); };
 }
 /* Hand the car back and show the table. */
+/* WHERE YOU FINISHED, AS A SCENE.
+
+   Top three and you are on the podium; anything else and you are back in the
+   pit lane. Both are drawn rather than filmed -- three steps and a figure, or
+   a garage bay and a car -- which keeps the whole thing in one file and
+   offline. The seam for the real models is exactly here: replace resultScene's
+   innerHTML with a canvas or a model viewer and nothing else has to change,
+   because everything around it only cares when it starts and when it ends. */
+function resultScene(pos){
+  const podium=pos<=3;
+  const c=(typeof CAREER!=='undefined'&&CAREER.active&&typeof careerSlot==='function')?careerSlot():null;
+  const col=(c&&c.colour)||'#c8102e';
+  const skin=(c&&c.driver&&c.driver.skin)||'#e4b48c';
+  const hair=(c&&c.driver&&c.driver.hair)||'#1b1512';
+  let el=document.getElementById('resultscene');
+  if(!el){ el=document.createElement('div'); el.id='resultscene'; document.body.appendChild(el); }
+  const art = podium ? podiumSVG(pos,col,skin,hair) : pitlaneSVG(col);
+  el.innerHTML='<div class="rs-art">'+art+'</div>'
+    +'<div class="rs-copy">'
+    +'<span class="rs-kick">'+(podium?'On the podium':'Back in the pit lane')+'</span>'
+    +'<b class="rs-pos">P'+pos+'</b>'
+    +'<span class="rs-line">'+(podium
+        ? (pos===1?'You won it.':pos===2?'Second. Close.':'Third. On the box.')
+        : 'Points another day. Take it apart and come back.')+'</span>'
+    +'</div>';
+  el.classList.add('on');
+  return el;
+}
+function resultSceneHide(){
+  const el=document.getElementById('resultscene');
+  if(el){ el.classList.remove('on'); setTimeout(()=>{ if(el) el.innerHTML=''; },600); }
+}
+/* Three steps, and a figure on the one you earned. */
+function podiumSVG(pos,col,skin,hair){
+  const H={1:[58,46,30],2:[46,58,30],3:[46,30,58]}[pos]||[46,58,30];
+  const x=[36,104,172], lbl=['2','1','3'], rank=[2,1,3];
+  let g='<svg viewBox="0 0 240 150" aria-hidden="true">';
+  for(let i=0;i<3;i++){
+    const h=[H[1],H[0],H[2]][i], y=140-h;
+    const me=rank[i]===pos;
+    g+='<rect x="'+x[i]+'" y="'+y+'" width="64" height="'+h+'" '
+      +'fill="'+(me?col:'rgba(255,255,255,.10)')+'" '
+      +'stroke="'+(me?'#fff':'rgba(255,255,255,.28)')+'" stroke-width="1.6"/>'
+      +'<text x="'+(x[i]+32)+'" y="'+(y+h/2+7)+'" text-anchor="middle" '
+      +'font-family="ui-monospace,monospace" font-size="19" font-weight="700" '
+      +'fill="'+(me?'#fff':'rgba(255,255,255,.45)')+'">'+lbl[i]+'</text>';
+    if(me){
+      const cx=x[i]+32, cy=y-26;
+      g+='<circle cx="'+cx+'" cy="'+cy+'" r="11" fill="'+skin+'"/>'
+        +'<path d="M'+(cx-11)+' '+cy+'a11 11 0 0 1 22 0z" fill="'+hair+'"/>'
+        +'<path d="M'+(cx-13)+' '+(y-2)+'c0-11 6-16 13-16s13 5 13 16z" fill="'+col+'"/>'
+        +'<path d="M'+(cx-22)+' '+(cy-4)+'l9 6M'+(cx+22)+' '+(cy-4)+'l-9 6" '
+        +'stroke="'+skin+'" stroke-width="4.5" stroke-linecap="round"/>';
+    }
+  }
+  return g+'</svg>';
+}
+/* A bay, a car in it, and the shutter down. */
+function pitlaneSVG(col){
+  return '<svg viewBox="0 0 240 150" aria-hidden="true">'
+    +'<rect x="10" y="14" width="220" height="104" fill="rgba(255,255,255,.05)" '
+    +'stroke="rgba(255,255,255,.22)" stroke-width="1.6"/>'
+    +'<path d="M10 34h220M10 44h220M10 54h220" stroke="rgba(255,255,255,.10)" stroke-width="3"/>'
+    +'<rect x="26" y="96" width="188" height="6" fill="rgba(255,255,255,.14)"/>'
+    +'<path d="M62 96V80c0-7 8-11 24-12l36-2c5-8 13-11 22-11h10c9 0 14 5 15 12l22 2'
+    +'c14 1 22 5 24 10l2 17z" fill="'+col+'" opacity=".92"/>'
+    +'<circle cx="86" cy="96" r="13" fill="#0b0b0d"/><circle cx="86" cy="96" r="5" fill="#b6babd"/>'
+    +'<circle cx="176" cy="96" r="13" fill="#0b0b0d"/><circle cx="176" cy="96" r="5" fill="#b6babd"/>'
+    +'<path d="M10 118h220v14H10z" fill="rgba(255,255,255,.08)"/>'
+    +'</svg>';
+}
 function coolEnd(){
-  COOL.on=false; COOL.driver=null;
+  COOL.on=false; COOL.driver=null; COOL.scene=false;
+  resultSceneHide();
   carState.speed=0;
   if(COOL.card){ COOL.card.classList.remove('show');
                  setTimeout(()=>{ if(COOL.card){COOL.card.remove(); COOL.card=null;} },500); }
@@ -13631,6 +13708,8 @@ window.SIM={
   grid(){ return raceProgress().map((r,i)=>({p:i+1, who:r.name, you:!!r.you,
             prog:+r.prog.toFixed(4), fin:+(r.fin||0).toFixed(2),
             dsq:!!r.dsq, out:!!r.out})); },
+  /* Force the finish scene for a given position, to look at it. */
+  resultSceneAt(p){ resultScene(p||1); return true; },
   coolState(){ return {on:COOL.on, t:+COOL.t.toFixed(1), card:!!COOL.card, done:COOL.done,
                        kph:+(Math.abs(carState.speed)*3.6).toFixed(0),
                        thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2)}; },

@@ -1648,3 +1648,31 @@ body:not(.driving) #rain{display:none!important}
   .op-shot,.op-card,.op-badge,#opening.on{animation:none}
   .op-card,.op-badge{opacity:1}
 }
+
+/* ================================================ WHERE YOU FINISHED, AS A SCENE
+   Sits behind the position card during the slowing-down lap. Drawn, not
+   filmed -- the seam for real models is resultScene's innerHTML. */
+#resultscene{
+  position:fixed;left:0;right:0;bottom:0;top:auto;z-index:33;
+  display:flex;align-items:flex-end;justify-content:center;gap:clamp(20px,4vw,64px);
+  padding:0 clamp(20px,4vw,64px) 30vh;
+  pointer-events:none;opacity:0;transform:translateY(26px);
+  transition:opacity .7s ease,transform .8s cubic-bezier(.16,1,.3,1);
+  font-family:var(--apex-mono);
+}
+#resultscene.on{opacity:1;transform:none}
+.rs-art{width:min(300px,34vw);filter:drop-shadow(0 22px 50px rgba(0,0,0,.85))}
+.rs-art svg{width:100%;height:auto}
+.rs-copy{display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:6px}
+.rs-kick{font-size:9px;letter-spacing:.34em;text-transform:uppercase;color:var(--apex-red)}
+.rs-pos{
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(38px,5vw,74px);
+  line-height:.9;color:#fff;text-shadow:0 12px 50px rgba(0,0,0,.85);
+}
+.rs-line{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--apex-dim);margin-top:4px}
+@media (max-width:760px){
+  #resultscene{flex-direction:column;align-items:center;padding-bottom:34vh}
+  .rs-art{width:60vw}
+}
+/* The position card sits above the scene, not on top of it. */
+#cooldown{z-index:34}
