@@ -1429,3 +1429,18 @@ body.customizer-open #netbtn{display:none}
 @media (prefers-reduced-motion:reduce){
   .cool-pos:before,.cool-pos:after,.cool-go.ready{animation:none}
 }
+
+/* ---------------------------------------------------- the wordmark, renamed */
+.apex-brand .mark{letter-spacing:.02em}
+.apex-brand .mark b{color:var(--apex-red);font-weight:inherit;
+  text-shadow:0 0 18px rgba(255,31,45,.85)}
+
+/* The driver badge carries the helmet picture rather than a line drawing of
+   one. Screened, so the black ground of the image drops out and only the red
+   light is left -- the same treatment the home card uses. */
+.apex-driver .helm{
+  width:34px;min-width:34px;padding:0 0 0 8px;
+  background:url('assets/home/helmet-red.webp') center/cover no-repeat;
+  mix-blend-mode:screen;
+  border-radius:2px;
+}
