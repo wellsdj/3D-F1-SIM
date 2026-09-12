@@ -10258,7 +10258,7 @@ function marksStep(C, dt){
   if(!markMesh||!C||!C.st) return;
   const st=C.st, sp=Math.abs(st.speed);
   if(sp<6) return;
-  const slide=Math.abs(C.spin||0);
+  const slide=Math.abs(C.yawSpin||0);
   const off=C.surf&&(C.surf.grass||C.surf.loose);
   const scrub=off ? Math.min(1,Math.abs(C.steerAng||0)*2.2) : 0;
   const strength=Math.max(slide>0.22?Math.min(1,slide*0.7):0, scrub>0.35?scrub:0);
@@ -10286,9 +10286,9 @@ const SPIN_GAIN=2.5;      // how hard it lets go once it does
 const SPIN_DECAY=1.9;     // and how quickly it settles when you stop asking
 function spinStep(C, v, yawRate, dt){
   const st=C.st, sp=Math.abs(v);
-  C.spin=C.spin||0;
-  if(sp<8){ C.spin*=Math.exp(-6*dt); if(Math.abs(C.spin)<1e-3) C.spin=0;
-            C.slipAng=C.spin*0.5; return; }
+  C.yawSpin=C.yawSpin||0;
+  if(sp<8){ C.yawSpin*=Math.exp(-6*dt); if(Math.abs(C.yawSpin)<1e-3) C.yawSpin=0;
+            C.slipAng=C.yawSpin*0.5; return; }
   /* What the wheels were asked for, against what the tyres would give. */
   const dTyre=-C.steerAng/STEER_RATIO;
   const want=sp*Math.tan(dTyre)/WHEELBASE;
@@ -10299,18 +10299,18 @@ function spinStep(C, v, yawRate, dt){
     ? (C.surf.grassFrac||C.surf.looseFrac||0)*Math.min(1,Math.abs(yawRate)*3.2) : 0;
   const slack=SPIN_SLACK*wet;
   const push=Math.max(0, over-slack) + offLine*0.55;
-  if(push>0) C.spin += Math.sign(want||yawRate||1)*push*SPIN_GAIN*dt;
-  else       C.spin *= Math.exp(-SPIN_DECAY*dt);
+  if(push>0) C.yawSpin += Math.sign(want||yawRate||1)*push*SPIN_GAIN*dt;
+  else       C.yawSpin *= Math.exp(-SPIN_DECAY*dt);
   /* Catching it: unwinding the lock, or lifting, brings it back. */
-  if(Math.sign(C.steerAng)!==Math.sign(C.spin) && Math.abs(C.steerAng)>0.02)
-    C.spin *= Math.exp(-3.4*dt);
-  C.spin=clamp(C.spin,-3.2,3.2);
-  if(Math.abs(C.spin)<1e-3){ C.spin=0; C.slipAng=0; return; }
-  st.hdg += C.spin*dt;
+  if(Math.sign(C.steerAng)!==Math.sign(C.yawSpin) && Math.abs(C.steerAng)>0.02)
+    C.yawSpin *= Math.exp(-3.4*dt);
+  C.yawSpin=clamp(C.yawSpin,-3.2,3.2);
+  if(Math.abs(C.yawSpin)<1e-3){ C.yawSpin=0; C.slipAng=0; return; }
+  st.hdg += C.yawSpin*dt;
   /* The car keeps going the way it was pointed while the nose comes round --
      that is what a spin is -- and scrubs speed off doing it. */
-  st.speed -= Math.abs(C.spin)*sp*0.055*dt;
-  C.slipAng=C.spin*0.5;
+  st.speed -= Math.abs(C.yawSpin)*sp*0.055*dt;
+  C.slipAng=C.yawSpin*0.5;
 }
 function stepCar(C, inp, dt){
   const st=C.st;
@@ -11672,9 +11672,21 @@ function aiTraffic(d,dt){
   const left=Math.max(0,aiRoomNear(d,d.i,-1,span)-.9);
   const right=Math.max(0,aiRoomNear(d,d.i,1,span)-.9);
   const obstacles=[];
-  const add=(x,z,speed)=>{const r=aiRelTo(d,x,z,speed*3.6);if(r&&r.gap>-6&&r.gap<55)obstacles.push(r);};
-  add(carState.wx,carState.wz,carState.speed);
-  for(const o of AIS)if(o!==d&&o.on&&o.car)add(o.car.st.wx,o.car.st.wz,o.car.st.speed);
+  const add=(x,z,speed,you)=>{const r=aiRelTo(d,x,z,speed*3.6);
+    if(r&&r.gap>-6&&r.gap<55){ r.you=!!you; obstacles.push(r); }};
+  add(carState.wx,carState.wz,carState.speed,true);
+  for(const o of AIS)if(o!==d&&o.on&&o.car)add(o.car.st.wx,o.car.st.wz,o.car.st.speed,false);
+  /* RACING YOU IS NOT THE SAME AS RACING EACH OTHER.
+
+     Between themselves they are as hard as they ever were -- they will take
+     the line and lean on it. With you they leave more room, and if you have a
+     run on them they take the alternative rather than close the door. It is
+     the difference between a field that is fun to race and one that is just
+     an obstacle, and it costs them nothing they would not give a team mate. */
+  const you=obstacles.find(o=>o.you);
+  /* A run on them: alongside, or close behind and carrying more speed. */
+  const yielding = you && you.gap>-6 && you.gap<26
+                   && (you.gap<4 || carState.speed*3.6 > (d.car?d.car.st.speed*3.6:0)+4);
   const candidates=[base,d.lat||base,base-2.5,base+2.5].map(x=>clamp(x,-left,right));
   const current=d.lat||0;
   let want=clamp(current,-left,right),best=Infinity;
@@ -11682,7 +11694,13 @@ function aiTraffic(d,dt){
     // Do not sweep across a car alongside or immediately ahead.
     if(Math.abs(lat-current)>.15&&obstacles.some(o=>o.gap<12&&o.gap>-6&&o.lat>Math.min(current,lat)-2.4&&o.lat<Math.max(current,lat)+2.4))continue;
     let score=Math.abs(lat-base)*.3+Math.abs(lat-(d.lat||0))*.5;
-    for(const o of obstacles){const overlap=Math.max(0,2.3-Math.abs(lat-o.lat));score+=overlap*overlap*(o.gap<16?12:4);}
+    for(const o of obstacles){
+      /* Half a car more room around you than around each other, and when you
+         have a run it is weighted hard enough to actually move them. */
+      const room=o.you?3.1:2.3, w=o.you?(yielding?26:17):(o.gap<16?12:4);
+      const overlap=Math.max(0,room-Math.abs(lat-o.lat));
+      score+=overlap*overlap*w;
+    }
     if(score<best){best=score;want=lat;}
   }
   if(d.forced&&d.field[d.forced])want=clamp(d.field[d.forced][d.i],-left,right);
@@ -13560,7 +13578,7 @@ window.SIM={
   stuckSpots(){ return AI_STUCK_LOG.slice(); },
   /* Weather, from outside: read it, force it, or sample the roll. */
   /* Spinning and marks, from outside. */
-  spinState(){ return {spin:+(PLAYER.spin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3),
+  spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3),
                        marks:markMesh?markAt:-1}; },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
                                  WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
