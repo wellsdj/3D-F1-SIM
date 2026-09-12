@@ -1,56 +1,53 @@
-const {test}=require('node:test');
-const assert=require('node:assert/strict');
-const {Model,Renderer,ANCHORS}=require('../engine-sound.js');
-const input=(kmh,throttle=1,brake=0)=>({speed:kmh/3.6,throttle,brake});
-const settle=(m,i,n=100)=>{let p;while(n--)p=m.update(i,.02);return p;};
-test('grid remains identical idle regardless of either pedal',()=>{
- const m=new Model();settle(m,input(300));
- for(const throttle of [0,.5,1])for(const brake of [0,1]){
-  const p=m.update({...input(0,throttle,brake),gridded:true},.02);
-  assert.equal(p.mode,'idle');assert.equal(p.gear,1);
-  assert.deepEqual(p.layers,[{name:'idle',rate:1,volume:.75}]);
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {Model,Renderer,CLIPS,accelerationOffset,prepare}=require('../engine-sound.js');
+const input=(speed,throttle=1,brake=0)=>({speed:speed/3.6,throttle,brake});
+const run=(m,i,seconds)=>{let p;for(let t=0;t<seconds;t+=.02)p=m.update(i,.02);return p;};
+test('grid always uses idle and never advances acceleration',()=>{
+ const m=new Model();run(m,input(200),2);
+ for(const throttle of [0,.5,1]){const p=m.update({...input(0,throttle),gridded:true},.02);assert.equal(p.mode,'idle');assert.equal(p.rate,1);assert.equal(m.saved,null);}
+});
+test('one-second lift resumes the acceleration recording instead of launch',()=>{
+ const m=new Model();run(m,input(180),2);run(m,input(180,0),1);
+ const remembered=m.saved.cursor,p=run(m,input(175),.04);
+ assert.equal(p.mode,'accel');assert.ok(Math.abs(p.offset-remembered)<.04);assert.ok(p.offset>3);
+});
+test('large speed loss or a long lift selects a speed-appropriate recording position',()=>{
+ const m=new Model();run(m,input(300),2);run(m,input(70,0,1),.4);
+ const p=run(m,input(70),.04);assert.ok(Math.abs(p.offset-accelerationOffset(70))<.04);
+ run(m,input(150,0),3);const q=run(m,input(150),.04);assert.ok(Math.abs(q.offset-accelerationOffset(150))<.04);
+});
+test('held acceleration plays forward through recorded shifts and repeats only the long tail',()=>{
+ const m=new Model();let previous=m.update(input(5),0),wraps=0;
+ for(let i=0;i<2000;i++){
+  const p=m.update(input(300),.02);
+  assert.equal(p.key,previous.key);assert.ok(p.rate>=.9&&p.rate<=1.1);
+  if(p.offset<previous.offset){wraps++;assert.ok(p.offset>=CLIPS.accel.loop);}
+  previous=p;
  }
+ assert.ok(wraps>=1&&wraps<5);
 });
-test('half-second lift preserves gear and pitch while changing load',()=>{
- const m=new Model(),a=settle(m,input(120)),b=settle(m,input(120,0),25),c=settle(m,input(120));
- assert.equal(a.gear,b.gear);assert.equal(b.gear,c.gear);
- assert.ok(Math.abs(a.hz-b.hz)<.001);assert.ok(b.load<.01);assert.ok(c.load>.99);
+test('coasting and braking share transport; pedal chatter does not restart it',()=>{
+ const m=new Model();const a=run(m,input(150,0),.1),b=run(m,input(150,0,1),.1);
+ assert.equal(a.key,b.key);assert.ok(b.offset>a.offset);assert.equal(b.rate,1);
+ const c=m.update(input(150,1),.016);assert.equal(c.key,b.key);
+ assert.equal(m.update(input(150,0),.016).key,b.key);
 });
-test('upshift drops pitch; hysteresis prevents gear chatter',()=>{
- const m=new Model(),before=settle(m,input(89));
- const after=settle(m,input(91));assert.equal(after.gear,2);assert.ok(after.hz<before.hz-50);
- assert.equal(m.update(input(85,0),.02).gear,2);
- assert.equal(m.update(input(70,0),.02).gear,1);
- assert.equal(m.update(input(150,1,1),.02).mode,'brake');
-});
-test('high-speed coast keeps revs and a mechanical high-register layer',()=>{
- const m=new Model(),on=settle(m,input(300)),off=settle(m,input(300,0));
- assert.equal(off.mode,'coast');
- assert.ok(Math.abs(off.hz-on.hz)<.001);
- assert.equal(off.gear,on.gear);
- assert.ok(off.layers.filter(l=>l.name.startsWith('on-')).reduce((s,l)=>s+l.volume*l.volume,0)>.20);
- assert.ok(off.layers.some(l=>l.name.startsWith('off-')));
- const braking=settle(m,input(200,0,1));
- assert.ok(braking.hz<off.hz||braking.gear<off.gear);
-});
-test('sustained high revs remain stable and every layer matches target pitch',()=>{
- const m=new Model(),first=settle(m,input(340));
- for(let i=0;i<3000;i++){
-  const p=m.update(input(340),.02);assert.equal(p.gear,8);
-  assert.ok(Math.abs(p.hz-first.hz)<.001);
-  assert.ok(p.layers.length<=4);
-  for(const l of p.layers)assert.ok(Math.abs(l.rate*ANCHORS[l.name]-p.hz)<.001);
- }
-});
-test('pedal changes reuse sources; stop disconnects every source; restart works',()=>{
- const param=()=>({value:0,setValueAtTime(v){this.value=v;},setTargetAtTime(v){this.value=v;},cancelScheduledValues(){}});
+function context(){
+ const param=()=>({value:0,setValueAtTime(v){this.value=v;},setTargetAtTime(v){this.value=v;},linearRampToValueAtTime(v){this.value=v;},cancelScheduledValues(){}});
  const node=()=>({connect(){},disconnect(){this.disconnected=true;}});
- const ctx={currentTime:0,destination:{},sources:[],createGain(){return {...node(),gain:param()};},createBiquadFilter(){return {...node(),frequency:param()};},createDynamicsCompressor(){return {...node(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};},createBufferSource(){const s={...node(),playbackRate:param(),start(){this.started=true;},stop(){this.stopped=true;}};this.sources.push(s);return s;}};
- const r=new Renderer(ctx,Object.fromEntries(Object.keys(ANCHORS).map(k=>[k,{duration:2}]))),m=new Model();
- for(let i=0;i<1000;i++)r.apply(m.update(input(120,i%2),.02),i*.02);
- assert.equal(ctx.sources.length,5);
- for(const [i,name] of Object.keys(ANCHORS).entries())
-  assert.ok(Math.abs(ctx.sources[i].playbackRate.value*ANCHORS[name]-m.hz)<1e-8,'muted and audible registers track the same revs');
+ return {currentTime:0,destination:{},sources:[],createGain(){return {...node(),gain:param()};},createBiquadFilter(){return {...node(),frequency:param()};},createDynamicsCompressor(){return {...node(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};},createBufferSource(){const s={...node(),playbackRate:param(),start(t,o){this.offset=o;},stop(){this.stopped=true;}};this.sources.push(s);return s;},createBuffer(c,n,sr){const data=Array.from({length:c},()=>new Float32Array(n));return {numberOfChannels:c,length:n,sampleRate:sr,duration:n/sr,getChannelData:i=>data[i]};}};
+}
+test('renderer reuses held clip, bounds crossfades, and stops every source',()=>{
+ const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end}]));
+ const r=new Renderer(ctx,bank),m=new Model();
+ for(let i=0;i<100;i++)r.apply(m.update(input(150),.02),i*.02);
+ assert.equal(ctx.sources.length,1);
+ for(let i=100;i<1100;i++){ctx.currentTime=i*.02;r.apply(m.update(input(150,Math.floor(i/4)%2),.02),i*.02);assert.ok(r.voices.size<=3);}
  r.stop();assert.equal(r.voices.size,0);assert.ok(ctx.sources.every(s=>s.stopped&&s.disconnected));
- r.apply(m.update(input(0),.02),21);assert.equal(ctx.sources.length,10);
+});
+test('preparation retains the original recording except its final wrap fade',()=>{
+ const ctx=context(),b=ctx.createBuffer(1,24000,1000);const d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.sin(i*.1);
+ const original=d.slice(),p=prepare(ctx,b,CLIPS.accel);
+ assert.equal(p.loop,16.2);assert.equal(p.end,23.4);
+ assert.deepEqual(p.buffer.getChannelData(0).slice(0,23340),original.slice(0,23340));assert.deepEqual(d,original);
 });
