@@ -360,6 +360,14 @@
   /* the dot menu tracks its point across the screen, so it is positioned from
      the frame loop and only ever laid out here */
   #map{position:fixed;right:16px;top:86px;width:186px;height:186px;pointer-events:none;opacity:.9}
+  /* The car's instruments only exist while you are in the car. With the menu
+     up they were fixed over the top of it. */
+  body:not(.driving) #map,
+  body:not(.driving) #racepos,
+  body:not(.driving) #speed,
+  body:not(.driving) #cmap,
+  body:not(.driving) #tt,
+  body:not(.driving) #keys{display:none!important}
   #cmap{position:fixed;right:16px;top:284px;width:186px;height:214px;pointer-events:none;opacity:.94}
   /* The old front door's rules lived here and are gone. home-apex.css owns
      #boot now, and leaving these behind was not harmless: a later stylesheet
@@ -4677,50 +4685,91 @@ function tmFit(){
   return { k, ox:pad+(S-(maxx-minx)*k)/2-minx*k,
               oz:pad+(S-(maxz-minz)*k)/2-minz*k };
 }
+/* THE MAP FOLLOWS YOU.
+
+   It was the whole circuit drawn at once with everybody as dots on it, which
+   tells you where you are on the lap and nothing at all about the next two
+   hundred metres or who is beside you. This is the chase camera as a drawing:
+   the road just behind to a long way ahead, turned so the nose is always up,
+   you as an arrow near the bottom, and the others as dots you can judge a move
+   against.
+
+   It costs less than what it replaces, not more -- the old one stroked seven
+   kilometres of circuit every frame and this one strokes about four hundred
+   metres of it. */
+const TM_AHEAD=320, TM_BEHIND=110, TM_STEP=7;
 function tmDraw(){
   const cv=document.getElementById('trackmap');
   if(!cv) return;
   const on=(RACE.on&&RACE.phase==='racing')||TT.live;
   cv.classList.toggle('show', !!on);
   if(!on||!AI.n) return;
-  if(!_tmFit) _tmFit=tmFit();
-  const M=_tmFit; if(!M) return;
-  const g=cv.getContext('2d'), W=cv.width;
-  const X=x=>x*M.k+M.ox, Z=z=>z*M.k+M.oz;
-  g.clearRect(0,0,W,W);
+  const g=cv.getContext('2d'), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
 
-  // the lap
+  const cx=carState.wx, cz=carState.wz, hdg=carState.hdg;
+  const k=(H*0.82)/(TM_AHEAD+TM_BEHIND);
+  const sin=Math.sin(-hdg), cos=Math.cos(-hdg);
+  const CX=W/2, CY=H*0.72;          // you sit low, so the road ahead gets the room
+  const P=[0,0];
+  const to=(x,z,out)=>{
+    const dx=x-cx, dz=z-cz;
+    out[0]=CX+(dx*cos-dz*sin)*k;
+    out[1]=CY+(dx*sin+dz*cos)*k;
+    return out;
+  };
+
+  g.save();
+  g.beginPath(); g.arc(W/2,H/2,W/2-3,0,6.2832); g.clip();
+  g.fillStyle='rgba(9,10,12,.55)'; g.fillRect(0,0,W,H);
+
+  /* Walk the line from the point nearest the car. */
+  let near=0, nd=Infinity;
+  for(let i=0;i<AI.n;i+=2){
+    const q=(AI.x[i]-cx)**2+(AI.z[i]-cz)**2; if(q<nd){nd=q;near=i;}
+  }
+  const back=Math.round(TM_BEHIND/AI.ds), fwd=Math.round(TM_AHEAD/AI.ds);
+  const step=Math.max(1,Math.round(TM_STEP/AI.ds));
   g.lineJoin=g.lineCap='round';
   g.beginPath();
-  for(let i=0;i<=AI.n;i+=5){
-    const k=i%AI.n, px=X(AI.x[k]), pz=Z(AI.z[k]);
-    i?g.lineTo(px,pz):g.moveTo(px,pz);
+  let first=true;
+  for(let o=-back;o<=fwd;o+=step){
+    const i=((near+o)%AI.n+AI.n)%AI.n;
+    to(AI.x[i],AI.z[i],P);
+    if(first){ g.moveTo(P[0],P[1]); first=false; } else g.lineTo(P[0],P[1]);
   }
-  g.closePath();
-  g.strokeStyle='rgba(0,0,0,.55)'; g.lineWidth=7; g.stroke();
-  g.strokeStyle='rgba(255,255,255,.88)'; g.lineWidth=3.5; g.stroke();
+  const road=Math.max(6, (typeof ROAD_HALF==='number'?ROAD_HALF:7)*2*k);
+  g.strokeStyle='rgba(0,0,0,.6)';        g.lineWidth=road+6; g.stroke();
+  g.strokeStyle='rgba(226,229,234,.26)'; g.lineWidth=road;   g.stroke();
+  g.strokeStyle='rgba(255,255,255,.32)'; g.lineWidth=1.6; g.setLineDash([7,11]); g.stroke();
+  g.setLineDash([]);
 
-  // the line, so you know where the lap begins
-  g.fillStyle='#ffb020';
-  g.beginPath(); g.arc(X(AI.x[0]), Z(AI.z[0]), 3.2, 0, 7); g.fill();
+  /* The start of the lap, when it comes into view. */
+  to(AI.x[0],AI.z[0],P);
+  if(P[0]>-30&&P[0]<W+30&&P[1]>-30&&P[1]<H+30){
+    g.beginPath(); g.arc(P[0],P[1],3.4,0,6.2832); g.fillStyle='#ffb020'; g.fill();
+  }
 
-  // everyone else
+  /* Everybody else, in their own colour so you can tell who is who. */
   for(const d of AIS){
     if(!d.car||!d.on) continue;
-    const px=X(d.car.st.wx), pz=Z(d.car.st.wz);
-    g.beginPath(); g.arc(px,pz,4.6,0,7);
-    g.fillStyle='#fff'; g.fill();
-    g.lineWidth=1.4; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke();
+    to(d.car.st.wx,d.car.st.wz,P);
+    if(P[0]<-14||P[0]>W+14||P[1]<-14||P[1]>H+14) continue;
+    g.beginPath(); g.arc(P[0],P[1],5.2,0,6.2832);
+    g.fillStyle=(d.liv&&d.liv.body)||'#e6e9ee'; g.fill();
+    g.lineWidth=2; g.strokeStyle='rgba(8,9,11,.92)'; g.stroke();
   }
 
-  // and you, pointing where you are pointing
-  const px=X(carState.wx), pz=Z(carState.wz);
-  g.save(); g.translate(px,pz); g.rotate(-carState.hdg+Math.PI);
-  g.beginPath(); g.moveTo(0,-9.5); g.lineTo(6.4,7.2); g.lineTo(0,3.4); g.lineTo(-6.4,7.2);
+  /* You. Always pointing up, because the map turns instead of the arrow. */
+  g.beginPath();
+  g.moveTo(CX,CY-10.5); g.lineTo(CX+7.2,CY+7.6); g.lineTo(CX,CY+3.6); g.lineTo(CX-7.2,CY+7.6);
   g.closePath();
   g.fillStyle='#2f9bff'; g.fill();
-  g.lineWidth=1.6; g.strokeStyle='rgba(255,255,255,.85)'; g.stroke();
+  g.lineWidth=1.8; g.strokeStyle='rgba(255,255,255,.9)'; g.stroke();
   g.restore();
+
+  g.beginPath(); g.arc(W/2,H/2,W/2-3,0,6.2832);
+  g.strokeStyle='rgba(255,255,255,.18)'; g.lineWidth=3; g.stroke();
 }
 
 /* ---------------------------------------------------------------- minimap */
@@ -4754,17 +4803,99 @@ function buildMap(){
   mapBg=o;
 }
 const _mp=new THREE.Vector2();
-function drawMap(){
-  if(!mapBg) return;
-  mapCtx.clearRect(0,0,mapCan.width,mapCan.height);
-  mapCtx.drawImage(mapBg,0,0);
-  // the car's own position now, not a point on the centreline
-  mapCtx.beginPath();
-  mapCtx.arc(carGroup.position.x*mapK+mapPX,carGroup.position.z*mapK+mapPZ,7,0,6.2832);
-  mapCtx.fillStyle='#f2a20c'; mapCtx.fill();
-  mapCtx.lineWidth=3; mapCtx.strokeStyle='rgba(11,12,13,.85)'; mapCtx.stroke();
-}
+/* THE MAP FOLLOWS YOU.
 
+   It used to be the whole circuit drawn once with a dot crawling round it,
+   which tells you where you are on the lap and nothing at all about the next
+   two hundred metres or who is beside you. This is the chase camera as a
+   drawing: the road ahead and a little behind, rotated so the nose is always
+   up, you as an arrow near the bottom, and every other car as a dot you can
+   actually judge a move against.
+
+   Drawn straight from the centreline samples each frame -- about seventy short
+   segments -- which is cheaper than the old prebuilt image it replaces because
+   that one covered seven kilometres and this one covers three hundred metres. */
+const MAP_AHEAD=300, MAP_BEHIND=90, MAP_STEP=6;
+function drawMap(){
+  if(!sx||!sx.length) return;
+  const W=mapCan.width, H=mapCan.height, g=mapCtx;
+  g.clearRect(0,0,W,H);
+
+  const hdg=carState.hdg, cx=carGroup.position.x, cz=carGroup.position.z;
+  /* Metres to pixels: the view is as tall as ahead+behind, with a margin. */
+  const k=(H*0.86)/(MAP_AHEAD+MAP_BEHIND);
+  const sin=Math.sin(-hdg), cos=Math.cos(-hdg);
+  /* World -> map. Rotate about the car so the nose points up the canvas, then
+     drop the car near the bottom so the road ahead gets the room. */
+  const to=(x,z,out)=>{
+    const dx=x-cx, dz=z-cz;
+    const rx= dx*cos - dz*sin;
+    const rz= dx*sin + dz*cos;
+    out[0]=W/2 + rx*k;
+    out[1]=H*0.74 + rz*k;      // +z is behind, so this puts ahead up the screen
+    return out;
+  };
+  const P=[0,0], Q=[0,0];
+
+  g.save();
+  g.beginPath(); g.arc(W/2,H/2,W/2-2,0,6.2832); g.clip();
+  g.fillStyle='rgba(10,11,13,.62)'; g.fillRect(0,0,W,H);
+
+  /* The road. Walk the centreline from behind the car to well ahead of it,
+     using the sample nearest the car as the anchor. */
+  let near=0, nd=Infinity;
+  for(let i=0;i<NSAMP;i+=2){
+    const q=(sx[i]-cx)**2+(sz[i]-cz)**2; if(q<nd){nd=q;near=i;}
+  }
+  const mPerSample=LAP/NSAMP;
+  const back=Math.round(MAP_BEHIND/mPerSample), fwd=Math.round(MAP_AHEAD/mPerSample);
+  const step=Math.max(1,Math.round(MAP_STEP/mPerSample));
+  g.lineJoin=g.lineCap='round';
+  g.beginPath();
+  let first=true;
+  for(let o=-back;o<=fwd;o+=step){
+    const i=((near+o)%NSAMP+NSAMP)%NSAMP;
+    to(sx[i],sz[i],P);
+    if(first){ g.moveTo(P[0],P[1]); first=false; } else g.lineTo(P[0],P[1]);
+  }
+  g.strokeStyle='rgba(0,0,0,.55)'; g.lineWidth=ROAD_HALF*2*k+7; g.stroke();
+  g.strokeStyle='rgba(214,216,220,.30)'; g.lineWidth=ROAD_HALF*2*k; g.stroke();
+  g.strokeStyle='rgba(255,255,255,.34)'; g.lineWidth=2; g.setLineDash([9,13]); g.stroke();
+  g.setLineDash([]);
+
+  /* The start/finish line, when it is in view. */
+  { const d=new THREE.Vector2(), p=new THREE.Vector2();
+    trackAt(FINISH_S,p); trackDir(FINISH_S,d);
+    to(p.x+d.y*ROAD_HALF, p.y-d.x*ROAD_HALF, P);
+    to(p.x-d.y*ROAD_HALF, p.y+d.x*ROAD_HALF, Q);
+    if(P[1]>-40&&P[1]<H+40){
+      g.beginPath(); g.moveTo(P[0],P[1]); g.lineTo(Q[0],Q[1]);
+      g.strokeStyle='#f2f2f2'; g.lineWidth=3; g.stroke();
+    } }
+
+  /* Everybody else. */
+  if(typeof AIS!=='undefined') for(const d of AIS){
+    if(!d.car||!d.on) continue;
+    to(d.car.st.wx, d.car.st.wz, P);
+    if(P[0]<-20||P[0]>W+20||P[1]<-20||P[1]>H+20) continue;
+    g.beginPath(); g.arc(P[0],P[1],6.5,0,6.2832);
+    g.fillStyle=(d.liv&&d.liv.body)||'#cfd6dc'; g.fill();
+    g.lineWidth=2.5; g.strokeStyle='rgba(8,9,11,.9)'; g.stroke();
+  }
+
+  /* You, as an arrow, pointing up because the map turns instead. */
+  const ax=W/2, ay=H*0.74;
+  g.beginPath();
+  g.moveTo(ax, ay-11); g.lineTo(ax+8, ay+9); g.lineTo(ax, ay+4.5); g.lineTo(ax-8, ay+9);
+  g.closePath();
+  g.fillStyle='#f2a20c'; g.fill();
+  g.lineWidth=2.5; g.strokeStyle='rgba(8,9,11,.92)'; g.stroke();
+  g.restore();
+
+  /* A ring round the whole thing, so it reads as an instrument. */
+  g.beginPath(); g.arc(W/2,H/2,W/2-2,0,6.2832);
+  g.strokeStyle='rgba(255,255,255,.16)'; g.lineWidth=3; g.stroke();
+}
 /* ------------------------------------------------------ next-corner view */
 /* A heading-up slice of the road ahead: the centreline from just behind the
    car to CM_AHEAD metres in front, rotated so up is always where the nose is
@@ -13635,8 +13766,15 @@ function perfDraw(){
     +'F to hide';
   profReset();
 }
+let _wasDriving=null;
 function frame(now){
   requestAnimationFrame(frame);
+  /* The minimap, the position box and the speedo are the car's instruments.
+     They are fixed to the window, so with the menu up they sat on top of it --
+     a lap counter and a track map over the championship table. One class, set
+     from the one thing that actually says whether you are on the circuit. */
+  { const onTrack=bootEl.classList.contains('gone');
+    if(onTrack!==_wasDriving){ document.body.classList.toggle('driving',onTrack); _wasDriving=onTrack; } }
   const raw=Math.min((now-last)/1000, 0.25); last=now;
   if(raw>0) _simFps += (1/raw - _simFps)*0.2;
   _acc+=raw;
