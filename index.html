@@ -1380,8 +1380,7 @@ const ASSETS = {
   rock:  "rock.jpg",
   car:   "car.glb",
   podium:"podium_art.glb",
-  snd:   { accel:"accel.mp3", idle:"idle.mp3",
-           brake:"brake.mp3", coast:"coast-lift.mp3" }
+  snd: Object.fromEntries(['idle','on-low','on-mid','on-pull','on-high','on-top','off-low','off-mid','off-high'].map(name=>[name,'assets/audio/williams/'+name+'.wav']))
 };
 </script>
 <script>

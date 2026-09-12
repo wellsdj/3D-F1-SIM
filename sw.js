@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='f1sim-grid-idle-v29';
+const CACHE='f1sim-williams-rpm-v30';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/home/helmet-red.webp',
@@ -22,7 +22,10 @@ const SHELL=[
   './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
-  './idle.mp3','./accel.mp3','./coast-lift.mp3','./brake.mp3',
+  './assets/audio/williams/idle.wav',
+  './assets/audio/williams/on-low.wav','./assets/audio/williams/on-mid.wav',
+  './assets/audio/williams/on-pull.wav','./assets/audio/williams/on-high.wav','./assets/audio/williams/on-top.wav',
+  './assets/audio/williams/off-low.wav','./assets/audio/williams/off-mid.wav','./assets/audio/williams/off-high.wav',
   './home-hero.png','./home-race.webp','./home-best-laps.webp',
   './home-controller.webp','./home-customise.webp'
 ];

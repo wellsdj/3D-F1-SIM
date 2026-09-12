@@ -1,0 +1,101 @@
+[
+  {
+    "name": "idle",
+    "source": "idle.wav",
+    "start": 2,
+    "end": 12,
+    "load": "idle",
+    "hz": 151.348,
+    "duration": 9.9439,
+    "rms": 0.065,
+    "peak": 0.222
+  },
+  {
+    "name": "on-low",
+    "source": "steady-mid.wav",
+    "start": 3,
+    "end": 9,
+    "load": "on",
+    "hz": 186.346,
+    "duration": 5.9567,
+    "rms": 0.1,
+    "peak": 0.3641
+  },
+  {
+    "name": "on-mid",
+    "source": "steady-high.wav",
+    "start": 0.3,
+    "end": 4.6,
+    "load": "on",
+    "hz": 203.59,
+    "duration": 4.1898,
+    "rms": 0.1,
+    "peak": 0.3148
+  },
+  {
+    "name": "on-pull",
+    "source": "acceleration.wav",
+    "start": 1.55,
+    "end": 2.25,
+    "load": "on",
+    "hz": 234.064,
+    "duration": 0.6451,
+    "rms": 0.1,
+    "peak": 0.2758
+  },
+  {
+    "name": "on-high",
+    "source": "acceleration.wav",
+    "start": 3.5,
+    "end": 4.3,
+    "load": "on",
+    "hz": 267.659,
+    "duration": 0.7472,
+    "rms": 0.1,
+    "peak": 0.3021
+  },
+  {
+    "name": "on-top",
+    "source": "acceleration-short-birst.wav",
+    "start": 1.23,
+    "end": 1.62,
+    "load": "on",
+    "hz": 295.082,
+    "duration": 0.3491,
+    "rms": 0.1,
+    "peak": 0.319
+  },
+  {
+    "name": "off-low",
+    "source": "lift-off.wav",
+    "start": 7.8,
+    "end": 9.1,
+    "load": "off",
+    "hz": 142.617,
+    "duration": 1.2481,
+    "rms": 0.1,
+    "peak": 0.3285
+  },
+  {
+    "name": "off-mid",
+    "source": "lift-off.wav",
+    "start": 2.2,
+    "end": 4.9,
+    "load": "off",
+    "hz": 163.627,
+    "duration": 2.6401,
+    "rms": 0.1,
+    "peak": 0.3104
+  },
+  {
+    "name": "off-high",
+    "source": "lift-off.wav",
+    "start": 0.6,
+    "end": 1.5,
+    "load": "off",
+    "hz": 203.612,
+    "duration": 0.8448,
+    "rms": 0.1,
+    "peak": 0.2705
+  }
+]
