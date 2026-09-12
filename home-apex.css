@@ -1362,3 +1362,70 @@ body.customizer-open #netbtn{display:none}
   box-shadow:inset 0 0 0 1px var(--apex-red),0 0 46px -18px rgba(255,31,45,.9);
 }
 .rf-row.up.best b{color:#fff}
+
+/* ==========================================================================
+   THE SLOWING-DOWN LAP
+   Nothing over the picture but where you finished.
+   ========================================================================== */
+#cooldown{
+  position:fixed;left:0;right:0;bottom:12vh;z-index:34;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  pointer-events:none;opacity:0;transform:translateY(18px);
+  transition:opacity .5s ease,transform .6s cubic-bezier(.16,1,.3,1);
+  text-align:center;font-family:var(--apex-mono);
+}
+#cooldown.show{opacity:1;transform:none}
+.cool-kick{
+  font-size:9px;letter-spacing:.42em;text-transform:uppercase;color:var(--apex-red);
+  text-shadow:0 0 18px rgba(255,31,45,.8);
+}
+.cool-pos{
+  position:relative;font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(64px,11vw,158px);line-height:.86;letter-spacing:-.045em;
+  text-transform:uppercase;color:#fff;text-shadow:0 16px 70px rgba(0,0,0,.9);
+}
+/* Two offset copies clipped to bands, jumping on a stepped timeline -- the
+   same trick the front-end titles use, so the race ends in the game's voice. */
+.cool-pos:before,.cool-pos:after{
+  content:attr(data-glitch);position:absolute;left:0;top:0;width:100%;
+  pointer-events:none;
+}
+.cool-pos:before{
+  color:#00e5ff;clip-path:polygon(0 12%,100% 12%,100% 36%,0 36%);
+  animation:coolG1 2.4s steps(3,end) infinite;
+}
+.cool-pos:after{
+  color:var(--apex-red);clip-path:polygon(0 58%,100% 58%,100% 88%,0 88%);
+  animation:coolG2 3.1s steps(4,end) infinite;
+}
+@keyframes coolG1{0%,100%{transform:translate3d(0,0,0)}33%{transform:translate3d(-6px,0,0)}66%{transform:translate3d(4px,0,0)}}
+@keyframes coolG2{0%,100%{transform:translate3d(0,0,0)}25%{transform:translate3d(5px,0,0)}75%{transform:translate3d(-7px,0,0)}}
+.cool-word{
+  font-family:var(--apex-display);font-style:italic;font-size:clamp(16px,1.7vw,26px);
+  text-transform:uppercase;color:var(--apex-red);letter-spacing:-.01em;
+  text-shadow:0 0 30px rgba(255,31,45,.6);
+}
+.cool-line{
+  font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--apex-dim);
+  margin-top:2px;
+}
+.cool-go{
+  pointer-events:auto;margin-top:16px;padding:14px 34px;border:0;cursor:default;
+  font-family:var(--apex-mono);font-size:11px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--apex-faint);background:rgba(10,8,12,.7);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);
+  clip-path:polygon(11px 0,100% 0,100% calc(100% - 11px),calc(100% - 11px) 100%,0 100%,0 11px);
+  transition:color .2s,background .2s,box-shadow .2s,transform .16s;
+}
+.cool-go.ready{
+  cursor:pointer;color:#fff;
+  background:linear-gradient(100deg,rgba(140,14,24,.96),rgba(255,31,45,.76));
+  box-shadow:0 0 46px -16px rgba(255,31,45,.95);
+  animation:coolIn .4s cubic-bezier(.16,1,.3,1) both;
+}
+.cool-go.ready:hover{transform:translateY(-2px);
+  background:linear-gradient(100deg,rgba(172,16,28,.98),rgba(255,62,72,.88))}
+@keyframes coolIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .cool-pos:before,.cool-pos:after,.cool-go.ready{animation:none}
+}

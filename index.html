@@ -10074,7 +10074,9 @@ function playerRev(brk, thr, kph, dt){
 }
 function drive(dt){
   if(RETIRE.on){retirementDrive(dt);return;}
-  if(RESULT.on){carState.speed=0;silenceEngine();return;}
+  /* The cool-down lap still drives -- it is the rival brain at the wheel, not
+     you -- so everything below (wheels, engine, speedo) has to keep running. */
+  if(RESULT.on && !COOL.on){carState.speed=0;silenceEngine();return;}
   /* Arrows drive as well as WASD. Up and down were taken off throttle and brake
      to trim the seat height, then the seat trim was removed with the rest of
      the old camera controls and nothing was ever put back on them -- so the
@@ -10108,7 +10110,14 @@ function drive(dt){
      separate pushbuttons, so they are plain on/off -- a button is not a
      potentiometer, there is nothing to be gentle with. */
   let thrMag = thr?1:0, brkMag = brk?1:0;
-  if(!joyStale()){
+  /* Your hands are off it. Taken before the joystick block so a pad left on the
+     desk cannot fight the car home. */
+  if(COOL.on){
+    const c=coolInputs(dt);
+    if(c){ thrMag=c.thr; brkMag=c.brk; want=c.steer;
+           thr=c.thr>0; brk=c.brk>0; }
+  }
+  else if(!joyStale()){
     want = joyAxis(joyX,joyCx,JOY_INVERT_X);
     thrMag = joyAccel?1:0; brkMag = joyBrake?1:0;
     thr = joyAccel; brk = joyBrake;
@@ -11770,16 +11779,70 @@ function raceClock(dt){
    Progress is laps done plus how far round this one, so it is one number per
    car and sorting it is the classification. Yours is measured the same way off
    the same stations, so there is no argument about whose metre is whose. */
-function raceProgress(){
-  const L=TT.len||1;
-  const rows=[{you:true, name:'You', prog:(RACE.lapN||0)*L + tvCarS(), fin:RESULT.you||0}];
-  for(const d of AIS){
-    if(!d.car||!d.on) continue;
-    rows.push({you:false, name:d.name||'AI', prog:(d.lapN||0)*L + (d.i||0)*d.ds, fin:d.finish||0});
+/* ONE YARDSTICK FOR EVERYBODY.
+
+   This used to measure you as a fraction of the track-limit stations scaled by
+   the centreline length, and every rival as its index along the racing line
+   times the racing-line spacing. Those are two different lengths -- the line
+   the AI drives is not the centreline -- so the two numbers were never on the
+   same scale, and the gap between them was a standing bias of tens of metres.
+   Close together that is the difference between P4 and P5, which is why the
+   position was sometimes simply wrong.
+
+   Everyone is now placed by the same function against the same stations, so a
+   metre is a metre whoever covered it. Fraction of a lap rather than a
+   distance, because that is what the stations give without having to know how
+   long anybody's line is. */
+function raceFrac(idx){ const n=tlSt.length; return n ? Math.max(0,Math.min(1,idx/n)) : 0; }
+let tvCarHint=0;
+function tvCarFrac(){
+  if(!tlSt.length) return 0;
+  /* Its own cursor. tlStation walks from a hint, and sharing one between
+     callers is what once froze a car on P6 for a whole race. */
+  const st=tlStation(carState.wx, carState.wz, tvCarHint);
+  if(!st) return 0;
+  tvCarHint=tlLastIdx;
+  return raceFrac(tlLastIdx);
+}
+/* Stations are found by walking from where the car was last seen, and at Spa
+   the circuit runs close to itself in two places -- so a car that goes off, or
+   spins, can have the walk latch onto the wrong one and report itself a
+   kilometre back up the road. A car cannot un-drive a lap: a jump backwards
+   bigger than three per cent of one is not a car, it is the search. Hold the
+   last good figure, and only believe the new one if it is still saying the
+   same thing a second later. */
+function progHold(rec, now){
+  if(rec.p===undefined){ rec.p=now; rec.bad=0; return now; }
+  if(now < rec.p-0.03){
+    if(++rec.bad < 60) return rec.p;
+    rec.p=now; rec.bad=0; return now;     // it has stuck: it was real after all
   }
-  /* Anyone home is ahead of anyone still out, in the order they finished. */
-  rows.sort((a,b)=> (a.fin&&b.fin) ? a.fin-b.fin
-                  : a.fin ? -1 : b.fin ? 1 : b.prog-a.prog);
+  rec.bad=0; rec.p=now; return now;
+}
+function raceProgress(){
+  const you=RACE._prog||(RACE._prog={});
+  const rows=[{you:true, name:'You', dsq:false, out:false,
+               prog:progHold(you,(RACE.lapN||0) + tvCarFrac()), fin:RESULT.you||0}];
+  for(const d of AIS){
+    if(!d.car) continue;
+    /* d._tlHint is this car's own station index, already maintained every frame
+       for the track-limit room check -- the same index tvCarFrac reads. */
+    const rec=d._progRec||(d._progRec={});
+    rows.push({you:false, name:d.name||'AI', dsq:!!d.dsq, out:!d.on&&!d.finish,
+               prog:progHold(rec,(d.lapN||0) + raceFrac(d._tlHint||0)),
+               fin:d.finish||0});
+  }
+  rows.sort((a,b)=>{
+    /* Out of the race is behind everyone who is still in it, however far round
+       they got -- and they stay on the sheet, so the field size is the field
+       that started rather than whoever happens to be running. */
+    if(a.dsq!==b.dsq) return a.dsq?1:-1;
+    if(a.out!==b.out) return a.out?1:-1;
+    if(a.fin&&b.fin)  return a.fin-b.fin;      // both home: by the clock
+    if(a.fin) return -1;
+    if(b.fin) return 1;
+    return b.prog-a.prog;                      // otherwise furthest round leads
+  });
   return rows;
 }
 function racePositions(){
@@ -11803,8 +11866,104 @@ function raceFinish(){
   if(RESULT.on || RETIRE.on) return;
   RESULT.on=true; RESULT.you=RACE.raceT;
   finishCamera();
+  /* Before the rows are built, not after: raceResultRows paints the panel if
+     the slowing-down lap is not running, and at this point it would not be. */
+  coolStart();
   raceResultRows();
   careerScore();
+}
+/* ==========================================================================
+   THE SLOWING-DOWN LAP
+   Crossing the line used to freeze the car and put a table over the picture,
+   which is the one moment in a race nobody wants a table. The car keeps going
+   -- driven by the same brain the rivals use, at a cool-down pace -- the TV
+   camera follows it, and the only thing on screen is where you finished.
+   The table waits until you ask for it.
+   ========================================================================== */
+const COOL={ on:false, t:0, v0:0, driver:null, card:null, done:false };
+const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
+const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
+function coolStart(){
+  if(COOL.on || !AI.x || !AI.x.length) return;
+  COOL.on=true; COOL.t=0; COOL.done=false;
+  COOL.v0=Math.max(40, carState.speed);     // the speed you took the flag at
+  /* A driver of its own, reading the shared line like any rival, but pointed
+     at your car instead of one of theirs. */
+  const d=Object.create(AI);
+  Object.assign(d,{ car:PLAYER, obj:null, on:true, hold:false, i:0, t:0, lap:0,
+                    laps:[], worst:0, lat:0, want:0, speedK:1, mode:'clear',
+                    line:'race', off:0, room:99, outside:0, err:0, trace:null,
+                    _pi:0, _prev:0, _next:0, _thr:0, _brk:0, _dv:0, _dvRace:0,
+                    _lineHeld:0, _urgent:0, pinned:0, forced:0, react:0, _react:0,
+                    _lineWas:'race', vAct:null, _stat:null, _offN:0, finish:0,
+                    _prevLap:0, _onBrakes:false, _brkS:0, _gridT:undefined,
+                    lapN:0, capV:Infinity, name:'You', brakeOffset:0 });
+  aiLocate(d, carState.wx, carState.wz);
+  COOL.driver=d;
+}
+/* The pedals and the wheel, for your car, from the rival brain. Only the parts
+   that decide what to do -- traffic, track limits and the off-track watch all
+   belong to a race that has just ended. */
+function coolInputs(dt){
+  const d=COOL.driver, C=PLAYER, st=carState;
+  if(!d) return null;
+  const loc=aiLocate(d, st.wx, st.wz);
+  d.err=loc.d;
+  const i=loc.i, j=(i+1)%d.n;
+  const tx=d.x[j]-d.x[i], tz=d.z[j]-d.z[i], tl=Math.hypot(tx,tz)||1;
+  d.off=((st.wx-d.x[i])*(tz/tl) - (st.wz-d.z[i])*(tx/tl));
+  d.room=99; d.outside=Math.abs(d.off)-d.room;
+  /* Slowing down, not racing. Handing the whole car to aiPedals made it
+     accelerate away from the line at racing pace, which is the opposite of a
+     slowing-down lap -- so the wheel is the AI's and the pedals answer to a
+     target that eases off the speed you crossed at, floored so it still gets
+     round rather than stopping on the circuit. The AI's own corner speed still
+     caps it, so it brakes for the corners on the way home. */
+  d.speedK=0.7; d.mode='clear'; d.line='race';
+  const corner=(d.v && d.v[d.i]) ? d.v[d.i]*0.72 : Infinity;
+  const ease=Math.max(0.40, 1-COOL.t*0.055);
+  const want=Math.max(22, Math.min((COOL.v0||st.speed)*ease, corner));
+  const v=st.speed;
+  const thr = v < want-1.5 ? 0.34 : 0;
+  const brk = v > want+2.0 ? 0.30 : 0;
+  d._thr=thr; d._brk=brk;
+  return { thr, brk, steer:aiSteer(d, C, dt) };
+}
+function coolStep(dt){
+  if(!COOL.on) return;
+  COOL.t+=dt;
+  if(!COOL.card && COOL.t>=COOL_CARD_T) coolCard();
+  if(COOL.card && !COOL.done && COOL.t>=COOL_CONT_T){
+    COOL.done=true;
+    const b=COOL.card.querySelector('.cool-go');
+    if(b){ b.classList.add('ready'); b.disabled=false; b.textContent='Continue'; }
+  }
+}
+/* Where you finished, in the same glitched display face as the front end. */
+function coolCard(){
+  const pos=Math.max(1,RESULT.rows.findIndex(r=>r.you)+1);
+  const mine=RESULT.rows.find(r=>r.you);
+  const ord=APEX_ORD(pos);
+  let el=document.getElementById('cooldown');
+  if(!el){ el=document.createElement('div'); el.id='cooldown'; document.body.appendChild(el); }
+  el.innerHTML=
+     '<div class="cool-kick">Chequered flag</div>'
+    +'<div class="cool-pos" data-glitch="P'+pos+'">P'+pos+'</div>'
+    +'<div class="cool-word">'+pos+ord+' place</div>'
+    +'<div class="cool-line">'+fmtTime(RESULT.you)+' &middot; '+RACE_LAPS+' laps'
+    +(mine&&mine.pen?' &middot; +'+mine.pen.toFixed(1)+'s penalty':'')+'</div>'
+    +'<button type="button" class="cool-go" disabled>Slowing down&hellip;</button>';
+  el.classList.add('show');
+  COOL.card=el;
+  el.querySelector('.cool-go').onclick=()=>{ if(COOL.done) coolEnd(); };
+}
+/* Hand the car back and show the table. */
+function coolEnd(){
+  COOL.on=false; COOL.driver=null;
+  carState.speed=0;
+  if(COOL.card){ COOL.card.classList.remove('show');
+                 setTimeout(()=>{ if(COOL.card){COOL.card.remove(); COOL.card=null;} },500); }
+  raceResultUI();
 }
 /* WHAT A RESULT IS WORTH.
 
@@ -11821,7 +11980,14 @@ function careerScore(){
   if(left.length && RACE.raceT-RESULT.you<90) return;
   const rows=RESULT.rows.map(r=>({...r,dnf:!r.you&&!r.t}));
   RESULT.rows=rows;
-  if(CareerSeason.score(careerSlot(),rows)){careerSave();raceResultUI();careerRewardPending=true;}
+  if(CareerSeason.score(careerSlot(),rows)){careerSave();
+    /* The table is a thing you ask for now, not a thing that lands on you --
+       see coolEnd. Scoring still happens the moment everyone is in. */
+    /* typeof, because careerScore is lifted out and run in a sandbox by
+       tests/career-integration -- scoring must not depend on the presentation
+       layer existing at all. */
+    if(typeof COOL==='undefined' || !COOL.on) raceResultUI();
+    careerRewardPending=true;}
 }
 
 function raceResultRows(){
@@ -11838,7 +12004,10 @@ function raceResultRows(){
   done.sort((a,b)=>a.total-b.total);
   out.sort((a,b)=>(b.run||0)-(a.run||0));      // whoever is furthest round leads
   RESULT.rows=done.concat(out);
-  raceResultUI();
+  /* The rows keep filling in as cars come home; the panel only draws if it is
+     already up. During the slowing-down lap there is nothing on screen but the
+     position, and coolEnd is what puts the table there. */
+  if(typeof COOL==='undefined' || !COOL.on) raceResultUI();
 }
 /* Keeps filling in until the last of them is home. */
 function finishCamera(){
@@ -11872,7 +12041,8 @@ function raceResultUI(){
           '</div><div class="tag">'+gap+'</div></div>';
   });
   const pending=AIS.some(d=>d.car&&d.on&&!d.finish) && (!CAREER.active||!careerSlot().weekend.scored);
-  html+='</div><button id="resultclose" '+(pending?'disabled':'')+'>'+(pending?'Results updating as cars finish…':'Done')+'</button>';
+  html+='</div><button id="resultclose" '+(pending?'disabled':'')+'>'
+     +(pending?'Results updating as cars finish…':(CAREER.active?'Next':'Done'))+'</button>';
   box.innerHTML=html; box.classList.add('show');
   document.getElementById('resultclose').onclick=()=>{ box.classList.remove('show'); raceEnd(); if(CAREER.active){goHome();setTimeout(careerShowRewards,100);} };
 }
@@ -11998,6 +12168,10 @@ function racePlace(car, slot){
 function raceStart(opts){
   if(RETIRE.on)return false;
   RETIRE.on=false;RETIRE.parked=false;decisionClose();sessionLapInvalid=false;
+  /* A new race starts from nothing: held progress from the last one would
+     classify everybody behind where they have not been yet. */
+  RACE._prog=null; tvCarHint=0;
+  for(const d of AIS) d._progRec=null;
   if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
   if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
@@ -12824,6 +12998,21 @@ window.SIM={
                                  pin:!!d._pinTest,
                                  kph:d.car?+(Math.abs(d.car.st.speed)*3.6).toFixed(1):null})); },
   /* Wedge one, to prove the ladder runs. */
+  /* The chequered flag, on demand: driving a full lap from a script is not a
+     way to test what happens after one. */
+  finishNow(){ if(!RACE.on || RESULT.on) return false; raceFinish(); return true; },
+  /* Lights out, for a script. skipCountdown releases you; the field answers to
+     its own hold flag, and a test that never lets them go tells you nothing
+     about where anybody is. */
+  lightsOut(){ let n=0; for(const d of AIS){ if(!d.car) continue; d.hold=false; d.react=0; n++; }
+               startPhase='go'; return n; },
+  /* The live classification, exactly as the HUD reads it. */
+  grid(){ return raceProgress().map((r,i)=>({p:i+1, who:r.name, you:!!r.you,
+            prog:+r.prog.toFixed(4), fin:+(r.fin||0).toFixed(2),
+            dsq:!!r.dsq, out:!!r.out})); },
+  coolState(){ return {on:COOL.on, t:+COOL.t.toFixed(1), card:!!COOL.card, done:COOL.done,
+                       kph:+(Math.abs(carState.speed)*3.6).toFixed(0),
+                       thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2)}; },
   aiPin(i,on){ const d=AIS[i]; if(!d) return false;
     d._pinTest=!!on;
     if(on){ d.hold=false; d.react=0; }   // released, then wedged
@@ -13083,7 +13272,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); coolStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
