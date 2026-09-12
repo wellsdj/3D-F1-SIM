@@ -1010,6 +1010,7 @@ if('serviceWorker' in navigator){
   <div id="netmsg"></div>
 </div>
 <canvas id="trackmap" width="320" height="320"></canvas>
+<div id="rain" aria-hidden="true"><i></i><i></i></div>
 <div id="racepos"></div>
 <div id="result"></div>
 <div id="limwarn"></div>
@@ -3888,6 +3889,58 @@ const TIME_OF_DAY={
     sunDir:[-0.26,0.68,0.68],sunIntensity:.56,hemiSky:0x5874a2,hemiGround:0x111728,hemiIntensity:.48,fog:.00055}
 };
 let timeOfDay='midday';
+/* ==========================================================================
+   WEATHER
+   Wet about three times in ten. It has to change how the car behaves or it is
+   a filter, and it has to cost almost nothing or it is a filter that also eats
+   the frame rate -- so the expensive-looking parts are the cheap ones: the
+   road turns reflective (two numbers on a material), the light goes flat and
+   close (the same uniforms the time of day already sets), and the rain itself
+   is a CSS overlay that never touches the renderer.
+
+   What actually matters is the grip, which is real and is felt everywhere:
+   cornering, braking and the AI's reference lap all read it. */
+const WEATHER={ wet:false, level:0, grip:1 };
+const WET_CHANCE=0.30;
+function rollWeather(rand){
+  const r=(rand||Math.random)();
+  WEATHER.wet = r < WET_CHANCE;
+  /* Damp is not a downpour. A wet session lands somewhere between the two, so
+     two wet races do not feel like the same race. */
+  WEATHER.level = WEATHER.wet ? 0.45+((rand||Math.random)())*0.55 : 0;
+  WEATHER.grip  = 1 - 0.26*WEATHER.level;      // down to about three quarters
+  applyWeather();
+  return WEATHER.wet;
+}
+function applyWeather(){
+  document.body.classList.toggle('wet', !!WEATHER.wet);
+  document.body.dataset.wet = WEATHER.wet ? WEATHER.level.toFixed(2) : '';
+  try{
+    /* Flat, close light and a darker sky: the cheap half of looking wet. */
+    const L=WEATHER.level;
+    if(L>0){
+      sun.intensity      *= 1-0.45*L;
+      raceHemi.intensity *= 1-0.18*L;
+      scene.fog.density  *= 1+1.6*L;
+      scene.fog.color.multiplyScalar(1-0.22*L);
+      skyMat.uniforms.uTop.value.multiplyScalar(1-0.30*L);
+      skyMat.uniforms.uMid.value.multiplyScalar(1-0.26*L);
+      skyMat.uniforms.uHaze.value.multiplyScalar(1-0.18*L);
+    }
+    /* And the expensive-looking half, which is two numbers. */
+    if(trackRoot) trackRoot.traverse(o=>{
+      if(!o.isMesh||!o.material) return;
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      for(const m of ms){
+        if(!m||m.metalness===undefined) continue;
+        if(m.userData._dryRough===undefined){ m.userData._dryRough=m.roughness; m.userData._dryMetal=m.metalness; }
+        m.roughness=m.userData._dryRough*(1-0.55*L);
+        m.metalness=Math.min(1,m.userData._dryMetal+0.42*L);
+        m.needsUpdate=true;
+      }
+    });
+  }catch(e){}
+}
 function applyTimeOfDay(kind){
   const p=TIME_OF_DAY[kind]||TIME_OF_DAY.midday;
   timeOfDay=TIME_OF_DAY[kind]?kind:'midday';
@@ -3910,6 +3963,9 @@ function applyTimeOfDay(kind){
   customTop.intensity=p.sunIntensity;
   customTop.position.copy(SUN_DIR).multiplyScalar(10);
   document.body.dataset.timeOfDay=timeOfDay;
+  /* The time of day resets everything this touches, so the wet pass runs
+     again on top of it rather than being overwritten by it. */
+  if(WEATHER.wet) applyWeather();
 }
 applyTimeOfDay('midday');
 
@@ -9915,7 +9971,8 @@ function applyPedals(st, thr, brk, surf, dt, allowRev){
     /* 7.5 barely cleared gravel's own drag -- about 6 m/s/s at walking pace --
        so reversing out of a trap crawled. Enough authority to actually pull
        the car out, still a fraction of the 46 the brake has going forwards. */
-    st.speed -= (st.speed>0 ? 46 : 13)*dt*brk;
+    const wetB=(typeof WEATHER!=='undefined')?WEATHER.grip:1;
+    st.speed -= (st.speed>0 ? 46*wetB : 13)*dt*brk;
   }
   /* Coasting decays toward zero from either side. Subtracting unconditionally
      was right while speed could not go below zero and would have quietly
@@ -9956,7 +10013,8 @@ function yawFor(speed, steerAng, surf, gripMul){
      yawRate above -- which is what makes the back of the car lead, exactly as
      it does when you reverse a real one. */
   const vAbs=Math.abs(speed);
-  const yawMax = vAbs>0.5 ? A_GRIP*turnBoost(vAbs*3.6)*slick*(gripMul||1)/vAbs : 8;
+  const wet=(typeof WEATHER!=='undefined')?WEATHER.grip:1;
+  const yawMax = vAbs>0.5 ? A_GRIP*turnBoost(vAbs*3.6)*slick*(gripMul||1)*wet/vAbs : 8;
   return clamp(yawRate,-yawMax,yawMax);
 }
 /* What the surface takes off you for being on it. */
@@ -11636,7 +11694,11 @@ function aiPedals(d, C){
   const F=(typeof AI_FINAL!=='undefined')?AI_FINAL:{late:2.0,exit:140,hold:0.93,brake:44.8};
   // The reference lap belongs to the driver. Traffic can change steering,
   // never its throttle, braking target or reference speed profile.
-  const v=C.st.speed,K=d.paceMul||1,V=d.v;
+  /* The rivals feel the weather as well: their reference lap is a dry one, so
+     in the wet they have to run inside it by the same margin the grip has
+     dropped, or they simply drive off the circuit. */
+  const wetK=(typeof WEATHER!=='undefined')?(0.62+0.38*WEATHER.grip):1;
+  const v=C.st.speed,K=(d.paceMul||1)*wetK,V=d.v;
   const target=q=>Math.min(V[q],aiFirstLimit(d,q))*K;
   let finalProgress=AI.lastApex==null?Infinity:(d.i-AI.lastApex)*d.ds;
   if(finalProgress>d.len/2)finalProgress-=d.len;
@@ -12459,6 +12521,7 @@ function raceStart(opts){
   /* A new race starts from nothing: held progress from the last one would
      classify everybody behind where they have not been yet. */
   RACE._prog=null; tvCarHint=0;
+  rollWeather();                      // three races in ten are wet
   for(const d of AIS) d._progRec=null;
   if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
@@ -13374,6 +13437,10 @@ window.SIM={
   /* The stuck ladder, from the outside: how many attempts a car has made,
      whether it is mid-recovery, and whether it has been shown the flag. */
   stuckSpots(){ return AI_STUCK_LOG.slice(); },
+  /* Weather, from outside: read it, force it, or sample the roll. */
+  weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
+                                 WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
+              return {...WEATHER, rainShown:document.body.classList.contains('wet')}; },
   /* The surveyed edges of the circuit around the first corner, so a barrier
      can be laid on the real geometry instead of eyeballed off a screenshot. */
   turnOneEdges(){
@@ -14288,6 +14355,7 @@ function qualifyingBegin(){
   }
   qualifyingLoadSetStatus('Starting '+TIME_OF_DAY[qualifyingWeatherChoice].label.toLowerCase()+' session');
   try{ applyTimeOfDay(qualifyingWeatherChoice); }catch(e){}   // in case it could not be set at the time
+  try{ rollWeather(); }catch(e){}
   ttStart();
   /* And straight onto the grid. Pressing a key to make a race happen was never
      the idea: you come out of the loading screen into the drone shot with both

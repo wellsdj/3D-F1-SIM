@@ -1444,3 +1444,37 @@ body.customizer-open #netbtn{display:none}
   mix-blend-mode:screen;
   border-radius:2px;
 }
+
+/* ============================================================== WET WEATHER
+   The rain is drawn by the compositor, not the renderer: two repeating
+   gradients translated down the screen. It costs nothing the car needs. */
+#rain{
+  position:fixed;inset:0;z-index:11;pointer-events:none;display:none;
+  mix-blend-mode:screen;
+}
+body.wet #rain{display:block}
+#rain i{
+  position:absolute;inset:-20% -20%;display:block;
+  background-repeat:repeat;
+  will-change:transform;
+}
+#rain i:nth-child(1){
+  background-image:repeating-linear-gradient(102deg,
+    rgba(255,255,255,0) 0 7px, rgba(255,255,255,.16) 7px 8px, rgba(255,255,255,0) 8px 15px);
+  animation:rainA 0.42s linear infinite; opacity:.5;
+}
+#rain i:nth-child(2){
+  background-image:repeating-linear-gradient(99deg,
+    rgba(255,255,255,0) 0 13px, rgba(255,255,255,.11) 13px 14px, rgba(255,255,255,0) 14px 27px);
+  animation:rainB 0.66s linear infinite; opacity:.38;
+}
+@keyframes rainA{ from{transform:translate3d(0,-14%,0)} to{transform:translate3d(-4%,14%,0)} }
+@keyframes rainB{ from{transform:translate3d(0,-18%,0)} to{transform:translate3d(-6%,18%,0)} }
+/* A cold cast over the picture, so the whole frame reads wet rather than just
+   the streaks. */
+body.wet #rain:after{
+  content:"";position:absolute;inset:0;mix-blend-mode:normal;
+  background:radial-gradient(ellipse 120% 80% at 50% 10%,rgba(120,150,190,.10),transparent 70%);
+}
+body:not(.driving) #rain{display:none!important}
+@media (prefers-reduced-motion:reduce){ #rain i{animation:none} }
