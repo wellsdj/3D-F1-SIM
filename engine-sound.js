@@ -4,7 +4,7 @@
  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
  const GEARS=[90,135,175,210,245,278,308,370];
  // Relative harmonic anchors, not measured engine RPM.
- const ANCHORS={idle:151.348,'on-low':186.346,'on-mid':203.590,'on-pull':234.064,'on-high':267.659,'on-top':295.082,'off-low':142.617,'off-mid':163.627,'off-high':203.612};
+ const ANCHORS={idle:151.348,'on-low':186.34588345571004,'on-mid':203.59006948857657,'on-pull':234.06402385432196,'on-high':267.6589218338667,'on-top':295.08209529539073,'off-low':142.617,'off-mid':163.627,'off-high':203.612};
  const ON=['idle','on-low','on-mid','on-pull','on-high','on-top'],OFF=['off-low','off-mid','off-high'];
  function blend(names,hz,weight,layers){
   if(weight<=0)return;
@@ -58,22 +58,25 @@
    this.limiter=ctx.createDynamicsCompressor();this.limiter.threshold.value=-3;this.limiter.knee.value=2;this.limiter.ratio.value=12;this.limiter.attack.value=.003;this.limiter.release.value=.12;
    this.master.connect(this.filter);this.filter.connect(this.limiter);this.limiter.connect(ctx.destination);
   }
-  start(now){
+  start(now,hz){
    if(this.running)return;this.running=true;
    // Continuous beds: changing pedals/gear never restarts a recording.
    for(const [name,buffer] of Object.entries(this.buffers)){
     if(!ANCHORS[name])continue;
     const source=this.ctx.createBufferSource(),gain=this.ctx.createGain();source.buffer=buffer;source.loop=true;source.loopStart=0;source.loopEnd=buffer.duration;
+    source.playbackRate.setValueAtTime(hz/ANCHORS[name],now);
     gain.gain.setValueAtTime(0,now);source.connect(gain);gain.connect(this.master);source.start(now);
     this.voices.set(name,{source,gain});
    }
   }
   apply(plan,now=this.ctx.currentTime){
-   this.start(now);const wanted=new Map(plan.layers.map(layer=>[layer.name,layer]));
+   this.start(now,plan.hz);const wanted=new Map(plan.layers.map(layer=>[layer.name,layer]));
    for(const [name,v] of this.voices){
     const layer=wanted.get(name);
     v.gain.gain.setTargetAtTime(layer?layer.volume:0,now,.025);
-    if(layer)v.source.playbackRate.setTargetAtTime(layer.rate,now,.025);
+    // Silent registers must follow the same phase progression as audible ones.
+    // Updating only the audible layer causes beating when its neighbour enters.
+    v.source.playbackRate.setTargetAtTime(plan.hz/ANCHORS[name],now,.025);
    }
   }
   stop(now=this.ctx.currentTime){
