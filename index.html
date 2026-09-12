@@ -11666,17 +11666,65 @@ function carContact(dt){
    halo and the wing core, and the wheels used to separate cars that would
    otherwise read the same at a distance. You are not in here -- your car is
    whatever you set it to in the customiser. */
-const LIVERIES=[
-  { name:'Verstappen', body:'#12305e', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
-  { name:'Norris',     body:'#ff6b1a', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' },
-  { name:'Leclerc',    body:'#9c1122', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
-  { name:'Piastri',    body:'#0f6f5c', ring:'#15171b', wing:'#15171b', rims:'#c8a24a' },
-  { name:'Russell',    body:'#cfd6dc', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' },
-  { name:'Hamilton',   body:'#2b2f36', ring:'#15171b', wing:'#15171b', rims:'#c8a24a' },
-  { name:'Sainz',      body:'#1f6fb2', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
-  { name:'Alonso',     body:'#0b4f2c', ring:'#15171b', wing:'#15171b', rims:'#b6babd' },
-  { name:'Gasly',      body:'#6b4bb0', ring:'#15171b', wing:'#15171b', rims:'#1a1c20' }
+/* ONE FIELD, WHICHEVER WAY YOU RACE IT.
+
+   Quick play used the current Formula One grid by name while a career raced
+   nine invented teams, so the same circuit had two different fields depending
+   on which button you pressed. They are the same nine now, and this is the one
+   place they are written down -- the liveries below and the championship table
+   further down the file are both derived from it.
+
+   It lives up here rather than next to the career code because LIVERIES is
+   needed long before that: a constant cannot be read above its own
+   declaration, and reaching down the file for one is how the whole script once
+   died on load. */
+const TEAMS=[
+  { name:'Meridian',   pace:1.000, body:'#123c78', rims:'#b6babd' },
+  { name:'Halcyon',    pace:0.963, body:'#c8481e', rims:'#1a1c20' },
+  { name:'Sable GP',   pace:0.925, body:'#8c1327', rims:'#b6babd' },
+  { name:'Vantari',    pace:0.887, body:'#0f6f5c', rims:'#c8a24a' },
+  { name:'Northwind',  pace:0.850, body:'#cfd6dc', rims:'#1a1c20' },
+  { name:'Solis',      pace:0.813, body:'#2b2f36', rims:'#c8a24a' },
+  { name:'Kestrel',    pace:0.775, body:'#3b6ea5', rims:'#b6babd' },
+  { name:'Ferro Nine', pace:0.737, body:'#6b4f9e', rims:'#b6babd' },
+  { name:'Lowen',      pace:0.700, body:'#b8860b', rims:'#1a1c20' },
 ];
+const LIVERIES=TEAMS.map(t=>({ name:t.name, body:t.body,
+                               ring:'#15171b', wing:'#15171b', rims:t.rims }));
+/* WHO THAT IS.
+
+   A name over each car, drawn once into a canvas and carried as a sprite so it
+   always faces you without anything having to turn it every frame. Depth
+   testing is off: a name you can only read when the car is in the open is a
+   name you cannot use to find the car, and finding the car is the whole job.
+   Sized in world units, so it shrinks with distance on its own. */
+const AI_TAGS=[];
+function aiNameTag(name, colour){
+  const W=320,H=84,cv=document.createElement('canvas');
+  cv.width=W; cv.height=H;
+  const g=cv.getContext('2d');
+  const label=String(name||'').toUpperCase();
+  g.font='700 40px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  const w=Math.min(W-8, g.measureText(label).width+56);
+  const x=(W-w)/2, y=14, h=52;
+  /* A plate, a team-coloured flash down the left, and the name. */
+  g.fillStyle='rgba(8,7,10,.74)'; g.fillRect(x,y,w,h);
+  g.fillStyle='rgba(255,255,255,.16)'; g.fillRect(x,y,w,1); g.fillRect(x,y+h-1,w,1);
+  g.fillStyle=colour||'#ff1f2d'; g.fillRect(x,y,6,h);
+  g.fillStyle='#fff'; g.textAlign='center'; g.textBaseline='middle';
+  g.shadowColor='rgba(0,0,0,.9)'; g.shadowBlur=6;
+  g.fillText(label, W/2+3, y+h/2+1);
+  const tex=new THREE.CanvasTexture(cv);
+  tex.anisotropy=1; tex.needsUpdate=true;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({
+    map:tex, transparent:true, depthTest:false, depthWrite:false, sizeAttenuation:true }));
+  sp.scale.set(4.2, 4.2*H/W, 1);
+  sp.position.set(0, 2.05, 0);
+  sp.renderOrder=900;
+  sp.userData.nameTag=true;
+  AI_TAGS.push(sp);
+  return sp;
+}
 /* A clone shares its materials with the car it came from, so painting one car
    paints the lot -- including yours. Each car is given its own copies first. */
 function aiPaint(root, liv){
@@ -11755,6 +11803,7 @@ function aiSpawnOne(d){
   g.add(m); d.obj=g;
   d.liv=LIVERIES[(AIS.indexOf(d)+LIVERIES.length)%LIVERIES.length] || LIVERIES[0];
   d.name=d.liv.name;
+  g.add(aiNameTag(d.name, d.liv.body));
   aiPaint(m, d.liv);
   d.car=makeCar(g,false);                       // no aids: it steers with a number
   /* Their wheels turn.
@@ -14221,17 +14270,8 @@ const CAREER_ROUNDS=8;
    around that, so the same car is not the same car every weekend: a midfield
    team has a day and beats the second-quickest, which is what makes a season
    worth running rather than the same result eight times. */
-const CAREER_TEAMS=[
-  { name:'Meridian',   pace:1.000, body:'#123c78' },
-  { name:'Halcyon',    pace:0.963, body:'#c8481e' },
-  { name:'Sable GP',   pace:0.925, body:'#8c1327' },
-  { name:'Vantari',    pace:0.887, body:'#0f6f5c' },
-  { name:'Northwind',  pace:0.850, body:'#cfd6dc' },
-  { name:'Aurelia',    pace:0.813, body:'#2b2f36' },
-  { name:'Kestrel',    pace:0.775, body:'#3b6ea5' },
-  { name:'Ferro Nine', pace:0.737, body:'#6b4f9e' },
-  { name:'Lowen',      pace:0.700, body:'#b8860b' },
-];
+/* The same nine, from the same list -- see TEAMS. */
+const CAREER_TEAMS=TEAMS.map(t=>({ name:t.name, pace:t.pace, body:t.body }));
 /* How far a car can wander from its own pace on a given weekend. Five per cent
    is about a place and a half of grid: enough that no two rounds line up the
    same way, small enough that the ladder still means something. */
@@ -14317,6 +14357,24 @@ function careerLoad(){
     if(!Array.isArray(a)) return;
     /* Whichever career was actually being played is the one that survives:
        the furthest-on save, so nobody who had three loses the real one. */
+    /* Teams that have been renamed since a save was written. Without this a
+       career started earlier keeps racing a team that no longer exists, and
+       its colour lookup -- which is by name -- falls back to red. */
+    const RENAMED={ Aurelia:'Solis' };
+    let renamed=false;
+    const fix=(o,k)=>{ if(o&&RENAMED[o[k]]){ o[k]=RENAMED[o[k]]; renamed=true; } };
+    for(const c of a){
+      if(!c) continue;
+      fix(c,'team');
+      if(Array.isArray(c.table)) for(const t of c.table) fix(t,'name');
+      if(Array.isArray(c.history)) for(const h of c.history)
+        if(h&&Array.isArray(h.rows)) for(const r of h.rows) fix(r,'who');
+      if(c.last&&Array.isArray(c.last.rows)) for(const r of c.last.rows) fix(r,'who');
+      if(Array.isArray(c.archive)) for(const ar of c.archive) fix(ar,'team');
+    }
+    /* Written straight back, or the old name returns every reload until
+       something else happens to save. */
+    if(renamed) try{ localStorage.setItem(CAREER_KEY, JSON.stringify(a)); }catch(e){}
     const keep=a.filter(c=>c&&c.used).sort((x,y)=>
       (y.season||1)-(x.season||1) || (y.round||1)-(x.round||1) || (y.points||0)-(x.points||0))[0]
       || a[0];
