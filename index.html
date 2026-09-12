@@ -319,7 +319,16 @@
              background:linear-gradient(180deg,rgba(10,13,19,.72),rgba(10,13,19,.34));
              border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:8px 22px 10px;
              backdrop-filter:blur(10px)}
-  #replaybar.show{opacity:.95}
+  /* The bar takes clicks now: it has cameras on it. Without this the pointer
+     events are off for the whole thing and every button is decoration. */
+  #replaybar.show{opacity:.95;pointer-events:auto}
+  #replaycams{display:flex;gap:6px;justify-content:center;margin-top:9px}
+  #replaycams button{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;
+      text-transform:uppercase;color:#dfe7f1;cursor:pointer;
+      background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);
+      border-radius:6px;padding:6px 9px}
+  #replaycams button:hover{background:rgba(255,255,255,.17)}
+  #replaycams button.on{background:#ffb020;border-color:#ffb020;color:#111}
   #replaybar b{display:block;font-size:28px;font-weight:600;color:#f2f6fb;
                font-variant-numeric:tabular-nums;margin-top:2px}
   #tlpanel{position:fixed;right:18px;top:132px;z-index:8;width:246px;display:none;
@@ -1036,7 +1045,8 @@ if('serviceWorker' in navigator){
 <button id="restartbtn" type="button">Restart race</button>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
-<div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b></div>
+<div id="replaybar"><span class="ttlbl">Replay · your best lap</span><b id="replayt">0:00.00</b>
+  <div id="replaycams"></div></div>
 <div id="tlpanel">
   <h4>Track limits &mdash; mark the edges</h4>
   <div class="row">
@@ -5108,6 +5118,7 @@ addEventListener('keydown',e=>{
   }
   if(k===' '||e.code==='Space'){ LOOKBACK=true; e.preventDefault(); }
   if(k==='c' && !(TT.live&&TT.drone>0)){ camMode=(camMode+1)%CAMS.length; orbit=false; freeLook=false; updateStatus();
+    if(TTREC.playing) replayCamBar();
     const tg=document.getElementById('tvtag'); if(tg&&!CAMS[camMode].tv) tg.classList.remove('on'); }
   if(k==='o' && !(TT.live&&TT.drone>0)){ orbit=!orbit; if(orbit) freeLook=false; updateStatus(); }
   if(k==='v' && !(TT.live&&TT.drone>0)){ freeLook=!freeLook; if(freeLook){ orbit=false; camMode=0; } resetFree(); updateStatus(); }
@@ -6013,6 +6024,41 @@ function replayBtn(){
   b.style.display = TTREC.best ? '' : 'none';
   b.textContent = TTREC.playing ? 'Stop replay' : ('Watch best lap · '+ttFmt(TTREC.best?TTREC.best.t:0));
 }
+/* THE CAMERAS, ON THE REPLAY BAR.
+
+   All of them already worked during a replay -- the replay writes carState the
+   same way driving does, so the TV director has a car to follow and C cycles
+   the cameras as it always did. What there was no way to know was that any of
+   that was true: the bar showed a running time and nothing else, so watching a
+   lap back meant watching it from whichever camera happened to be selected
+   when you pressed the button.
+
+   The row is the same list, in the same order, and pressing one is exactly
+   pressing C until it comes round -- so nothing here is a second way of doing
+   something, it is the first way of seeing it. */
+function replayCamBar(){
+  const host=document.getElementById('replaycams');
+  if(!host) return;
+  if(!host.children.length){
+    CAMS.forEach((c,i)=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.textContent=c.name;
+      b.onclick=()=>{
+        camMode=i; orbit=false; freeLook=false;
+        updateStatus(); replayCamBar();
+        /* The TV tag belongs to TV. Leaving it up over a chase camera is the
+           same bug the C key has a guard for. */
+        const tg=document.getElementById('tvtag');
+        if(tg && !CAMS[camMode].tv) tg.classList.remove('on');
+      };
+      host.appendChild(b);
+    });
+  }
+  Array.prototype.forEach.call(host.children,(b,i)=>{
+    b.classList.toggle('on', i===camMode && !orbit && !freeLook);
+  });
+}
 function replayStart(){
   if(!TTREC.best||!TTREC.best.f.length) return;
   ttBuild();
@@ -6031,6 +6077,7 @@ function replayStart(){
   document.body.classList.remove('cinema');   // or the whole overlay stays faded out
   document.getElementById('tt').classList.remove('show');
   const r=document.getElementById('replaybar'); if(r) r.classList.add('show');
+  replayCamBar();
   startPhase='go';
   replayBtn();
 }
