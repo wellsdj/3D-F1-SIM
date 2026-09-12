@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='f1sim-williams-continuous-v32';
+const CACHE='f1sim-recorded-engine-v33';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/home/helmet-red.webp',
@@ -22,10 +22,9 @@ const SHELL=[
   './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
-  './assets/audio/williams/idle.wav',
-  './assets/audio/williams/on-low.wav','./assets/audio/williams/on-mid.wav',
-  './assets/audio/williams/on-pull.wav','./assets/audio/williams/on-high.wav','./assets/audio/williams/on-top.wav',
-  './assets/audio/williams/off-low.wav','./assets/audio/williams/off-mid.wav','./assets/audio/williams/off-high.wav',
+  './assets/audio/recorded-v2/idle.wav',
+  './assets/audio/recorded-v2/on-low.wav','./assets/audio/recorded-v2/on-high.wav',
+  './assets/audio/recorded-v2/off-low.wav','./assets/audio/recorded-v2/off-high.wav',
   './home-hero.png','./home-race.webp','./home-best-laps.webp',
   './home-controller.webp','./home-customise.webp'
 ];

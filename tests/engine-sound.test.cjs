@@ -48,9 +48,9 @@ test('pedal changes reuse sources; stop disconnects every source; restart works'
  const ctx={currentTime:0,destination:{},sources:[],createGain(){return {...node(),gain:param()};},createBiquadFilter(){return {...node(),frequency:param()};},createDynamicsCompressor(){return {...node(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};},createBufferSource(){const s={...node(),playbackRate:param(),start(){this.started=true;},stop(){this.stopped=true;}};this.sources.push(s);return s;}};
  const r=new Renderer(ctx,Object.fromEntries(Object.keys(ANCHORS).map(k=>[k,{duration:2}]))),m=new Model();
  for(let i=0;i<1000;i++)r.apply(m.update(input(120,i%2),.02),i*.02);
- assert.equal(ctx.sources.length,9);
+ assert.equal(ctx.sources.length,5);
  for(const [i,name] of Object.keys(ANCHORS).entries())
   assert.ok(Math.abs(ctx.sources[i].playbackRate.value*ANCHORS[name]-m.hz)<1e-8,'muted and audible registers track the same revs');
  r.stop();assert.equal(r.voices.size,0);assert.ok(ctx.sources.every(s=>s.stopped&&s.disconnected));
- r.apply(m.update(input(0),.02),21);assert.equal(ctx.sources.length,18);
+ r.apply(m.update(input(0),.02),21);assert.equal(ctx.sources.length,10);
 });

@@ -1,21 +1,44 @@
-# Engine audio
+# Recorded engine audio preview
 
-The Williams cockpit recordings supplied on 12 September 2026 replace the mixed-car MP3 playback. Prepared mono 48 kHz WAV loops live in assets/audio/williams; regions.json records source cuts and relative harmonic anchors. Original user WAVs are untouched. Idle and steady-low contained identical audio.
+The September 12 replacement uses the user's four new MP3 recordings:
 
-Steady sections and selected acceleration sections are pitch-stabilized, normalized and crossfaded at their loop seams. The short acceleration burst supplies the highest register. Lift-off supplies three off-throttle registers.
+| Purpose | Supplied file |
+| --- | --- |
+| Acceleration | 33e51ca2-6622-4e01-9a10-7312b6d8527a.mp3 |
+| Braking / lift | 9c8de92e-cc24-4218-a2c0-ec3f89dfc4ce.mp3 |
+| Short acceleration pull | 044f47c3-4b67-448a-864e-343ab350625d.mp3 |
+| Idle | 090a0cf8-6dd2-46e6-a193-af34f7b4dd32.mp3 |
 
-The original 0.35–0.85 second upper-register loops repeated their recorded gestures too often. The next approach, tools/prepare-engine-textures.py, produced longer beds but its 65–105 ms fragment joins introduced rapid flutter. That method remains in the off-throttle assets only; texture-preparation.json describes that intermediate bank.
+assets/audio/recorded-v2 contains five mono WAV regions. All active engine
+audio comes from this new set. Old Williams assets remain unused.
 
-Acceleration now uses tools/prepare-engine-sustain.py: a source-derived harmonic/noise reconstruction with continuous harmonic phases, broad recorded noise texture, and envelope correction for rapid flutter. No fragment joins occur during acceleration sustain. Harmonic amplitudes and noise spectrum come from the supplied recordings; the result is processed/resynthesized audio, not an untouched recording or Forza's proprietary engine. Integer harmonic cycles close each roughly 16-second bed. sustain-preparation.json records the actual tuned frequencies and measurements. Run against the original prepared bank (from commit 5892c0f), not the granular output. Preparation is offline, so runtime still uses nine sources.
+The high-rev recording is a direct 7.13-second loop taken from 16.2–23.4 seconds
+of the acceleration file. Idle is a direct 4.23-second loop. Each has a 70 ms
+wrap crossfade and level adjustment. A 65 Hz high-pass reduces low rumble.
+There is no harmonic/noise reconstruction, generated noise, or micro-grain
+stitching in this bank.
 
-engine-sound.js uses a cosmetic speed-based gearbox with downshift hysteresis. Adjacent loops are pitch-matched and blended according to revs; throttle blends loaded and unloaded engine tone. Off-throttle retains a small loaded-register contribution to preserve mechanical presence instead of substituting only the low-rev deceleration take. Throttle never directly lowers pitch. Shifts produce a pitch drop and brief load dip. Nine continuous sources start once per session; pedal changes never restart them. Grid lock always selects unpitched idle. Existing home, pause, restart and visibility hooks stop playback.
+The short burst supplies the lower loaded register. Two braking regions
+supply unloaded registers. Those three source ramps are resampled according
+to measured pitch before looping, so the recorded rise/fall does not repeat
+inside a sustained note. This is waveform resampling, not spectral synthesis.
+Their lengths and source boundaries are recorded in regions.json.
 
-All registers, including muted ones, now follow the same pitch automation from their initial start, preserving harmonic phase relationships as adjacent registers fade in. This avoids the previous drift caused by changing playback rate only while a register was audible. Gear thresholds and shift envelopes are unchanged.
+tools/prepare-recorded-engine.py rebuilds the bank from decoded 48 kHz mono
+16-bit WAV files named acceleration.wav, burst.wav, braking.wav and idle.wav.
+The supplied MP3s remain untouched.
 
-The harmonic anchors are relative pitch measurements, not actual RPM telemetry. Higher off-throttle pitches are extrapolated because the supplied recording has limited high-rev sustain. This is a loop-based approximation, not a full professionally recorded engine library.
+engine-sound.js retains the existing speed-based gear thresholds, downshift
+hysteresis, shift dips, throttle continuity and grid idle lock. Its pitch
+range is calibrated to this recording's audible harmonics, not actual engine
+RPM telemetry. Five continuous voices replace nine; idle is used only while
+stationary/gridded. Releasing the pedal blends toward braking tone without
+forcing an RPM drop. Home/restart/visibility cleanup remains intact.
 
-Source: Pole Position Production Williams FW29 2007 cockpit recording included in the Sonniss 2016 GDC bundle, edited by the user. See https://sonniss.com/gameaudiogdc/ and https://sonniss.com/gdc-bundle-license/ . Assets are incorporated for this game; do not redistribute them as a standalone sound library.
-
-Comparison references: Forza Horizon 5 lead audio designer Fraser Strachan describes granular engine playback and acceleration/deceleration capture at https://www.asoundeffect.com/forza-5-game-audio/ . Turn 10 and Project CARS audio leads describe physics-driven RPM/load blending at https://designingsound.org/2014/08/11/vehicle-engine-design-project-cars-forza-motorsport-5-and-rev/ . This implementation borrows those principles, not their proprietary engine or recordings.
-
-Validation: all 48 tests pass, including automation of muted-register pitch, grid idle, lift continuity, shifts, coasting and cleanup. Identical 36-second browser OfflineAudioContext renders against commit 381d31f decoded all nine assets: before peak 0.314/RMS 0.072; after peak 0.294/RMS 0.079, all samples finite. At sustained 320 km/h, normalized envelope modulation in the 5–20 Hz band fell from 0.0453 to 0.0131 (71%). That is a narrow objective flutter measurement, not a claim of 71% better sound or a subjective listening review.
+Validation: all 48 tests pass, including grid idle, gear shifts, lift
+continuity, muted-register pitch tracking and source cleanup. Inline scripts
+parse. A 36-second browser OfflineAudioContext preview decoded all five WAVs
+and exercised launch, shifting, sustained speed, coasting and braking.
+Peak 0.360 and RMS 0.067; every sample finite. This is objective validation,
+not a subjective listening claim. The preview is for user listening before
+production promotion.

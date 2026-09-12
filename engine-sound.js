@@ -4,8 +4,8 @@
  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
  const GEARS=[90,135,175,210,245,278,308,370];
  // Relative harmonic anchors, not measured engine RPM.
- const ANCHORS={idle:151.348,'on-low':186.34588345571004,'on-mid':203.59006948857657,'on-pull':234.06402385432196,'on-high':267.6589218338667,'on-top':295.08209529539073,'off-low':142.617,'off-mid':163.627,'off-high':203.612};
- const ON=['idle','on-low','on-mid','on-pull','on-high','on-top'],OFF=['off-low','off-mid','off-high'];
+ const ANCHORS={idle:428,'on-low':455,'on-high':586,'off-low':335,'off-high':478};
+ const ON=['on-low','on-high'],OFF=['off-low','off-high'];
  function blend(names,hz,weight,layers){
   if(weight<=0)return;
   let a=names[0],b=a;
@@ -32,7 +32,7 @@
    this.mode=idle?'idle':brk>.04?'brake':thr>.04?'accel':'coast';
    const demand=idle||brk>.04?0:thr;
    this.load+=(demand-this.load)*(1-Math.exp(-dt/.085));
-   const target=idle?ANCHORS.idle:this.gear===0?ANCHORS.idle+(310-ANCHORS.idle)*clamp(speed/GEARS[0],0,1):clamp(speed/GEARS[this.gear]*310,ANCHORS.idle,330);
+   const target=idle?ANCHORS.idle:this.gear===0?ANCHORS.idle+(590-ANCHORS.idle)*clamp(speed/GEARS[0],0,1):clamp(speed/GEARS[this.gear]*590,330,625);
    if(idle)this.hz=ANCHORS.idle;
    else this.hz+=(target-this.hz)*(1-Math.exp(-dt/(this.shiftLeft>0?.035:.07)));
    const layers=[];
@@ -42,7 +42,7 @@
     // Wheels still drive the engine on lift-off. Keep some mechanical high
     // register instead of replacing it entirely with a low-rev decel take.
     // Load changes tone/level, never the speed-derived acoustic RPM.
-    const presence=.16+.10*clamp((this.hz-180)/130,0,1);
+    const presence=.16+.10*clamp((this.hz-360)/230,0,1);
     blend(ON,this.hz,Math.sqrt(presence+(1-presence)*this.load)*dip,layers);
     blend(OFF,this.hz,Math.sqrt(1-this.load)*.64,layers);
    }
