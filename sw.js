@@ -13,14 +13,15 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='slipstream-gates-v30';
+const CACHE='slipstream-rain-v32';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/driver/driver.glb',
   './assets/home/helmet-red.webp',
   './assets/home/race-pitlane.webp',
   './assets/home/garage-bay.webp','./career-season.js','./retirement-route.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
-  './','./index.html','./GLTFLoader.js','./meshopt_decoder.js',
+  './','./index.html',
+  './assets/audio/crash.mp3','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
   './assets/audio/direct-recordings/idle.mp3','./assets/audio/direct-recordings/acceleration.mp3','./assets/audio/direct-recordings/braking.mp3',

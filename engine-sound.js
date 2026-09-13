@@ -5,6 +5,11 @@
  const CLIPS={accel:{end:23.4,loop:16.2},brake:{end:5.15,loop:2.8},idle:{end:4.7,loop:.2}};
  // Approximate road-speed positions within the actual acceleration recording.
  // Used on entry/re-entry, not to force repeated cuts while the pedal is held.
+ /* Roughly 1.5 g of deceleration, smoothed. Coasting drag is about 11 kph/s at
+   speed and never comes close; gravel is 180 and the brakes more, so both trip
+   it comfortably. Set above a one-frame sample jump on purpose -- a gap in the
+   timeline is not the car slowing down. */
+ const DECEL_KPH_S=55;
  const SPEED_MAP=[[0,0],[100,1.7],[160,3],[220,5],[280,9],[330,16],[370,20]];
  function accelerationOffset(speed){
   for(let i=1;i<SPEED_MAP.length;i++){
@@ -19,14 +24,36 @@
  }
  class Model{
   constructor(){this.reset();}
-  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;}
+  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;this.dv=0;this.hit=0;}
   update(input,dt){
    dt=clamp(Number.isFinite(dt)?dt:0,0,.1);this.time+=dt;
    const speed=Math.abs(Number(input.speed)||0)*3.6,thr=clamp(Number(input.throttle)||0,0,1),brake=clamp(Number(input.brake)||0,0,1);
    if(this.mode!=='silent')this.cursor=advance(this.cursor,dt*this.rate,CLIPS[this.mode]);
-   let next=input.gridded||speed<1.5?'idle':brake>.04?'brake':thr>(this.mode==='accel'?.03:.08)?'accel':'brake';
+   /* WHAT THE CAR IS DOING BEATS WHAT THE PEDALS SAY.
+
+      The mode was chosen from the pedals alone, so a car being dragged down by
+      gravel or stopped by a barrier went on playing the acceleration recording
+      as long as the throttle was held -- an engine pulling hard while the car
+      loses eighty kph. Speed is the first thing asked now: if the car is
+      actually being slowed, that is what you hear, whatever your foot is
+      doing. Gentle decay from drag is not enough to trigger it; this is the
+      rate you only reach in gravel, on the brakes, or against a wall. */
+   /* Smoothed over about a tenth of a second. One frame of a big number is
+      noise -- a sample gap, a teleport, a test feeding speeds directly. Gravel
+      and the brakes hold the figure for as long as they are slowing the car,
+      which is the thing worth reacting to. */
+   const dvRaw=(speed-this.speed)/Math.max(dt,1e-4);     // kph per second
+   this.dv=(this.dv||0)+(dvRaw-(this.dv||0))*Math.min(1,dt/.1);
+   /* A barrier is an event, not a rate: by the time it has been smoothed the
+      car has already stopped changing speed. The game says when one happened. */
+   const impact=clamp(Number(input.impact)||0,0,1);
+   if(impact>.02) this.hit=Math.max(this.hit||0,.45);
+   else this.hit=Math.max(0,(this.hit||0)-dt);
+   const dragged=this.dv < -DECEL_KPH_S || this.hit>0;
+   let next=input.gridded||speed<1.5?'idle':(brake>.04||dragged)?'brake'
+           :thr>(this.mode==='accel'?.03:.08)?'accel':'brake';
    // Ignore one-frame pedal chatter, but apply idle/grid lock immediately.
-   if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'){
+   if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'&&!(this.hit>0)){
     if(this.pending!==next){this.pending=next;this.pendingTime=0;}
     this.pendingTime+=dt;
     if(this.pendingTime<.035)next=this.mode;
@@ -58,7 +85,7 @@
       recording and low speed starts further down it. */
    if(this.mode==='accel'){ this.coast=0; this.rate=1; }
    else if(this.mode==='brake'){
-    if(brake>.04){ this.coast=0; this.rate=1; }
+    if(brake>.04||dragged){ this.coast=0; this.rate=1; }
     else{
      this.coast=(this.coast||0)+dt;
      const fall=.055+.10*(1-clamp(speed/300,0,1));   // per second, faster when slow

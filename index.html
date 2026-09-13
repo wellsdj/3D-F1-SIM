@@ -1019,7 +1019,6 @@ if('serviceWorker' in navigator){
   <div id="netmsg"></div>
 </div>
 <canvas id="trackmap" width="320" height="320"></canvas>
-<div id="rain" aria-hidden="true"><i></i><i></i></div>
 <div id="racepos"></div>
 <div id="result"></div>
 <div id="limwarn"></div>
@@ -4540,7 +4539,78 @@ const _dustC=new THREE.Color();
    one colour and it was gravel's. The comment beside the AI emitter has long
    claimed grass "throws a thinner plume of its own" -- this is that plume,
    which until now did not exist. */
-function spawnDust(speed, from, grass){
+/* ==========================================================================
+   RAIN
+
+   Drops in the world, not lines on the glass. A pool of short line segments
+   around the camera, each one falling at its own speed and each at its own
+   distance -- which is what gives the depth: the near ones are long and fast
+   across the frame, the far ones short and slow, and the camera moving through
+   them does the rest.
+
+   They live in a box that travels with the camera and wrap when they leave it,
+   so a few hundred segments cover the whole view however far you drive. One
+   buffer, written on the CPU, no per-drop objects, no shadows, no lighting --
+   about as cheap as weather gets.
+
+   Nothing is drawn on the camera itself. Water on the lens is a nice shot and
+   a bad idea: you cannot wipe it, so it sits in front of everything you are
+   trying to look at for the whole race.
+   ========================================================================== */
+const RAIN_N=780, RAIN_BOX=42, RAIN_TOP=26;
+let rainGeo=null, rainSeg=null, rainPos=null, rainVel=null, rainLen=null;
+function rainInit(){
+  if(rainSeg) return;
+  rainPos=new Float32Array(RAIN_N*6);
+  rainVel=new Float32Array(RAIN_N);
+  rainLen=new Float32Array(RAIN_N);
+  for(let i=0;i<RAIN_N;i++){
+    rainVel[i]=16+Math.random()*16;              // metres a second
+    rainLen[i]=0.9+Math.random()*2.4;             // the near ones streak
+  }
+  rainGeo=new THREE.BufferGeometry();
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos,3));
+  /* Fog off: the wet pass thickens the fog, and rain that fades out at twenty
+     metres is rain you cannot see. Bright, because a thin line against a bright
+     sky at a distance is nothing at all. */
+  const mat=new THREE.LineBasicMaterial({ color:0xe8f2ff, transparent:true, opacity:0.6,
+                                          depthWrite:false, fog:false });
+  rainSeg=new THREE.LineSegments(rainGeo, mat);
+  rainSeg.frustumCulled=false;
+  rainSeg.renderOrder=5;
+  rainSeg.visible=false;
+  scene.add(rainSeg);
+  for(let i=0;i<RAIN_N;i++) rainPlace(i, true);
+}
+const _rainC=new THREE.Vector3();
+function rainPlace(i, anywhere){
+  const c=_rainC;
+  const x=c.x + (Math.random()-0.5)*RAIN_BOX;
+  const z=c.z + (Math.random()-0.5)*RAIN_BOX;
+  const y=c.y + (anywhere ? (Math.random()-0.3)*RAIN_TOP : RAIN_TOP*0.5+Math.random()*4);
+  rainPos[i*6]=x;   rainPos[i*6+1]=y;               rainPos[i*6+2]=z;
+  rainPos[i*6+3]=x; rainPos[i*6+4]=y+rainLen[i];    rainPos[i*6+5]=z;
+}
+let _rainDt=1/60;
+function rainStep(dt){
+  const on=(typeof WEATHER!=='undefined')&&WEATHER.wet;
+  if(!on){ if(rainSeg) rainSeg.visible=false; return; }
+  rainInit();
+  rainSeg.visible=true;
+  rainSeg.material.opacity=0.42+0.38*WEATHER.level;
+  camera.getWorldPosition(_rainC);
+  const half=RAIN_BOX*0.5, floor=_rainC.y-RAIN_TOP*0.55;
+  for(let i=0;i<RAIN_N;i++){
+    const drop=rainVel[i]*dt*(0.7+0.6*WEATHER.level);
+    rainPos[i*6+1]-=drop; rainPos[i*6+4]-=drop;
+    /* Out of the box in any direction and it comes back in at the top. */
+    if(rainPos[i*6+1]<floor ||
+       Math.abs(rainPos[i*6]-_rainC.x)>half ||
+       Math.abs(rainPos[i*6+2]-_rainC.z)>half) rainPlace(i,false);
+  }
+  rainGeo.attributes.position.needsUpdate=true;
+}
+function spawnDust(speed, from, grass, wet){
   const i=dustHead; dustHead=(dustHead+1)%DUST_N;
   const g=from||carGroup;
   const h=g.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
@@ -4553,12 +4623,18 @@ function spawnDust(speed, from, grass){
      so the plume drifts outward and hangs rather than trailing in a line. */
   const back=speed*(0.18+Math.random()*0.30);
   dustVel[i*3]  =-fx*back - fz*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustVel[i*3+1]= grass ? 0.5+Math.random()*1.0 + speed*0.012
+  dustVel[i*3+1]= wet   ? 0.9+Math.random()*1.8 + speed*0.030
+                : grass ? 0.5+Math.random()*1.0 + speed*0.012
                         : 1.1+Math.random()*2.4 + speed*0.035;
   dustVel[i*3+2]=-fz*back + fx*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustMax[i]=dustLife[i]=grass ? 0.35+Math.random()*0.35    // settles quickly
-                                : 0.7+Math.random()*0.9;
-  if(grass)
+  dustMax[i]=dustLife[i]=wet ? 0.55+Math.random()*0.55
+                             : grass ? 0.35+Math.random()*0.35    // settles quickly
+                                     : 0.7+Math.random()*0.9;
+  if(wet)
+    /* Water off a wet circuit: white, barely any colour in it, and bright
+       enough to read against the dark tarmac a wet track turns into. */
+    _dustC.setHSL(0.58, 0.05+Math.random()*0.06, 0.74+Math.random()*0.22);
+  else if(grass)
     /* Torn grass and damp earth: green, dark, and much less saturated than
        sand, so a car on the verge does not look like it is in a gravel trap. */
     _dustC.setHSL(0.24+Math.random()*0.06, 0.20+Math.random()*0.14,
@@ -9321,6 +9397,38 @@ function barrBlocked(x,z,h){
    from the contact, fast, and die inside half a second. Scaled by how hard the
    hit was, because a brush down the armco at 60 and a shunt at 300 should not
    look the same. */
+/* THE WALL, HEARD.
+
+   One buffer, decoded once, played through the same context the engine uses so
+   it sits in the same mix. Louder and less filtered the harder the hit; a
+   scrape is a scuff, a big one is the whole thing. Rate-limited, because a car
+   grinding along a barrier generates a contact every frame and forty of them a
+   second is a buzz rather than a crash. */
+let crashBuf=null, crashAt=0, crashTried=false;
+function crashSound(severity){
+  const ctx=(typeof engineAudio!=='undefined'&&engineAudio.context)?engineAudio.context:null;
+  if(!ctx||ctx.state!=='running') return;
+  const now=ctx.currentTime;
+  if(now-crashAt < 0.12) return;
+  if(!crashBuf){
+    if(crashTried) return;
+    crashTried=true;
+    fetch('assets/audio/crash.mp3').then(r=>r.arrayBuffer())
+      .then(a=>ctx.decodeAudioData(a)).then(b=>{crashBuf=b;}).catch(()=>{});
+    return;
+  }
+  crashAt=now;
+  const hard=Math.min(1,severity/40);
+  const src=ctx.createBufferSource(); src.buffer=crashBuf;
+  src.playbackRate.value=0.88+hard*0.3;
+  const g=ctx.createGain();
+  g.gain.value=0.12+hard*0.85;
+  /* A light knock is duller as well as quieter. */
+  const lp=ctx.createBiquadFilter(); lp.type='lowpass';
+  lp.frequency.value=900+hard*11000;
+  src.connect(lp); lp.connect(g); g.connect(ctx.destination);
+  src.start();
+}
 function spawnSparks(x,y,z,power){
   if(!dustPts) return 0;
   const n=Math.round(clamp(18+power*90, 12, 150));
@@ -9439,6 +9547,19 @@ function barrNormal(x,z){
   return {x:nx, z:nz};
 }
 
+/* Where a lap is policed: the last third of it. Measured off the same stations
+   everything else uses, so it moves with the circuit rather than a hard-coded
+   distance. */
+const TL_FROM=2/3;
+function tlPoliced(){
+  const n=tlSt.length;
+  if(!n) return true;                       // no survey, no exemption
+  const st=tlStation(carState.wx, carState.wz, _tlPoliceHint);
+  if(!st) return true;
+  _tlPoliceHint=tlLastIdx;
+  return (tlLastIdx/n) >= TL_FROM;
+}
+let _tlPoliceHint=0;
 function tlCheck(dt){
   if(RETIRE.on || !TT.live || TT.cd>0 || CARPTS.length!==4) return;
   let on=0;
@@ -9447,6 +9568,15 @@ function tlCheck(dt){
   if(_tlOff===0) _tlPosWas=RACE.pos||0;      // the order on the way off
   _tlOff+=(dt||STEP);
   if(_tlOff<TL_GRACE || _tlCounted || _tlLock>0) return;
+  /* ONLY THE LAST THIRD OF THE LAP.
+
+     Most of this circuit runs kerb-to-grass with nothing gained by touching
+     it, and having every one of those count made the flag something you
+     collected rather than earned. The part where going off is worth time is
+     the run to the end of the lap, so that is where it is policed. Earlier on
+     you still lose the time the grass costs you -- that is the whole penalty
+     there, and it is a fair one. */
+  if(!tlPoliced()){ _tlOff=0; return; }
   _tlCounted=true;
   _tlLock=TL_QUIET;
   sessionLapInvalid=true;
@@ -10199,78 +10329,6 @@ function turnWheels(list, wl, wr, spinAng, steerAng){
 /* Retirement driving uses the same barrier response as the racing grid. */
 function aiWall(C,dt){return collisionWall(C,dt);}
 /* ==========================================================================
-   TYRE MARKS
-   Laid when a tyre is actually sliding: black on asphalt, green where the car
-   has cut a verge. A fixed pool of quads that is written round and round, so
-   the cost is decided once at load and never grows however long the race runs
-   -- no allocation, no garbage, and the oldest mark simply becomes the newest.
-   ========================================================================== */
-const MARK_MAX=520;            // about forty seconds of continuous sliding
-let markMesh=null, markAt=0, markGeo=null, markCol=null, markLast=new Map();
-function marksInit(){
-  if(markMesh) return;
-  const g=new THREE.PlaneGeometry(1,1);
-  markGeo=new THREE.InstancedBufferGeometry().copy(g);
-  markGeo.instanceCount=MARK_MAX;
-  const m=new THREE.MeshBasicMaterial({ transparent:true, opacity:0.5, depthWrite:false,
-                                        color:0xffffff, vertexColors:true });
-  markMesh=new THREE.InstancedMesh(g, m, MARK_MAX);
-  markMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  markCol=new THREE.InstancedBufferAttribute(new Float32Array(MARK_MAX*3),3);
-  markMesh.instanceColor=markCol;
-  markMesh.frustumCulled=false;
-  markMesh.renderOrder=-1;
-  /* Parked below the world until used, so an unwritten slot draws nothing. */
-  const hide=new THREE.Matrix4().makeTranslation(0,-1000,0);
-  for(let i=0;i<MARK_MAX;i++) markMesh.setMatrixAt(i,hide);
-  scene.add(markMesh);
-}
-const _mM=new THREE.Matrix4(), _mQ=new THREE.Quaternion(),
-      _mP=new THREE.Vector3(), _mS=new THREE.Vector3(),
-      _mE=new THREE.Euler();
-function markPut(x,y,z,hdg,len,wide,grass){
-  if(!markMesh) return;
-  _mE.set(-Math.PI/2, 0, -hdg);
-  _mQ.setFromEuler(_mE);
-  _mP.set(x, y+0.012, z);
-  _mS.set(wide, len, 1);
-  _mM.compose(_mP,_mQ,_mS);
-  markMesh.setMatrixAt(markAt,_mM);
-  if(grass) markCol.setXYZ(markAt, 0.16, 0.30, 0.11);
-  else      markCol.setXYZ(markAt, 0.05, 0.05, 0.055);
-  markAt=(markAt+1)%MARK_MAX;
-  markMesh.instanceMatrix.needsUpdate=true;
-  markCol.needsUpdate=true;
-}
-/* One call a frame per car. A mark goes down when the tyre is sliding -- the
-   back stepping out, or a wheel scrabbling on a verge -- and only every so
-   many metres, so a long slide is a dotted line rather than ten thousand
-   overlapping quads. */
-function marksStep(C, dt){
-  if(!markMesh||!C||!C.st) return;
-  const st=C.st, sp=Math.abs(st.speed);
-  if(sp<6) return;
-  const slide=Math.abs(C.yawSpin||0);
-  const off=C.surf&&(C.surf.grass||C.surf.loose);
-  const scrub=off ? Math.min(1,Math.abs(C.steerAng||0)*2.2) : 0;
-  const strength=Math.max(slide>0.22?Math.min(1,slide*0.7):0, scrub>0.35?scrub:0);
-  if(strength<=0){ markLast.delete(C); return; }
-  const last=markLast.get(C);
-  if(last && (st.wx-last.x)**2+(st.wz-last.z)**2 < 2.6*2.6) return;
-  markLast.set(C,{x:st.wx,z:st.wz});
-  /* Both rear wheels, a metre and a bit either side of the centreline. */
-  const fx=Math.sin(st.hdg), fz=Math.cos(st.hdg);
-  const rx= fz, rz=-fx;                              // the car's right
-  const back=1.5, half=0.78;
-  const y=(C.groundY||0)-(typeof RIDE==='number'?RIDE:0.1);
-  for(const sgn of [-1,1]){
-    markPut(st.wx - fx*back + rx*half*sgn,
-            y,
-            st.wz - fz*back + rz*half*sgn,
-            st.hdg, 3.0, 0.34, !!off);
-  }
-}
-/* ==========================================================================
    SPINNING
    ========================================================================== */
 const SPIN_SLACK=0.22;    // how far past the clamp before the back goes
@@ -10333,7 +10391,6 @@ function stepCar(C, inp, dt){
      lock for the grip, and putting a wheel on the grass mid-corner, which is
      the classic way to lose one. */
   spinStep(C, v, yawRate, dt);
-  marksStep(C, dt);
   st.wx  += Math.sin(st.hdg)*v*dt;
   st.wz  += Math.cos(st.hdg)*v*dt;
   /* A shove from another car, carried as its own velocity so it moves the car
@@ -10390,12 +10447,17 @@ function placeCar(C, dt, t){
      Spa there is far more grass beside the road than there is gravel, so
      limiting this to gravel meant almost never seeing it. */
   const _loose=C.surf&&C.surf.ok&&(C.surf.loose||C.surf.grass);
-  if(_loose && C.st.speed>0.8 && C.group!==carGroup){
-    const frac=C.surf.loose?(C.surf.looseFrac||1):(C.surf.grassFrac||1)*0.55;
+  /* In the wet everybody throws water up, everywhere -- it is not a surface
+     you can leave, so the plume is constant rather than something you only see
+     in a gravel trap. Same emitter, white, and a good deal of it. */
+  const _wet=(typeof WEATHER!=='undefined')&&WEATHER.wet&&!_loose;
+  if((_loose||_wet) && C.st.speed>2 && C.group!==carGroup){
+    const frac=_loose ? (C.surf.loose?(C.surf.looseFrac||1):(C.surf.grassFrac||1)*0.55)
+                      : 0.55+0.45*WEATHER.level;
     C._spray=(C._spray||0) + (18+C.st.speed*2.0)*frac*dt;
     let guard=0;
-    while(C._spray>=1 && guard++<4){
-      C._spray-=1; spawnDust(C.st.speed, C.group, !C.surf.loose);
+    while(C._spray>=1 && guard++<5){
+      C._spray-=1; spawnDust(C.st.speed, C.group, _loose?!C.surf.loose:false, _wet);
     }
     if(C._spray>1.5) C._spray=1.5;
   } else C._spray=0;
@@ -10600,7 +10662,8 @@ function presentCar(dt, thr, brk, gridded, yawRate){
 
   const wSpd=carState.speed;
   if(careerQuiet()||document.hidden)engineAudio.stop();
-  else engineAudio.update({speed:wSpd,throttle:Number(thr),brake:Number(brk),gridded});
+  else engineAudio.update({speed:wSpd,throttle:Number(thr),brake:Number(brk),gridded,
+                           impact:BARR_HIT});
 
   kmhEl.textContent = Math.round(Math.abs(wSpd)*3.6);
   /* Backwards is still a speed. The number stays positive and the unit says
@@ -12008,7 +12071,16 @@ function collisionWall(C,dt){
  const severity=CollisionPhysics.impulse(C,null,{nx:-normal.x,nz:-normal.z,x:point.x,z:point.z});wingImpact(C,point.x,point.z,severity);
  // Resolve an initially overlapping spawn locally; never teleport to a distant remembered pose.
  for(let i=0;i<20&&barrBlocked(st.wx,st.wz,st.hdg);i++){st.wx+=normal.x*.1;st.wz+=normal.z*.1;}
- if(C===PLAYER&&severity>2){BARR_SHAKE=Math.max(BARR_SHAKE,Math.min(5,severity*.1));if(BARR_SPARK<=0){spawnSparks(point.x,(C.groundY||0)+.2,point.z,Math.min(.6,severity/60));BARR_SPARK=.1;}}
+ if(C===PLAYER){
+  /* Every hit is felt, not only the big ones. The old floor of severity>2 meant
+     a scrape along a wall did nothing at all -- no shake, no sound, no change
+     in the engine -- which is why hitting a barrier could pass unnoticed.
+     Everything below scales with how hard it was. */
+  BARR_HIT=Math.max(BARR_HIT,Math.min(1,severity/45));
+  BARR_SHAKE=Math.max(BARR_SHAKE,Math.min(6,severity*.16));
+  crashSound(severity);
+  if(severity>2&&BARR_SPARK<=0){spawnSparks(point.x,(C.groundY||0)+.2,point.z,Math.min(.6,severity/60));BARR_SPARK=.1;}
+ }
  return true;
 }
 function carsTouch(A,B,dt){
@@ -12035,6 +12107,7 @@ function carContact(dt){
  }
  for(const C of cars)collisionWall(C,dt);
  BARR_SHAKE*=Math.exp(-5*dt);BARR_LURCH*=Math.exp(-5*dt);BARR_SPARK=Math.max(0,BARR_SPARK-dt);
+ BARR_HIT=Math.max(0,BARR_HIT-dt*3);
 }
 
 /* The grid, and what is on it.
@@ -12709,7 +12782,20 @@ function raceResultTick(){
   if(left!==RESULT._left){ RESULT._left=left; raceResultRows(); }
   careerScore();
 }
+/* THE TABLE DOES NOT OPEN ITSELF.
+
+   It used to appear the moment the rows changed, which after the flag means
+   every time another car came home -- so it kept reappearing over whatever you
+   had moved on to, saying "results updating as cars finish". Nobody wants a
+   scoreboard pushed at them for a result they have just watched; the standings
+   are under Career whenever they are wanted. The rows are still built and
+   still scored, because the season depends on them. Only the panel is gone. */
 function raceResultUI(){
+  const _box=raceEl('result');
+  if(_box) _box.classList.remove('show');
+  return;
+}
+function raceResultUIUnused(){
   const box=raceEl('result'); if(!box) return;
   const lead=RESULT.rows[0];
   const mine=RESULT.rows.find(r=>r.you),position=RESULT.rows.findIndex(r=>r.you)+1;
@@ -13783,8 +13869,12 @@ window.SIM={
   /* Weather, from outside: read it, force it, or sample the roll. */
   /* Spinning and marks, from outside. */
   editorKeys(on){ if(on!==undefined) EDITOR_KEYS=!!on; return EDITOR_KEYS; },
-  spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3),
-                       marks:markMesh?markAt:-1}; },
+  rainState(){ try{ return {built:!!rainSeg, visible:rainSeg?rainSeg.visible:false,
+      drops:rainGeo?rainGeo.attributes.position.count/2:0,
+      opacity:rainSeg?+rainSeg.material.opacity.toFixed(2):0,
+      camY:+_rainC.y.toFixed(1), y0:rainPos?+rainPos[1].toFixed(1):null,
+      wet:(typeof WEATHER!=='undefined')&&WEATHER.wet }; }catch(e){ return {err:String(e)}; } },
+  spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3)}; },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
                                  WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
               return {...WEATHER, rainShown:document.body.classList.contains('wet')}; },
@@ -14318,14 +14408,18 @@ function frame(now){
      that stopped rather than as a stream. This emits a set number per second,
      spreads them across frames, and throws any surplus away instead of banking
      it, so the plume is continuous at any frame rate and cannot burst. */
-  if(onLoose && carState.speed>0.8){
+  const _pWet=(typeof WEATHER!=='undefined')&&WEATHER.wet&&!onLoose;
+  if((onLoose||_pWet) && carState.speed>(onLoose?0.8:2)){
     const rate = 30 + carState.speed*3.4;        // particles per second
-    looseSpray += rate*looseFrac*dt;
+    looseSpray += rate*(onLoose?looseFrac:(0.55+0.45*WEATHER.level))*dt;
     let guard=0;
-    while(looseSpray>=1 && guard++<8){ looseSpray-=1; spawnDust(carState.speed); }
+    while(looseSpray>=1 && guard++<8){
+      looseSpray-=1; spawnDust(carState.speed, carGroup, false, _pWet);
+    }
     if(looseSpray>2) looseSpray=2;               // never bank a debt
   } else looseSpray=0;
   updateDust(dt);
+  _rainDt=dt;
 
   /* The drone. Before the lights go out the camera is not in the car at all:
      it stands off ahead and above the start, looking back down the pit straight
@@ -14568,6 +14662,11 @@ function frame(now){
   sun.target.position.copy(tmp);
   sun.position.copy(tmp).addScaledVector(SUN_DIR,190);
 
+  /* Last thing before the draw. The drops are placed around wherever the camera
+     has ended up this frame, so running it earlier builds them around where it
+     was -- which during the opening drone shot is fifty metres above the road,
+     and the rain is then somewhere you are not looking. */
+  rainStep(_rainDt);
   renderer.render(scene,camera);
   if(!FREEROAM){ drawMap(); drawCornerMap(); }
 
@@ -14634,7 +14733,6 @@ function maybeStart(){
   if(booted || !assetsDone || !worldDone) return;
   booted=true;
   if(TRACK.scenery) makeTrees();
-  marksInit();
   if(!FREEROAM){ buildMap(); armStart(); }
   else { startPhase='go'; }
   applyDetail();
@@ -15983,7 +16081,7 @@ function engineValue(e){ return engineSpeedWorth(e)+e.dev; }
 let NEW=null;
 const SETUP_STEPS=['team','colours','engine','badge','driver','season'];
 function apexNewCareer(){
-  NEW={ step:0, team:TEAM_NAMES[0], body:TEAM_COLOURS[0], trim:'#15171b',
+  NEW={ step:0, name:'', team:TEAM_NAMES[0], body:TEAM_COLOURS[0], trim:'#15171b',
         engine:ENGINES[1].id, logo:TEAM_LOGOS[0].id,
         skin:SKIN_TONES[1], hair:HAIR_TONES[0],
         rounds:8, laps:3 };
@@ -16071,7 +16169,11 @@ function setupDraw(){
         +'</div>';
   }
   else if(step==='driver'){
-    body='<p class="newnote">Your suit takes the team colour. The rest is you.</p>'
+    body='<p class="newnote">Your name goes on the timing screens and the grid sheet. '
+        +'Your suit takes the team colour; the rest is you.</p>'
+        +'<input id="setup-name" type="text" maxlength="22" placeholder="Your name" '
+        +'autocomplete="off" spellcheck="false" aria-label="Driver name" value="'
+        +setupEsc(NEW.name)+'">'
         +'<div class="setup-driver">'+driverSVG(NEW)+'</div>'
         +'<div class="slabel2">Skin</div>'
         +'<div class="setup-grid swatches">'
@@ -16099,6 +16201,7 @@ function setupDraw(){
         +'</div>'
         +'<div class="setup-summary">'
         +'<span>'+teamLogoSVG(NEW.logo,NEW.body,22)+setupEsc(NEW.team)+'</span>'
+        +'<span>'+setupEsc(NEW.name||'Driver')+'</span>'
         +'<span>'+setupEsc(e.name)+'</span>'
         +'<span>'+NEW.rounds+' rounds &middot; '+NEW.laps+' lap'+(NEW.laps>1?'s':'')+'</span>'
         +'</div>';
@@ -16123,6 +16226,11 @@ function setupDraw(){
   const back=el.querySelector('.sback');
   if(back) back.onclick=()=>{ NEW.step--; setupDraw(); };
   el.querySelector('.newgo').onclick=()=>{
+    if(step==='driver' && !(NEW.name||'').trim()){
+      const n=el.querySelector('#setup-name');
+      if(n){ n.classList.add('needed'); n.focus(); }
+      return;
+    }
     if(last) setupFinish();
     else { NEW.step++; setupDraw(); }
   };
@@ -16130,6 +16238,14 @@ function setupDraw(){
   const pick=(sel,field,cast)=>Array.prototype.forEach.call(el.querySelectorAll(sel),b=>{
     b.onclick=()=>{ NEW[field]=cast?cast(b.dataset[field]):b.dataset[field]; setupDraw(); };
   });
+  const nameEl=el.querySelector('#setup-name');
+  if(nameEl){
+    /* Held on NEW as it is typed, because every swatch click redraws the step
+       and an input that forgets what you wrote is worse than no input. */
+    nameEl.oninput=()=>{ NEW.name=nameEl.value; };
+    nameEl.onkeydown=e=>{ if(e.key==='Enter'){ NEW.name=nameEl.value; NEW.step++; setupDraw(); } };
+    if(!NEW._named){ NEW._named=true; setTimeout(()=>nameEl.focus(),60); }
+  }
   pick('[data-team]','team'); pick('[data-body]','body'); pick('[data-trim]','trim');
   pick('[data-eng]','engine'); pick('[data-logo]','logo');
   pick('[data-skin]','skin'); pick('[data-hair]','hair');
@@ -16194,7 +16310,11 @@ function setupFinish(){
   c.rounds=NEW.rounds; c.raceLaps=NEW.laps;
   c.engine=NEW.engine; c.engineTop=e.top; c.engineDev=e.dev;
   c.logo=NEW.logo; c.colour=NEW.body;
-  c.driver={ skin:NEW.skin, hair:NEW.hair };
+  /* The name is c.driver -- CareerSeason.migrate coerces that field with
+     String(), so putting the appearance there turned the driver on the grid
+     sheet and the badge into "[object Object]". The look lives beside it. */
+  c.driver=NEW.name || 'Driver';
+  c.look={ skin:NEW.skin, hair:NEW.hair };
   c.livery={ body:NEW.body, ring:NEW.trim, wing:NEW.trim, rims:'#b6babd' };
   CAREER_SLOTS[0]=c; CAREER_AT=0; careerSave();
   /* The car you drive is the car you just painted. */
