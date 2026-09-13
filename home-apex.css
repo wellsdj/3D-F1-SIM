@@ -1649,30 +1649,33 @@ body:not(.driving) #rain{display:none!important}
   .op-card,.op-badge{opacity:1}
 }
 
-/* ================================================ WHERE YOU FINISHED, AS A SCENE
-   Sits behind the position card during the slowing-down lap. Drawn, not
-   filmed -- the seam for real models is resultScene's innerHTML. */
-#resultscene{
-  position:fixed;left:0;right:0;bottom:0;top:auto;z-index:33;
-  display:flex;align-items:flex-end;justify-content:center;gap:clamp(20px,4vw,64px);
-  padding:0 clamp(20px,4vw,64px) 30vh;
-  pointer-events:none;opacity:0;transform:translateY(26px);
-  transition:opacity .7s ease,transform .8s cubic-bezier(.16,1,.3,1);
-  font-family:var(--apex-mono);
+
+/* ============================================================ CELEBRATIONS
+   Black, a line of text, ten seconds. Placeholder for the real scene -- when
+   that lands it replaces what is inside .cb-in and nothing else moves. */
+#celebrate{
+  position:fixed;inset:0;z-index:70;display:none;place-items:center;
+  background:#000;font-family:var(--apex-mono);
 }
-#resultscene.on{opacity:1;transform:none}
-.rs-art{width:min(300px,34vw);filter:drop-shadow(0 22px 50px rgba(0,0,0,.85))}
-.rs-art svg{width:100%;height:auto}
-.rs-copy{display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:6px}
-.rs-kick{font-size:9px;letter-spacing:.34em;text-transform:uppercase;color:var(--apex-red)}
-.rs-pos{
-  font-family:var(--apex-display);font-style:italic;font-size:clamp(38px,5vw,74px);
-  line-height:.9;color:#fff;text-shadow:0 12px 50px rgba(0,0,0,.85);
+#celebrate.on{display:grid;animation:cbIn .6s ease both}
+@keyframes cbIn{from{opacity:0}to{opacity:1}}
+.cb-in{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.cb-kick{font-size:10px;letter-spacing:.38em;text-transform:uppercase;color:var(--apex-red)}
+.cb-pos{
+  font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(56px,9vw,132px);line-height:.9;color:#fff;
 }
-.rs-line{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--apex-dim);margin-top:4px}
-@media (max-width:760px){
-  #resultscene{flex-direction:column;align-items:center;padding-bottom:34vh}
-  .rs-art{width:60vw}
+.cb-line{
+  font-family:var(--apex-display);font-style:italic;
+  font-size:clamp(18px,2.2vw,34px);text-transform:uppercase;color:var(--apex-red);
+  letter-spacing:.02em;
 }
-/* The position card sits above the scene, not on top of it. */
-#cooldown{z-index:34}
+.cb-note{margin-top:10px;font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--apex-faint)}
+.cb-skip{
+  margin-top:26px;border:0;cursor:pointer;padding:12px 26px;color:var(--apex-dim);
+  background:rgba(255,255,255,.05);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2);
+  font-family:var(--apex-mono);font-size:10px;letter-spacing:.24em;text-transform:uppercase;
+  clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);
+}
+.cb-skip:hover{color:#fff;box-shadow:inset 0 0 0 1px var(--apex-red)}
+@media (prefers-reduced-motion:reduce){#celebrate.on{animation:none}}

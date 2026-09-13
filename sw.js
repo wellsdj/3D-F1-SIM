@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='slipstream-spa-v27';
+const CACHE='slipstream-v28';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/home/helmet-red.webp',

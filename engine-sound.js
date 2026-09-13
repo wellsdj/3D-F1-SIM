@@ -19,7 +19,7 @@
  }
  class Model{
   constructor(){this.reset();}
-  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;}
+  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;}
   update(input,dt){
    dt=clamp(Number.isFinite(dt)?dt:0,0,.1);this.time+=dt;
    const speed=Math.abs(Number(input.speed)||0)*3.6,thr=clamp(Number(input.throttle)||0,0,1),brake=clamp(Number(input.brake)||0,0,1);
@@ -38,11 +38,34 @@
      this.cursor=resume?this.saved.cursor:accelerationOffset(speed);
     }else if(next==='brake')this.cursor=clamp((1-speed/340)*3.8,0,3.8);
     else{this.cursor=0;this.saved=null;}
-    this.mode=next;this.key++;this.pending='';this.pendingTime=0;
+    this.mode=next;this.key++;this.pending='';this.pendingTime=0;this.coast=0;
    }
-   // Keep recorded shifts intact. Only a small playback-speed correction is
-   // allowed; no per-frame seeking or artificial pitch dips.
-   this.rate=this.mode==='accel'?clamp(1+(accelerationOffset(speed)-this.cursor)*.025,.9,1.1):this.mode==='brake'?(brake>.04?1:.85):1;
+   /* WHERE THE PITCH IS ALLOWED TO MOVE.
+
+      Under power: nowhere. The acceleration recording already has the engine
+      rising through it, so bending the playback rate on top of that was two
+      pitch changes fighting, which is the wobble you could hear. It plays at
+      the rate it was recorded at.
+
+      On the brakes: nowhere either. It is a steady note being braked into.
+
+      Coasting -- rolling, off the throttle and off the brakes -- is the only
+      place it moves, and it moves one way: down. The note sags the way an
+      engine does when nothing is driving it, and it sags faster when there is
+      less speed holding it up, so a coast from 300 falls slowly and a coast
+      from 60 drops away. Which note is sagging is already right: entry into
+      this clip is mapped from speed, so high speed starts near the top of the
+      recording and low speed starts further down it. */
+   if(this.mode==='accel'){ this.coast=0; this.rate=1; }
+   else if(this.mode==='brake'){
+    if(brake>.04){ this.coast=0; this.rate=1; }
+    else{
+     this.coast=(this.coast||0)+dt;
+     const fall=.055+.10*(1-clamp(speed/300,0,1));   // per second, faster when slow
+     this.rate=clamp(1-this.coast*fall,.70,1);
+    }
+   }
+   else{ this.coast=0; this.rate=1; }
    this.speed=speed;
    return {key:this.key,mode:this.mode,offset:this.cursor,rate:this.rate,volume:this.mode==='idle'?.6:this.mode==='brake'?.72:.85};
   }
