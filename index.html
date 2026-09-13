@@ -1090,7 +1090,7 @@ if('serviceWorker' in navigator){
 </div>
 
 <div id="gridcard">
-  <div class="head"><b>Starting grid</b><span>Ardennes &middot; 5 laps</span></div>
+  <div class="head"><b>Starting grid</b><span>Spa &middot; 5 laps</span></div>
   <div id="racegrid"></div>
   <div class="pace">
     <div class="paceline"><span>AI pace</span><b id="pacenum">2</b><em id="pacename">Quick</em></div>
@@ -1194,7 +1194,7 @@ if('serviceWorker' in navigator){
         </div>
         <div class="rcard" id="race-track">
           <div class="rshot"></div>
-          <div class="rname">Ardennes Circuit<span>Seven kilometres through the Ardennes</span></div>
+          <div class="rname">Spa-Francorchamps<span>Seven kilometres through the Ardennes</span></div>
         </div>
         <div class="rrow">
           <div class="rbox rstep" id="race-weather"></div>
@@ -1233,7 +1233,7 @@ if('serviceWorker' in navigator){
   </main>
 
   <footer class="apex-footer">
-    <p id="bootmsg">System ready // Ardennes</p>
+    <p id="bootmsg">System ready // Spa</p>
     <div id="bar"><i></i></div>
   </footer>
 
@@ -1255,7 +1255,7 @@ if('serviceWorker' in navigator){
   <video id="qualifying-load-video" muted loop playsinline preload="none" poster="home-hero.png" aria-hidden="true"></video>
   <div class="load-shade"></div>
   <div class="load-content">
-    <div class="load-kicker">Qualifying · Ardennes</div>
+    <div class="load-kicker">Qualifying · Spa</div>
     <div class="load-ring" aria-hidden="true"></div>
     <div class="load-word">Loading</div>
     <div class="load-status" id="qualifying-load-status">Preparing the circuit</div>
@@ -1265,7 +1265,7 @@ if('serviceWorker' in navigator){
 
 <section id="lapbook" aria-hidden="true">
   <button class="overlay-close" id="lapbook-close" aria-label="Close best laps">×</button>
-  <div class="overlay-kicker">Driver archive · Ardennes</div>
+  <div class="overlay-kicker">Driver archive · Spa</div>
   <h2>Best <em>laps.</em></h2>
   <p class="lap-intro">Your quickest qualifying runs live here. Select a record to watch it back from every camera.</p>
   <div id="lapbook-list"></div>
@@ -1733,7 +1733,7 @@ const TRACKS={
     barrierOut:2.6
   },
   spa22:{
-    id:'spa22', name:'Ardennes', sub:'Imported · free roam · full layout',
+    id:'spa22', name:'Spa', sub:'Imported · free roam · full layout',
     /* The same circuit, meshopt-compressed: 77 MB to 21 MB. Positions and texture
        coordinates are left as floats rather than quantised -- quantising them is
        no smaller here, because the compression is doing the work, and this model
@@ -12915,7 +12915,7 @@ function raceGridList(){
   raceEl('paceslider').style.display=CAREER.active?'none':'';
   card.querySelector('.scale').style.display=CAREER.active?'none':'';
   card.querySelector('.hint').textContent=CAREER.active?'Difficulty is fixed for this career. Start when you are ready.':'Set the pace, then start. Nothing happens until you do.';
-  const caption=raceEl('gridcard').querySelector('.head span');if(caption)caption.textContent='Ardennes · '+RACE_LAPS+' laps';
+  const caption=raceEl('gridcard').querySelector('.head span');if(caption)caption.textContent='Spa · '+RACE_LAPS+' laps';
   const row=(pos,name,sub,tag,you)=>
     '<div class="slot'+(you?' you':'')+'"><div class="pos">P'+pos+'</div>'+
     '<div class="who"><b>'+name+'</b><span>'+sub+'</span></div>'+
@@ -14593,7 +14593,7 @@ function qualifyingLoadCancel(){
   qualifyingWeatherReset();
   qualifyingLoadHide(true);
   goHome();
-  bootMsg.textContent='System ready // Ardennes';
+  bootMsg.textContent='System ready // Spa';
   document.getElementById('racepick').focus();
 }
 qualifyingCancelEl.onclick=qualifyingLoadCancel;
@@ -15653,10 +15653,10 @@ function careerPaintHub(){
   const labels={briefing:'Weekend briefing',practice:'Free practice',qualifying:'Qualifying',race:'Grand Prix',debrief:'Weekend debrief'};
   const stage=w.stage;
   const descriptions={briefing:'Meet your race engineer, review your objectives and prepare for the weekend.',practice:'Complete your first clean lap to earn 250 development credits and 50 upgrade points. Return to the hub after each valid lap.',qualifying:'Qualifying is simulated from your car performance and a fresh variation for each driver.',race:'Three laps. Ten cars. Your qualifying result sets the grid. Race results count toward the championship.',debrief:'Review the classification and rewards, develop your car, then move to the next weekend.'};
-  body=stats+'<div class="weekend-layout"><article class="weekend-feature"><span class="overlay-kicker">'+(complete?'The chequered flag':'Round '+c.round+' / Belgium')+'</span><h3>'+(complete?'Season '+c.season+' complete':ev.name)+'</h3><p>Ardennes Circuit · '+(complete?'Championship classification':ev.lighting+' · 3 lap race')+'</p><div class="weekend-steps">'+['briefing','practice','qualifying','race','debrief'].map((s,i)=>'<span class="'+(s===stage?'current':'')+'">0'+(i+1)+' '+s+'</span>').join('')+'</div><h4>'+(complete?'Your next season awaits':labels[stage])+'</h4><p>'+(complete?'Choose your next contract. Keep your upgrades, credits and career record as the championship begins again.':descriptions[stage])+'</p><div class="career-actions"><button id="career-primary">'+(complete?'Negotiate next season →':stage==='briefing'?'Begin weekend →':stage==='debrief'?'Continue season →':stage==='race'?'Go to race →':stage==='qualifying'?'Simulate qualifying →':'Drive '+stage+' →')+'</button>'+(!complete&&stage==='practice'?'<button class="ghost" id="career-advance">'+(stage==='practice'?'Finish practice':w.qualifying.length?'Confirm grid':'Start last without a time')+' →</button>':'')+'</div>'+(stage==='practice'?'<p class="session-best">'+w[stage].length+' valid laps · Best '+cFmt(Math.min(...w[stage]))+'</p>':'')+(stage==='race'?'<p class="session-best">Starting position P'+w.gridPosition+' · '+(w.qualifying.length?'Best lap '+cFmt(Math.min(...w.qualifying)):w.simulated?'Simulated qualifying':'No qualifying time')+'</p>':'')+'</article><aside class="engineer-card"><span class="overlay-kicker">Race engineer / Briefing</span><h3>Aim for the<br>top '+c.contract.target+'.</h3><p>'+esc(c.contract.name)+' contract</p><div class="engineer-line"><span>Race objective bonus</span><b>+'+c.contract.bonus+'</b></div><div class="engineer-line"><span>Clean practice lap</span><b>+250</b></div><div class="engineer-line"><span>Practice under 1:20 / 1:18 / 1:16 / 1:14</span><b>+60 &rarr; +220 UP</b></div><div class="engineer-line"><span>Beat your career best lap</span><b>+200 UP</b></div><p>Build confidence in practice. Your car development and qualifying form set the grid automatically.</p><small>All weekends use the existing Spa circuit. Rival qualifying times are simulated; race positions are earned on track.</small></aside></div>';
+  body=stats+'<div class="weekend-layout"><article class="weekend-feature"><span class="overlay-kicker">'+(complete?'The chequered flag':'Round '+c.round+' / Belgium')+'</span><h3>'+(complete?'Season '+c.season+' complete':ev.name)+'</h3><p>Spa-Francorchamps · '+(complete?'Championship classification':ev.lighting+' · 3 lap race')+'</p><div class="weekend-steps">'+['briefing','practice','qualifying','race','debrief'].map((s,i)=>'<span class="'+(s===stage?'current':'')+'">0'+(i+1)+' '+s+'</span>').join('')+'</div><h4>'+(complete?'Your next season awaits':labels[stage])+'</h4><p>'+(complete?'Choose your next contract. Keep your upgrades, credits and career record as the championship begins again.':descriptions[stage])+'</p><div class="career-actions"><button id="career-primary">'+(complete?'Negotiate next season →':stage==='briefing'?'Begin weekend →':stage==='debrief'?'Continue season →':stage==='race'?'Go to race →':stage==='qualifying'?'Simulate qualifying →':'Drive '+stage+' →')+'</button>'+(!complete&&stage==='practice'?'<button class="ghost" id="career-advance">'+(stage==='practice'?'Finish practice':w.qualifying.length?'Confirm grid':'Start last without a time')+' →</button>':'')+'</div>'+(stage==='practice'?'<p class="session-best">'+w[stage].length+' valid laps · Best '+cFmt(Math.min(...w[stage]))+'</p>':'')+(stage==='race'?'<p class="session-best">Starting position P'+w.gridPosition+' · '+(w.qualifying.length?'Best lap '+cFmt(Math.min(...w.qualifying)):w.simulated?'Simulated qualifying':'No qualifying time')+'</p>':'')+'</article><aside class="engineer-card"><span class="overlay-kicker">Race engineer / Briefing</span><h3>Aim for the<br>top '+c.contract.target+'.</h3><p>'+esc(c.contract.name)+' contract</p><div class="engineer-line"><span>Race objective bonus</span><b>+'+c.contract.bonus+'</b></div><div class="engineer-line"><span>Clean practice lap</span><b>+250</b></div><div class="engineer-line"><span>Practice under 1:20 / 1:18 / 1:16 / 1:14</span><b>+60 &rarr; +220 UP</b></div><div class="engineer-line"><span>Beat your career best lap</span><b>+200 UP</b></div><p>Build confidence in practice. Your car development and qualifying form set the grid automatically.</p><small>All weekends use the existing Spa circuit. Rival qualifying times are simulated; race positions are earned on track.</small></aside></div>';
   if(c.last)body+='<article class="debrief-card"><span class="overlay-kicker">Last result / Round '+c.last.round+'</span><h3>'+(c.last.dsq?'Disqualified':c.last.dnf?'Did not finish':'P'+c.last.pos)+' <small>'+c.last.points+' points · +'+(c.last.prize+(c.last.bonus||0)).toLocaleString()+' credits</small></h3><p>'+(c.last.simulatedFinish?'Disqualified. Remaining field finish simulated.':c.last.objective?'Contract objective achieved.':'Keep pushing toward your contract objective.')+'</p></article>';
  }else if(careerTab==='calendar'){
-  body='<h3 class="section-title">Your season at Spa</h3><p class="section-note">'+c.rounds+' weekends on the existing circuit, with different lighting across the season.</p><div class="calendar-grid">'+Array.from({length:c.rounds},(_,i)=>{const e=CareerSeason.event({...c,round:i+1}),h=c.history.find(r=>r.season===c.season&&r.round===i+1);return '<article class="calendar-card '+(c.round===i+1?'current':'')+'"><span>ROUND '+String(i+1).padStart(2,'0')+'</span><h3>'+e.name+'</h3><p>Ardennes Circuit</p><small>'+e.lighting+' / '+(h?'P'+h.pos+' · '+h.points+' pts':i+1===c.round?'Current weekend':'Upcoming')+'</small></article>';}).join('')+'</div>';
+  body='<h3 class="section-title">Your season at Spa</h3><p class="section-note">'+c.rounds+' weekends on the existing circuit, with different lighting across the season.</p><div class="calendar-grid">'+Array.from({length:c.rounds},(_,i)=>{const e=CareerSeason.event({...c,round:i+1}),h=c.history.find(r=>r.season===c.season&&r.round===i+1);return '<article class="calendar-card '+(c.round===i+1?'current':'')+'"><span>ROUND '+String(i+1).padStart(2,'0')+'</span><h3>'+e.name+'</h3><p>Spa-Francorchamps</p><small>'+e.lighting+' / '+(h?'P'+h.pos+' · '+h.points+' pts':i+1===c.round?'Current weekend':'Upcoming')+'</small></article>';}).join('')+'</div>';
  }else if(careerTab==='standings'){
   body=stats+'<h3 class="section-title">Championship standings</h3><p class="section-note">One entry per team · ties use race finishing positions.</p><div class="champ-table">'+careerRows(c).map((r,i)=>'<div class="champ-row '+(r.you?'you':'')+'"><b>'+String(i+1).padStart(2,'0')+'</b><span>'+esc(r.name)+(r.you?' <small>YOU</small>':'')+'</span><strong>'+r.points+' <small>PTS</small></strong></div>').join('')+'</div>';
  }else if(careerTab==='development'){
@@ -16070,7 +16070,7 @@ function seasonOpening(c){
     ['Season '+(c.season||1), 'A new season starts'],
     [setupEsc(c.team), (c.rounds||8)+' rounds &middot; '+(c.raceLaps||3)+' lap'+((c.raceLaps||3)>1?'s':'')+' a race'],
     [setupEsc(e.name), 'Engine supplier'],
-    ['Ardennes', 'Round one']
+    ['Spa', 'Round one']
   ];
   el.innerHTML='<div class="op-shot"></div><div class="op-scrim"></div>'
     +'<div class="op-badge">'+teamLogoSVG(c.logo,c.colour,64)+'</div>'
@@ -16454,7 +16454,7 @@ function apexQuickCard(){
   return '<button type="button" class="hcard hquick">'
     +'<span class="qshot" aria-hidden="true"></span>'
     +'<div class="hlabel">Quick race</div>'
-    +'<div class="hbigword">Ardennes<em>Circuit</em></div>'
+    +'<div class="hbigword">Spa<em>Francorchamps</em></div>'
     +'<div class="hfoot">Ten cars<em>Straight onto the circuit &rarr;</em></div>'
     +'</button>';
 }

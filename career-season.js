@@ -20,7 +20,7 @@ function migrate(c){
  c.weekend.practice=Array.isArray(c.weekend.practice)?c.weekend.practice:[];c.weekend.qualifying=Array.isArray(c.weekend.qualifying)?c.weekend.qualifying:[];
  return c;
 }
-function event(c){const i=c.rounds===4?(c.round-1)*2:c.round-1;return {name:EVENTS[i]||'Season complete',lighting:CONDITIONS[i]||'midday',track:'Ardennes Circuit',round:c.round};}
+function event(c){const i=c.rounds===4?(c.round-1)*2:c.round-1;return {name:EVENTS[i]||'Season complete',lighting:CONDITIONS[i]||'midday',track:'Spa-Francorchamps',round:c.round};}
 function begin(c){migrate(c);if(c.round>c.rounds)return false;if(c.weekend.stage==='briefing')c.weekend.stage='practice';return true;}
 /* WHAT A PRACTICE LAP IS WORTH.
    Turning up paid 250 credits and 50 UP for the first lap and nothing after
