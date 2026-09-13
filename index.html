@@ -12277,69 +12277,80 @@ function raceClock(dt){
    Progress is laps done plus how far round this one, so it is one number per
    car and sorting it is the classification. Yours is measured the same way off
    the same stations, so there is no argument about whose metre is whose. */
-/* ONE YARDSTICK FOR EVERYBODY.
+/* ==========================================================================
+   WHO IS WHERE: COUNT THE GATES THEY HAVE BEEN THROUGH
 
-   This used to measure you as a fraction of the track-limit stations scaled by
-   the centreline length, and every rival as its index along the racing line
-   times the racing-line spacing. Those are two different lengths -- the line
-   the AI drives is not the centreline -- so the two numbers were never on the
-   same scale, and the gap between them was a standing bias of tens of metres.
-   Close together that is the difference between P4 and P5, which is why the
-   position was sometimes simply wrong.
+   The old version added a lap number to a fraction of a lap and sorted on the
+   result. Two numbers from two different places, and every way of getting the
+   fraction slightly wrong -- a station search latching onto the wrong side of
+   the circuit, a lap counter ticking a metre before or after the fraction
+   wrapped -- came out as somebody in the wrong position. P9 and P10 swapped is
+   a tenth of a lap of error in a number that has to be exact at the line.
 
-   Everyone is now placed by the same function against the same stations, so a
-   metre is a metre whoever covered it. Fraction of a lap rather than a
-   distance, because that is what the stations give without having to know how
-   long anybody's line is. */
-function raceFrac(idx){ const n=tlSt.length; return n ? Math.max(0,Math.min(1,idx/n)) : 0; }
+   So: gates. The circuit is already surveyed into stations about four metres
+   apart, which is the row of markers this needs and costs nothing because the
+   data is already there -- nothing is drawn, nothing is added to the scene,
+   and there is no per-frame geometry. Each car keeps one integer: how many
+   gates it has driven through since the race started. Whoever has been through
+   more is ahead. Level on gates, whoever got there first is ahead. A car a lap
+   down has been through a lap's worth fewer gates, so it sorts behind without
+   lap numbers being mentioned anywhere.
+
+   Only small forward steps are believed. A car cannot cross forty gates in one
+   frame and cannot un-drive the ones behind it, so a jump is the station
+   search, not the car, and it is ignored -- which is the bug that used to leak
+   straight into the standings.
+   ========================================================================== */
+const GATE_MAX_STEP=40;              // ~160 m; more than that in one frame is a glitch
+function gateStep(rec, idx, t){
+  const N=tlSt.length;
+  if(!N || idx==null) return;
+  if(rec.i===undefined){ rec.i=idx; rec.n=0; rec.t=t; return; }
+  let d=idx-rec.i;
+  if(d >  N/2) d-=N;                 // wrapped back over the line
+  if(d < -N/2) d+=N;                 // wrapped forward over the line
+  if(d>0 && d<=GATE_MAX_STEP){ rec.n+=d; rec.i=idx; rec.t=t; }
+}
 let tvCarHint=0;
-function tvCarFrac(){
-  if(!tlSt.length) return 0;
+function tvCarStation(){
+  if(!tlSt.length) return null;
   /* Its own cursor. tlStation walks from a hint, and sharing one between
      callers is what once froze a car on P6 for a whole race. */
   const st=tlStation(carState.wx, carState.wz, tvCarHint);
-  if(!st) return 0;
+  if(!st) return null;
   tvCarHint=tlLastIdx;
-  return raceFrac(tlLastIdx);
-}
-/* Stations are found by walking from where the car was last seen, and at Spa
-   the circuit runs close to itself in two places -- so a car that goes off, or
-   spins, can have the walk latch onto the wrong one and report itself a
-   kilometre back up the road. A car cannot un-drive a lap: a jump backwards
-   bigger than three per cent of one is not a car, it is the search. Hold the
-   last good figure, and only believe the new one if it is still saying the
-   same thing a second later. */
-function progHold(rec, now){
-  if(rec.p===undefined){ rec.p=now; rec.bad=0; return now; }
-  if(now < rec.p-0.03){
-    if(++rec.bad < 60) return rec.p;
-    rec.p=now; rec.bad=0; return now;     // it has stuck: it was real after all
-  }
-  rec.bad=0; rec.p=now; return now;
+  return tlLastIdx;
 }
 function raceProgress(){
-  const you=RACE._prog||(RACE._prog={});
+  const t=(RACE.raceT||0);
+  const you=RACE._gate||(RACE._gate={});
+  gateStep(you, tvCarStation(), t);
   const rows=[{you:true, name:'You', dsq:false, out:false,
-               prog:progHold(you,(RACE.lapN||0) + tvCarFrac()), fin:RESULT.you||0}];
+               n:you.n||0, at:you.t||0, fin:RESULT.you||0}];
   for(const d of AIS){
     if(!d.car) continue;
-    /* d._tlHint is this car's own station index, already maintained every frame
-       for the track-limit room check -- the same index tvCarFrac reads. */
-    const rec=d._progRec||(d._progRec={});
+    /* d._tlHint is this car's own station index, already maintained every
+       frame for the track-limit room check -- the same gates you go through. */
+    /* Own property, not an inherited one. Every driver is Object.create(AI)
+       and AIS[0] IS AI, so `d._gate || (d._gate={})` reads straight through
+       the prototype to the leader's counter and the whole field shares one --
+       which is how nine cars came to be on exactly the same gate. */
+    if(!Object.prototype.hasOwnProperty.call(d,'_gate') || !d._gate) d._gate={};
+    const rec=d._gate;
+    gateStep(rec, d._tlHint, t);
     rows.push({you:false, name:d.name||'AI', dsq:!!d.dsq, out:!d.on&&!d.finish,
-               prog:progHold(rec,(d.lapN||0) + raceFrac(d._tlHint||0)),
-               fin:d.finish||0});
+               n:rec.n||0, at:rec.t||0, fin:d.finish||0});
   }
   rows.sort((a,b)=>{
-    /* Out of the race is behind everyone who is still in it, however far round
-       they got -- and they stay on the sheet, so the field size is the field
-       that started rather than whoever happens to be running. */
+    /* Out of the race is behind everyone still in it, however far they got --
+       and they stay on the sheet, so the field size is the field that started. */
     if(a.dsq!==b.dsq) return a.dsq?1:-1;
     if(a.out!==b.out) return a.out?1:-1;
     if(a.fin&&b.fin)  return a.fin-b.fin;      // both home: by the clock
     if(a.fin) return -1;
     if(b.fin) return 1;
-    return b.prog-a.prog;                      // otherwise furthest round leads
+    if(b.n!==a.n) return b.n-a.n;              // more gates is ahead
+    return a.at-b.at;                          // level: first there is ahead
   });
   return rows;
 }
@@ -12474,19 +12485,161 @@ function coolEnd(){
    celebration is a scene with the driver in it, and when that arrives it
    replaces what is inside #celebrate and nothing around it changes. */
 const CELEBRATE_MS=10000;
+/* THE DRIVER ON THE CELEBRATION SCREEN.
+
+   The model is static -- no skeleton, no skin weights, twenty-one rigid
+   meshes -- so the Victory clip that came with it cannot drive it: a Mixamo
+   clip moves a mixamorig skeleton and there is nothing here for it to move.
+   The motion below is applied to the whole model instead: it rises into frame,
+   turns, and rocks the way somebody does when they are celebrating and
+   standing still. See assets/driver/README.md for what turns this into the
+   real clip.
+
+   Its own renderer, like the garage view, so nothing about the race loop has
+   to know it exists. Loaded once and kept. */
+let celRend=null, celScene=null, celCam=null, celModel=null, celReq=0, celT=0, celLoad=null;
+/* He stands right of centre so the copy gets its own half of the frame rather
+   than being laid across his chest. */
+const CEL_OFFSET_X=0.62;
+let celMode='podium';
+/* ON THE BOX. Up into frame, then a slow turn and a rock. */
+function celPodium(t){
+  const rise=Math.min(1,t/1.1), e=1-Math.pow(1-rise,3);
+  celModel.position.y = -0.55*(1-e);
+  celModel.rotation.y = 0.55 + Math.sin(t*0.55)*0.42;
+  celModel.rotation.z = Math.sin(t*2.3)*0.035;
+  celModel.position.x = CEL_OFFSET_X + Math.sin(t*1.15)*0.045;
+}
+/* THE WALK BACK.
+
+   Across the frame at a walking pace, with the body rising and falling twice
+   a stride and rolling a little onto each foot -- which is what the cadence
+   below is: CEL_STEP_HZ is steps a second, so the bob runs at that and the
+   roll at half it, one cycle per stride.
+
+   The legs do not move, because this model has none that can: it is twenty-one
+   rigid meshes with no skeleton, so there is nothing to bend. The travel speed
+   is tied to the same cadence so the bob at least lands where a footfall
+   would, rather than the figure sliding at a speed unrelated to its bounce.
+   Rigging the driver is what makes this a real walk -- see
+   assets/driver/README.md. */
+const CEL_STEP_HZ=1.85, CEL_STRIDE=0.82;    // steps a second, metres per step
+function celWalk(t){
+  const speed=CEL_STEP_HZ*CEL_STRIDE;        // ~1.5 m/s, an unhurried walk
+  /* He crosses the right-hand half of the frame, which keeps him in shot and
+     off the board -- walking the full width put him through the position and
+     then out of the picture entirely. */
+  const from=1.0, span=2.5;
+  const x=from + ((t*speed) % span);
+  celModel.position.x = x;
+  celModel.position.y = Math.abs(Math.sin(Math.PI*CEL_STEP_HZ*t))*0.045 - 0.02;
+  celModel.rotation.y = Math.PI*0.5 + Math.sin(t*0.4)*0.06;   // side on, facing the way he walks
+  celModel.rotation.z = Math.sin(Math.PI*CEL_STEP_HZ*t)*0.028;
+  celModel.rotation.x = 0.035;                                 // a touch of forward lean
+}
+function celebrateScene(host, colour, mode){
+  if(!host || typeof THREE==='undefined') return;
+  celMode=mode||'podium';
+  const W=host.clientWidth||880, H=host.clientHeight||460;
+  if(!celRend){
+    const cv=document.createElement('canvas');
+    celRend=new THREE.WebGLRenderer({canvas:cv, antialias:true, alpha:true});
+    celRend.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+    celScene=new THREE.Scene();
+    celCam=new THREE.PerspectiveCamera(34, W/H, 0.1, 100);
+    /* A key from the front, a hard rim in the team colour from behind, and a
+       cold fill so the shadow side is not black. */
+    celScene.add(new THREE.HemisphereLight(0x8fa6c8, 0x0a0c10, 0.85));
+    const key=new THREE.DirectionalLight(0xfff4ec, 2.6); key.position.set(2.2,3.4,3.2);
+    celScene.add(key);
+    /* position is read-only on Object3D -- it has to be set, not assigned. */
+    const fill=new THREE.DirectionalLight(0xffffff,0.5);
+    fill.position.set(-3,1.6,2);
+    celScene.add(fill);
+    celRend.domElement.className='cb-canvas';
+  }
+  celRend.setSize(W,H,false);
+  celCam.aspect=W/H; celCam.updateProjectionMatrix();
+  /* The rim light takes the team colour, so the shot belongs to your team. */
+  if(!celScene.userData.rim){
+    const rim=new THREE.DirectionalLight(0xff2230, 3.4);
+    rim.position.set(-2.6,1.8,-3.2); celScene.add(rim); celScene.userData.rim=rim;
+  }
+  try{ celScene.userData.rim.color.set(colour||'#ff2230'); }catch(e){}
+  host.appendChild(celRend.domElement);
+
+  const start=()=>{
+    celT=0;
+    cancelAnimationFrame(celReq);
+    const tick=()=>{
+      celReq=requestAnimationFrame(tick);
+      celT+=1/60;
+      if(celModel){
+        if(celMode==='walk') celWalk(celT);
+        else                 celPodium(celT);
+      }
+      celRend.render(celScene, celCam);
+    };
+    tick();
+  };
+
+  celFrame();
+  if(celModel){ start(); return; }
+  if(celLoad){ celLoad.then(start); return; }
+  celLoad=new Promise(res=>{
+    new THREE.GLTFLoader().load('assets/driver/driver.glb', g=>{
+      const m=g.scene;
+      /* Frame it by what it measures rather than a guessed scale. */
+      const box=new THREE.Box3().setFromObject(m);
+      const size=box.getSize(new THREE.Vector3()), mid=box.getCenter(new THREE.Vector3());
+      const k=1.7/Math.max(0.001,size.y);
+      m.scale.setScalar(k);
+      m.position.set(-mid.x*k, -box.min.y*k, -mid.z*k);
+      const wrap=new THREE.Group(); wrap.add(m);
+      wrap.userData.baseY=0; wrap.userData.baseRot=0;
+      wrap.position.y=0;
+      celScene.add(wrap); celModel=wrap;
+      celFrame();
+      res();
+    }, undefined, ()=>res());
+  });
+  celLoad.then(start);
+}
+function celFrame(){
+  if(!celCam) return;
+  if(celMode==='walk'){ celCam.position.set(1.25, 1.5, 4.2); celCam.lookAt(1.25, 0.95, 0); }
+  else                { celCam.position.set(0.9, 1.42, 3.05); celCam.lookAt(CEL_OFFSET_X*0.55, 1.0, 0); }
+}
+function celebrateSceneStop(){
+  cancelAnimationFrame(celReq); celReq=0;
+  if(celRend && celRend.domElement && celRend.domElement.parentNode)
+    celRend.domElement.parentNode.removeChild(celRend.domElement);
+}
 function celebrate(pos){
   let el=document.getElementById('celebrate');
   if(!el){ el=document.createElement('div'); el.id='celebrate'; document.body.appendChild(el); }
-  el.innerHTML='<div class="cb-in">'
-    +'<span class="cb-kick">'+(pos<=3?'On the podium':'Chequered flag')+'</span>'
-    +'<b class="cb-pos">P'+pos+'</b>'
-    +'<span class="cb-line">Celebrations</span>'
-    +'<span class="cb-note">[ placeholder &mdash; the scene goes here ]</span>'
-    +'<button type="button" class="cb-skip">Skip &rsaquo;</button></div>';
+  const c=(typeof CAREER!=='undefined'&&CAREER.active&&typeof careerSlot==='function')?careerSlot():null;
+  const colour=(c&&c.colour)||(typeof carStyle!=='undefined'&&carStyle.body)||'#ff2230';
+  const ord=(typeof APEX_ORD==='function')?APEX_ORD(pos):'';
+  const line=pos===1?'Race winner':pos===2?'Second place':pos===3?'Third place'
+            :pos<=6?'In the points':'Chequered flag';
+  el.innerHTML='<div class="cb-stage" id="cb-stage"></div>'
+    +'<div class="cb-glow" style="--tc:'+colour+'"></div>'
+    /* The position on a board, in the same glitched face the front end uses:
+       two offset copies clipped to bands, jumping on a stepped timeline. */
+    +'<div class="cb-board'+(pos<=3?' box':'')+'">'
+    +'<span class="cb-kick">'+(pos<=3?'On the podium':'Race finished')+'</span>'
+    +'<b class="cb-pos" data-glitch="P'+pos+'">P'+pos+'</b>'
+    +'<span class="cb-ord">'+pos+ord+'</span>'
+    +'<span class="cb-line">'+line+'</span>'
+    +'</div>'
+    +'<div class="cb-in"><button type="button" class="cb-skip">Skip &rsaquo;</button></div>';
   el.classList.add('on');
+  celebrateScene(el.querySelector('#cb-stage'), colour, pos<=3?'podium':'walk');
   const out=()=>{
     clearTimeout(el._t);
     el.classList.remove('on');
+    celebrateSceneStop();
     setTimeout(()=>{ if(el) el.innerHTML=''; },600);
     raceEnd(); RESULT.on=false;
     goHome();
@@ -12700,9 +12853,9 @@ function raceStart(opts){
   RETIRE.on=false;RETIRE.parked=false;decisionClose();sessionLapInvalid=false;
   /* A new race starts from nothing: held progress from the last one would
      classify everybody behind where they have not been yet. */
-  RACE._prog=null; tvCarHint=0;
+  RACE._gate=null; tvCarHint=0;
   rollWeather();                      // three races in ten are wet
-  for(const d of AIS) d._progRec=null;
+  for(const d of AIS) d._gate=null;
   if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
   if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
@@ -13676,8 +13829,10 @@ window.SIM={
                startPhase='go'; return n; },
   /* The live classification, exactly as the HUD reads it. */
   grid(){ return raceProgress().map((r,i)=>({p:i+1, who:r.name, you:!!r.you,
-            prog:+r.prog.toFixed(4), fin:+(r.fin||0).toFixed(2),
+            gates:r.n, at:+(r.at||0).toFixed(2), fin:+(r.fin||0).toFixed(2),
             dsq:!!r.dsq, out:!!r.out})); },
+  /* Show a finish for a given position, to look at it. */
+  celebrateAt(p){ celebrate(p||1); return true; },
   coolState(){ return {on:COOL.on, t:+COOL.t.toFixed(1), card:!!COOL.card, done:COOL.done,
                        kph:+(Math.abs(carState.speed)*3.6).toFixed(0),
                        thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2)}; },
