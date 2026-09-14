@@ -4689,8 +4689,10 @@ function spawnDust(speed, from, grass, wet){
   const i=dustHead; dustHead=(dustHead+1)%DUST_N;
   const g=from||carGroup;
   const h=g.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
-  // Wet spray has exactly two sources: the contact patches of the rear tyres.
-  const side=wet ? (Math.random()<0.5?-1:1)*(0.91+(Math.random()-0.5)*0.12)
+  // Wet spray is a thin mist across the full rear, with a little wheel bias.
+  const side=wet ? (Math.random()<0.55
+                    ? (Math.random()<0.5?-1:1)*(0.78+Math.random()*0.28)
+                    : (Math.random()-0.5)*3.25)
                  : (Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7);
   const rear=wet?1.43:1.8;
   dustPos[i*3]  =g.position.x - fx*rear - fz*side;
@@ -4699,7 +4701,7 @@ function spawnDust(speed, from, grass, wet){
   /* Thrown backwards relative to the car and given a lot of sideways spread,
      so the plume drifts outward and hangs rather than trailing in a line. */
   const back=speed*(wet?(0.32+Math.random()*0.12):(0.18+Math.random()*0.30));
-  const spread=wet?(0.30+Math.random()*0.45):(1.4+Math.random()*2.2);
+  const spread=wet?(0.45+Math.random()*1.35):(1.4+Math.random()*2.2);
   dustVel[i*3]  =-fx*back - fz*Math.sign(side)*spread + (Math.random()-0.5)*(wet?0.35:1.2);
   dustVel[i*3+1]= wet   ? 3.3+Math.random()*1.7 + speed*0.035
                 : grass ? 0.5+Math.random()*1.0 + speed*0.012
@@ -4712,7 +4714,7 @@ function spawnDust(speed, from, grass, wet){
   if(wet)
     /* Water off a wet circuit: white, barely any colour in it, and bright
        enough to read against the dark tarmac a wet track turns into. */
-    _dustC.setHSL(0.58, 0.02+Math.random()*0.03, 0.88+Math.random()*0.12);
+    _dustC.setHSL(0.58, 0.015+Math.random()*0.025, 0.69+Math.random()*0.17);
   else if(grass)
     /* Torn grass and damp earth: green, dark, and much less saturated than
        sand, so a car on the verge does not look like it is in a gravel trap. */
@@ -10153,10 +10155,8 @@ function resetToTrack(){
    separate gear to select, because there is no gearbox in this model and a
    key you have to find is a worse answer than the one you are already
    holding. Capped well below walking-out-of-trouble speed. */
-/* Reverse tops out here. It was 8.5 kph -- enough to nudge off a barrier and
-   not enough to get out of a gravel trap and back to the circuit before the
-   race had gone. */
-const REV_MAX=100/3.6;                 // 100 kph
+/* Deliberately extreme recovery reverse: ten times the previous ceiling. */
+const REV_MAX=1000/3.6;                // 10x the previous 100 kph reverse ceiling
 function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
   tow=clamp(tow||0,0,1);
   if(thr>0){
@@ -10179,14 +10179,10 @@ function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
     st.speed += 26.0*(1.0 - v*v*(1-0.10*tow))*bog*dt*thr;
   }
   else if(brk>0){
-    /* The brake is the brake down to a standstill and the reverse pedal below
-       it, at a fraction of the authority -- 46 m/s/s backwards out of a gravel
-       trap would be a launch, not a recovery. */
-    /* 7.5 barely cleared gravel's own drag -- about 6 m/s/s at walking pace --
-       so reversing out of a trap crawled. Enough authority to actually pull
-       the car out, still a fraction of the 46 the brake has going forwards. */
+    /* The brake becomes the reverse pedal after the car stops. Reverse uses
+       ten times its previous acceleration so it reaches the new range. */
     const wetB=(typeof WEATHER!=='undefined')?WEATHER.grip:1;
-    st.speed -= (st.speed>0 ? 46*wetB : 13)*dt*brk;
+    st.speed -= (st.speed>0 ? 46*wetB : 130)*dt*brk;
   }
   /* Coasting decays toward zero from either side. Subtracting unconditionally
      was right while speed could not go below zero and would have quietly
@@ -10280,6 +10276,8 @@ function surfaceDrag(st, surf, dt){
    number so it does not want any of that, but every limit that belongs to the
    car -- lock, rack speed, grip -- applies to it identically. */
 function steerRack(C, want, kph, dt, aids){
+  /* Reverse uses the same speed-sensitive rack as forward motion. */
+  kph=Math.abs(kph);
   /* Two stages of easing on the input: it ramps toward the stick, then the
      wheel angle chases it.
 
@@ -10564,7 +10562,7 @@ function placeCar(C, dt, t){
   if((_loose||_wet) && C.st.speed>2 && C.group!==carGroup){
     const frac=_loose ? (C.surf.loose?(C.surf.looseFrac||1):(C.surf.grassFrac||1)*0.55)
                       : 0.55+0.45*WEATHER.level;
-    C._spray=(C._spray||0) + (_wet?52+C.st.speed*5.0:18+C.st.speed*2.0)*frac*dt;
+    C._spray=(C._spray||0) + (_wet?24+C.st.speed*2.15:18+C.st.speed*2.0)*frac*dt;
     let guard=0;
     while(C._spray>=1 && guard++<12){
       C._spray-=1; spawnDust(C.st.speed, C.group, _loose?!C.surf.loose:false, _wet);
@@ -14530,7 +14528,7 @@ function frame(now){
      it, so the plume is continuous at any frame rate and cannot burst. */
   const _pWet=(typeof WEATHER!=='undefined')&&WEATHER.wet&&!onLoose;
   if((onLoose||_pWet) && carState.speed>(onLoose?0.8:2)){
-    const rate = _pWet ? 70 + carState.speed*7.0 : 30 + carState.speed*3.4;
+    const rate = _pWet ? 30 + carState.speed*2.8 : 30 + carState.speed*3.4;
     looseSpray += rate*(onLoose?looseFrac:(0.55+0.45*WEATHER.level))*dt;
     let guard=0;
     while(looseSpray>=1 && guard++<16){
