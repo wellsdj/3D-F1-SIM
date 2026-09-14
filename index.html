@@ -4619,10 +4619,12 @@ const _dustC=new THREE.Color();
    a bad idea: you cannot wipe it, so it sits in front of everything you are
    trying to look at for the whole race.
    ========================================================================== */
-/* The box is pushed forward along the way the camera is looking, so you are
-   always driving into rain rather than trailing it. At 300 kph you cover the
-   old box in half a second, which is why it felt like the rain never caught up. */
-const RAIN_N=900, RAIN_BOX=46, RAIN_TOP=26, RAIN_AHEAD=16;
+/* A broad storm volume follows the camera. It is biased forward so the car
+   keeps driving into rain, but it also reaches sixty metres behind the camera:
+   a rear-facing TV shot or a look back now sees the same weather instead of
+   the sharp back edge of a small shower. The larger pool preserves visible
+   density across that volume without creating one object per drop. */
+const RAIN_N=4200, RAIN_BOX=150, RAIN_TOP=34, RAIN_AHEAD=15;
 let rainGeo=null, rainSeg=null, rainPos=null, rainVel=null, rainLen=null;
 function rainInit(){
   if(rainSeg) return;
@@ -4630,10 +4632,10 @@ function rainInit(){
   rainVel=new Float32Array(RAIN_N);
   rainLen=new Float32Array(RAIN_N);
   for(let i=0;i<RAIN_N;i++){
-    rainVel[i]=16+Math.random()*16;              // metres a second
+    rainVel[i]=19+Math.random()*15;              // metres a second
     /* Short. Long streaks read as scratches on the lens rather than water in
        the air -- these are closer to dashes. */
-    rainLen[i]=0.22+Math.random()*0.5;
+    rainLen[i]=0.16+Math.random()*0.34;
   }
   rainGeo=new THREE.BufferGeometry();
   rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos,3));
