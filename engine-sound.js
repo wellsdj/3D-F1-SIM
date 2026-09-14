@@ -9,8 +9,10 @@
     moment you lift, not continuously, or it would swap notes mid-coast.
     Both loop whole: they are a sustained note, so there is no run-in to skip. */
  const CLIPS={accel:{end:23.4,loop:16.2},brake:{end:5.15,loop:2.8},idle:{end:4.7,loop:.2},
-              coastLow:{end:3.55,loop:0},coastHigh:{end:4.02,loop:0}};
+              coastLow:{end:3.55,loop:.35},coastHigh:{end:4.02,loop:.4}};
  const COAST_HIGH_KPH=250;
+ /* Under this, braking sounds like coasting rather than like stopping. */
+ const COAST_BRAKE_KPH=60;
  // Approximate road-speed positions within the actual acceleration recording.
  // Used on entry/re-entry, not to force repeated cuts while the pedal is held.
  /* Roughly 1.5 g of deceleration, smoothed. Coasting drag is about 11 kph/s at
@@ -69,8 +71,14 @@
    let coastClip=this.coastClip||'coastLow';
    if(rolling && !this.mode.startsWith('coast'))
      coastClip=this.coastClip=(speed>=COAST_HIGH_KPH?'coastHigh':'coastLow');
-   let next=input.gridded||speed<1.5?'idle':(brake>.04||dragged)?'brake'
-           :rolling?coastClip
+   /* Braking down to a stop is the same note as rolling to one -- an engine
+      idling down, not a car being hauled up from 300. Below this the brake
+      recording is the wrong sound, so the coast carries it the rest of the way. */
+   const crawling=brake>.04 && speed<COAST_BRAKE_KPH && !dragged;
+   if(crawling && !this.mode.startsWith('coast'))
+     coastClip=this.coastClip='coastLow';
+   let next=input.gridded||speed<1.5?'idle':(brake>.04&&!crawling||dragged)?'brake'
+           :(rolling||crawling)?coastClip
            :thr>(this.mode==='accel'?.03:.08)?'accel':'brake';
    // Ignore one-frame pedal chatter, but apply idle/grid lock immediately.
    if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'&&!(this.hit>0)){
@@ -110,8 +118,9 @@
        clip loops underneath so a long coast keeps sagging rather than running
        out of recording. */
     this.coast=(this.coast||0)+dt;
-    const fall=.055+.10*(1-clamp(speed/300,0,1));
-    this.rate=clamp(1-this.coast*fall,.70,1);
+    /* Quicker off the top and further down than it was. */
+    const fall=.085+.15*(1-clamp(speed/300,0,1));
+    this.rate=clamp(1-this.coast*fall,.62,1);
    }
    else{ this.coast=0; this.rate=1; }
    this.speed=speed;
@@ -123,7 +132,16 @@
  // Alter only the final 60 ms of each recording to soften its long tail wrap.
  function prepare(ctx,buffer,clip){
   const end=Math.min(clip.end,buffer.duration),loop=Math.min(clip.loop,end-.1);
-  const n=Math.floor(end*buffer.sampleRate),fade=Math.min(Math.round(.06*buffer.sampleRate),Math.floor((end-loop)*buffer.sampleRate/4));
+  const n=Math.floor(end*buffer.sampleRate);
+  /* The tail is crossfaded into the loop point so the wrap is not a click. It
+     reads from `loop - fade`, so the fade can never be longer than the loop
+     point is deep -- with loop at 0 that read ran off the front of the buffer,
+     every sample came back undefined, and the tail of the clip became NaN.
+     A NaN tail is silence, which is exactly what a looping coast did after one
+     pass. */
+  const fade=Math.max(0,Math.min(Math.round(.06*buffer.sampleRate),
+                                 Math.floor((end-loop)*buffer.sampleRate/4),
+                                 Math.round(loop*buffer.sampleRate)));
   const out=ctx.createBuffer(buffer.numberOfChannels,n,buffer.sampleRate),head=Math.round(loop*buffer.sampleRate)-fade;
   let sum=0,peak=0;
   for(let c=0;c<out.numberOfChannels;c++){

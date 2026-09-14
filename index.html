@@ -3938,8 +3938,49 @@ function rollWeather(rand){
   applyWeather();
   return WEATHER.wet;
 }
+/* PUDDLES.
+
+   Off the circuit only -- standing water on the racing line would be a hazard
+   the physics does not model, and a reflection you can drive through reads as
+   a bug. These sit on the verges where water actually collects, and they are
+   flat mirrors: a plane with almost no roughness picks up the sky and whatever
+   is beside it, which at sunset is the whole point.
+
+   Built once and hidden when it is dry. A few dozen planes cost nothing. */
+const PUDDLE_N=34;
+let puddleGrp=null;
+function puddlesInit(){
+  if(puddleGrp||!tlSt.length) return;
+  puddleGrp=new THREE.Group();
+  puddleGrp.visible=false;
+  const geo=new THREE.CircleGeometry(1,14);
+  const mat=new THREE.MeshStandardMaterial({ color:0x2b3540, roughness:0.06, metalness:0.9,
+                                             transparent:true, opacity:0.85 });
+  const N=tlSt.length;
+  for(let k=0;k<PUDDLE_N;k++){
+    const i=Math.floor((k+0.5)/PUDDLE_N*N);
+    const t=tlSt[i];
+    if(!t) continue;
+    /* Just past the edge, on whichever side has more room to put one. */
+    const right=t.dR>=t.dL, room=(right?t.dR:t.dL);
+    const out=room+1.6+Math.random()*5.5, sgn=right?1:-1;
+    const x=t.x+sgn*t.rx*out, z=t.z+sgn*t.rz*out;
+    const g=groundAt(x,z,1e9);
+    if(!g) continue;
+    const m=new THREE.Mesh(geo,mat);
+    m.position.set(x, (g.y||0)+0.02, z);
+    m.rotation.x=-Math.PI/2;
+    m.rotation.z=Math.random()*Math.PI;
+    const r=1.1+Math.random()*2.6;
+    m.scale.set(r, r*(0.55+Math.random()*0.5), 1);
+    m.renderOrder=-1;
+    puddleGrp.add(m);
+  }
+  scene.add(puddleGrp);
+}
 function applyWeather(){
   document.body.classList.toggle('wet', !!WEATHER.wet);
+  try{ puddlesInit(); if(puddleGrp) puddleGrp.visible=!!WEATHER.wet; }catch(e){}
   document.body.dataset.wet = WEATHER.wet ? WEATHER.level.toFixed(2) : '';
   try{
     /* Flat, close light and a darker sky: the cheap half of looking wet. */
@@ -3960,8 +4001,10 @@ function applyWeather(){
       for(const m of ms){
         if(!m||m.metalness===undefined) continue;
         if(m.userData._dryRough===undefined){ m.userData._dryRough=m.roughness; m.userData._dryMetal=m.metalness; }
-        m.roughness=m.userData._dryRough*(1-0.55*L);
-        m.metalness=Math.min(1,m.userData._dryMetal+0.42*L);
+        /* Further than before: a wet circuit is close to a mirror down the
+           straights, and half-roughness was still reading as damp tarmac. */
+        m.roughness=m.userData._dryRough*(1-0.82*L);
+        m.metalness=Math.min(1,m.userData._dryMetal+0.62*L);
         m.needsUpdate=true;
       }
     });
@@ -4576,7 +4619,10 @@ const _dustC=new THREE.Color();
    a bad idea: you cannot wipe it, so it sits in front of everything you are
    trying to look at for the whole race.
    ========================================================================== */
-const RAIN_N=780, RAIN_BOX=42, RAIN_TOP=26;
+/* The box is pushed forward along the way the camera is looking, so you are
+   always driving into rain rather than trailing it. At 300 kph you cover the
+   old box in half a second, which is why it felt like the rain never caught up. */
+const RAIN_N=900, RAIN_BOX=46, RAIN_TOP=26, RAIN_AHEAD=16;
 let rainGeo=null, rainSeg=null, rainPos=null, rainVel=null, rainLen=null;
 function rainInit(){
   if(rainSeg) return;
@@ -4585,7 +4631,9 @@ function rainInit(){
   rainLen=new Float32Array(RAIN_N);
   for(let i=0;i<RAIN_N;i++){
     rainVel[i]=16+Math.random()*16;              // metres a second
-    rainLen[i]=0.9+Math.random()*2.4;             // the near ones streak
+    /* Short. Long streaks read as scratches on the lens rather than water in
+       the air -- these are closer to dashes. */
+    rainLen[i]=0.22+Math.random()*0.5;
   }
   rainGeo=new THREE.BufferGeometry();
   rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos,3));
@@ -4601,7 +4649,7 @@ function rainInit(){
   scene.add(rainSeg);
   for(let i=0;i<RAIN_N;i++) rainPlace(i, true);
 }
-const _rainC=new THREE.Vector3();
+const _rainC=new THREE.Vector3(), _rainF=new THREE.Vector3();
 function rainPlace(i, anywhere){
   const c=_rainC;
   const x=c.x + (Math.random()-0.5)*RAIN_BOX;
@@ -4618,6 +4666,10 @@ function rainStep(dt){
   rainSeg.visible=true;
   rainSeg.material.opacity=0.42+0.38*WEATHER.level;
   camera.getWorldPosition(_rainC);
+  /* Centre the box ahead of the camera rather than on it. */
+  camera.getWorldDirection(_rainF);
+  _rainF.y=0; if(_rainF.lengthSq()>1e-6) _rainF.normalize();
+  _rainC.addScaledVector(_rainF, RAIN_AHEAD);
   const half=RAIN_BOX*0.5, floor=_rainC.y-RAIN_TOP*0.55;
   for(let i=0;i<RAIN_N;i++){
     const drop=rainVel[i]*dt*(0.7+0.6*WEATHER.level);
@@ -4634,7 +4686,10 @@ function spawnDust(speed, from, grass, wet){
   const g=from||carGroup;
   const h=g.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
   // out of the back, off to one side or the other, never from under the nose
-  const side=(Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7);
+  /* Wet spray comes off the whole back of the car, not two points behind the
+     wheels: a wall of water rather than two rooster tails. */
+  const side=wet ? (Math.random()-0.5)*3.4
+                 : (Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7);
   dustPos[i*3]  =g.position.x - fx*1.8 - fz*side;
   dustPos[i*3+1]=g.position.y + 0.05 + Math.random()*0.20;
   dustPos[i*3+2]=g.position.z - fz*1.8 + fx*side;
@@ -4642,17 +4697,17 @@ function spawnDust(speed, from, grass, wet){
      so the plume drifts outward and hangs rather than trailing in a line. */
   const back=speed*(0.18+Math.random()*0.30);
   dustVel[i*3]  =-fx*back - fz*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustVel[i*3+1]= wet   ? 0.9+Math.random()*1.8 + speed*0.030
+  dustVel[i*3+1]= wet   ? 0.5+Math.random()*0.9 + speed*0.012
                 : grass ? 0.5+Math.random()*1.0 + speed*0.012
                         : 1.1+Math.random()*2.4 + speed*0.035;
   dustVel[i*3+2]=-fz*back + fx*side*(1.4+Math.random()*2.2) + (Math.random()-0.5)*1.2;
-  dustMax[i]=dustLife[i]=wet ? 0.55+Math.random()*0.55
+  dustMax[i]=dustLife[i]=wet ? 0.30+Math.random()*0.26   // falls back quickly
                              : grass ? 0.35+Math.random()*0.35    // settles quickly
                                      : 0.7+Math.random()*0.9;
   if(wet)
     /* Water off a wet circuit: white, barely any colour in it, and bright
        enough to read against the dark tarmac a wet track turns into. */
-    _dustC.setHSL(0.58, 0.05+Math.random()*0.06, 0.74+Math.random()*0.22);
+    _dustC.setHSL(0.58, 0.02+Math.random()*0.03, 0.88+Math.random()*0.12);
   else if(grass)
     /* Torn grass and damp earth: green, dark, and much less saturated than
        sand, so a car on the verge does not look like it is in a gravel trap. */
@@ -10473,9 +10528,9 @@ function placeCar(C, dt, t){
   if((_loose||_wet) && C.st.speed>2 && C.group!==carGroup){
     const frac=_loose ? (C.surf.loose?(C.surf.looseFrac||1):(C.surf.grassFrac||1)*0.55)
                       : 0.55+0.45*WEATHER.level;
-    C._spray=(C._spray||0) + (18+C.st.speed*2.0)*frac*dt;
+    C._spray=(C._spray||0) + (_wet?52+C.st.speed*5.0:18+C.st.speed*2.0)*frac*dt;
     let guard=0;
-    while(C._spray>=1 && guard++<5){
+    while(C._spray>=1 && guard++<12){
       C._spray-=1; spawnDust(C.st.speed, C.group, _loose?!C.surf.loose:false, _wet);
     }
     if(C._spray>1.5) C._spray=1.5;
@@ -14439,13 +14494,13 @@ function frame(now){
      it, so the plume is continuous at any frame rate and cannot burst. */
   const _pWet=(typeof WEATHER!=='undefined')&&WEATHER.wet&&!onLoose;
   if((onLoose||_pWet) && carState.speed>(onLoose?0.8:2)){
-    const rate = 30 + carState.speed*3.4;        // particles per second
+    const rate = _pWet ? 70 + carState.speed*7.0 : 30 + carState.speed*3.4;
     looseSpray += rate*(onLoose?looseFrac:(0.55+0.45*WEATHER.level))*dt;
     let guard=0;
-    while(looseSpray>=1 && guard++<8){
+    while(looseSpray>=1 && guard++<16){
       looseSpray-=1; spawnDust(carState.speed, carGroup, false, _pWet);
     }
-    if(looseSpray>2) looseSpray=2;               // never bank a debt
+    if(looseSpray>3) looseSpray=3;               // never bank a debt
   } else looseSpray=0;
   updateDust(dt);
   _rainDt=dt;
