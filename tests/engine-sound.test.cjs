@@ -26,9 +26,41 @@ test('held acceleration plays forward through recorded shifts and repeats only t
  }
  assert.ok(wraps>=1&&wraps<5);
 });
-test('coasting and braking share transport; pedal chatter does not restart it',()=>{
- const m=new Model();const a=run(m,input(150,0),.1),b=run(m,input(150,0,1),.1);
- assert.equal(a.key,b.key);assert.ok(b.offset>a.offset);assert.equal(b.rate,1);
+/* Coasting and braking used to share the braking recording, so lifting off and
+   standing on the brake sounded the same. They are separate recordings now,
+   and this asserts the new shape: different clips, the brake steady, the coast
+   sagging, and the clip chosen at the moment you lift rather than every frame. */
+test('coasting has its own recording, chosen by the speed you lifted at',()=>{
+ const fast=new Model();
+ let p=run(fast,input(300,1),.4);assert.equal(p.mode,'accel');
+ p=run(fast,input(300,0),.2);
+ assert.equal(p.mode,'coastHigh','lifting above 250 takes the high recording');
+ const slow=new Model();
+ run(slow,input(120,1),.4);
+ p=run(slow,input(120,0),.2);
+ assert.equal(p.mode,'coastLow','lifting below 250 takes the low one');
+ /* Still coasting as the car slows through the threshold: the note must not
+    swap halfway down. Ramped rather than stepped -- dropping a hundred kph in
+    one frame is a barrier, not a coast, and the model is right to hear it as
+    one. */
+ for(let v=300;v>=200;v-=0.4) p=fast.update(input(v,0),1/60);   // ~24 kph/s, a genuine roll
+ assert.equal(p.mode,'coastHigh','the clip is chosen at the lift, not per frame');
+});
+test('the brake is steady and the coast sags',()=>{
+ const m=new Model();
+ run(m,input(200,1),.3);
+ let p=run(m,input(200,0,1),.4);
+ assert.equal(p.mode,'brake');assert.equal(p.rate,1,'braking does not bend pitch');
+ const c=new Model();
+ run(c,input(200,1),.3);
+ const a=run(c,input(200,0),.3),b=run(c,input(200,0),1.2);
+ assert.ok(a.mode.startsWith('coast'));
+ assert.ok(b.rate<a.rate,'the coast bends down');
+ assert.ok(b.rate>=.70,'and stops at the floor');
+});
+test('pedal chatter does not restart the transport',()=>{
+ const m=new Model();const a=run(m,input(150,0),.1),b=run(m,input(150,0),.1);
+ assert.equal(a.key,b.key);assert.ok(b.offset>a.offset);
  const c=m.update(input(150,1),.016);assert.equal(c.key,b.key);
  assert.equal(m.update(input(150,0),.016).key,b.key);
 });

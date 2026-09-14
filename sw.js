@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='slipstream-wx-v33';
+const CACHE='slipstream-coast-v34';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/driver/driver.glb',
@@ -21,6 +21,8 @@ const SHELL=[
   './assets/home/race-pitlane.webp',
   './assets/home/garage-bay.webp','./career-season.js','./retirement-route.js','./assets/career/pitlane-hero.png','./assets/career/driver-garage.png',
   './','./index.html',
+  './assets/audio/direct-recordings/coast-high.mp3',
+  './assets/audio/direct-recordings/coast-low.mp3',
   './assets/audio/crash.mp3','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',

@@ -1390,7 +1390,8 @@ const ASSETS = {
   rock:  "rock.jpg",
   car:   "car.glb",
   podium:"podium_art.glb",
-  snd: {accel:'assets/audio/direct-recordings/acceleration.mp3',brake:'assets/audio/direct-recordings/braking.mp3',idle:'assets/audio/direct-recordings/idle.mp3'}
+  snd: {accel:'assets/audio/direct-recordings/acceleration.mp3',brake:'assets/audio/direct-recordings/braking.mp3',idle:'assets/audio/direct-recordings/idle.mp3',
+        coastLow:'assets/audio/direct-recordings/coast-low.mp3',coastHigh:'assets/audio/direct-recordings/coast-high.mp3'}
 };
 </script>
 <script>
@@ -13894,6 +13895,15 @@ window.SIM={
       wet:(typeof WEATHER!=='undefined')&&WEATHER.wet }; }catch(e){ return {err:String(e)}; } },
   spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3)}; },
   weatherFor(mode){ return weatherFor(mode); },
+  /* Start the audio the way a click does, so a script can check it. */
+  audioUnlock(){ engineAudio.unlock(); return true; },
+  /* Which recordings actually decoded, and what the engine is playing. */
+  audioState(){
+    const r=engineAudio.renderer, m=engineAudio.model;
+    return { clips:r?Object.keys(r.buffers):[], errors:engineAudio.errors.slice(),
+             mode:m?m.mode:'-', rate:m?+m.rate.toFixed(3):0,
+             state:engineAudio.context?engineAudio.context.state:'none' };
+  },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
                                  WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
               return {...WEATHER, rainShown:document.body.classList.contains('wet')}; },

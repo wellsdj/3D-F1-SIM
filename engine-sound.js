@@ -2,7 +2,15 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.EngineSound=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
  'use strict';
  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
- const CLIPS={accel:{end:23.4,loop:16.2},brake:{end:5.15,loop:2.8},idle:{end:4.7,loop:.2}};
+ /* Coasting has its own recordings now: it used to share the braking one, so
+    lifting off and standing on the brake sounded identical when they are not
+    the same thing at all. Two of them, because an engine falling away from 300
+    does not sound like one falling away from 80 -- which is chosen at the
+    moment you lift, not continuously, or it would swap notes mid-coast.
+    Both loop whole: they are a sustained note, so there is no run-in to skip. */
+ const CLIPS={accel:{end:23.4,loop:16.2},brake:{end:5.15,loop:2.8},idle:{end:4.7,loop:.2},
+              coastLow:{end:3.55,loop:0},coastHigh:{end:4.02,loop:0}};
+ const COAST_HIGH_KPH=250;
  // Approximate road-speed positions within the actual acceleration recording.
  // Used on entry/re-entry, not to force repeated cuts while the pedal is held.
  /* Roughly 1.5 g of deceleration, smoothed. Coasting drag is about 11 kph/s at
@@ -24,7 +32,7 @@
  }
  class Model{
   constructor(){this.reset();}
-  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;this.dv=0;this.hit=0;}
+  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;this.dv=0;this.hit=0;this.coastClip='coastLow';}
   update(input,dt){
    dt=clamp(Number.isFinite(dt)?dt:0,0,.1);this.time+=dt;
    const speed=Math.abs(Number(input.speed)||0)*3.6,thr=clamp(Number(input.throttle)||0,0,1),brake=clamp(Number(input.brake)||0,0,1);
@@ -50,7 +58,19 @@
    if(impact>.02) this.hit=Math.max(this.hit||0,.45);
    else this.hit=Math.max(0,(this.hit||0)-dt);
    const dragged=this.dv < -DECEL_KPH_S || this.hit>0;
+   /* Braking and coasting are different things and now sound like it. On the
+      brakes -- or being dragged down by gravel or a wall -- is the braking
+      recording. Rolling with nothing asked of the engine is a coast, and which
+      coast it is was decided when you lifted: above 250 the high one, below it
+      the low one. Chosen at the lift rather than every frame, or a car slowing
+      through the threshold would change note halfway down. */
+   const rolling=!(input.gridded||speed<1.5) && brake<=.04 && !dragged
+                 && thr<=(this.mode==='accel'?.03:.08);
+   let coastClip=this.coastClip||'coastLow';
+   if(rolling && !this.mode.startsWith('coast'))
+     coastClip=this.coastClip=(speed>=COAST_HIGH_KPH?'coastHigh':'coastLow');
    let next=input.gridded||speed<1.5?'idle':(brake>.04||dragged)?'brake'
+           :rolling?coastClip
            :thr>(this.mode==='accel'?.03:.08)?'accel':'brake';
    // Ignore one-frame pedal chatter, but apply idle/grid lock immediately.
    if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'&&!(this.hit>0)){
@@ -64,6 +84,7 @@
      const resume=this.saved&&this.time-this.saved.time<=1.5&&Math.abs(speed-this.saved.speed)<=35&&Math.abs(this.saved.cursor-accelerationOffset(speed))<5;
      this.cursor=resume?this.saved.cursor:accelerationOffset(speed);
     }else if(next==='brake')this.cursor=clamp((1-speed/340)*3.8,0,3.8);
+    else if(next.startsWith('coast'))this.cursor=0;
     else{this.cursor=0;this.saved=null;}
     this.mode=next;this.key++;this.pending='';this.pendingTime=0;this.coast=0;
    }
@@ -83,18 +104,20 @@
       from 60 drops away. Which note is sagging is already right: entry into
       this clip is mapped from speed, so high speed starts near the top of the
       recording and low speed starts further down it. */
-   if(this.mode==='accel'){ this.coast=0; this.rate=1; }
-   else if(this.mode==='brake'){
-    if(brake>.04||dragged){ this.coast=0; this.rate=1; }
-    else{
-     this.coast=(this.coast||0)+dt;
-     const fall=.055+.10*(1-clamp(speed/300,0,1));   // per second, faster when slow
-     this.rate=clamp(1-this.coast*fall,.70,1);
-    }
+   if(this.mode.startsWith('coast')){
+    /* Down, and only down. The note sags the way an engine does when nothing
+       is driving it, faster when there is less speed holding it up, and the
+       clip loops underneath so a long coast keeps sagging rather than running
+       out of recording. */
+    this.coast=(this.coast||0)+dt;
+    const fall=.055+.10*(1-clamp(speed/300,0,1));
+    this.rate=clamp(1-this.coast*fall,.70,1);
    }
    else{ this.coast=0; this.rate=1; }
    this.speed=speed;
-   return {key:this.key,mode:this.mode,offset:this.cursor,rate:this.rate,volume:this.mode==='idle'?.6:this.mode==='brake'?.72:.85};
+   return {key:this.key,mode:this.mode,offset:this.cursor,rate:this.rate,
+           volume:this.mode==='idle'?.6:this.mode==='brake'?.72
+                 :this.mode.startsWith('coast')?.66:.85};
   }
  }
  // Alter only the final 60 ms of each recording to soften its long tail wrap.
