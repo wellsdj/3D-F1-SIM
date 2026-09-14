@@ -1724,3 +1724,10 @@ body.customizer-open #netbtn{display:none}
 #setup-name:focus{box-shadow:inset 0 0 0 1px var(--apex-red),0 0 26px -12px rgba(255,31,45,.9)}
 #setup-name.needed{box-shadow:inset 0 0 0 1px var(--apex-red);animation:nameNudge .4s ease}
 @keyframes nameNudge{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+
+/* The weather setting carries a note under its label, so Random says what it
+   actually means before you commit to it. */
+.rstep .rlabel i{
+  display:block;font-style:normal;margin-top:3px;
+  font-size:8.5px;letter-spacing:.16em;color:var(--apex-faint);
+}

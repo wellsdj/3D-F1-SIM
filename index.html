@@ -3909,6 +3909,24 @@ let timeOfDay='midday';
    cornering, braking and the AI's reference lap all read it. */
 const WEATHER={ wet:false, level:0, grip:1 };
 const WET_CHANCE=0.30;
+/* What the Race page asked for. 'auto' is the roll -- about one race in three
+   -- and is the default, because a season where you do not know what you are
+   getting is the point of having weather at all. */
+let APEX_WX='auto';
+const WX_MODES=[
+  {id:'auto',  label:'Random', note:'1 in 3 wet'},
+  {id:'clear', label:'Clear',  note:'Dry circuit'},
+  {id:'wet',   label:'Wet',    note:'Standing water'},
+];
+function weatherFor(mode, rand){
+  const r=rand||Math.random;
+  if(mode==='wet'){        WEATHER.wet=true;  WEATHER.level=0.55+r()*0.45; }
+  else if(mode==='clear'){ WEATHER.wet=false; WEATHER.level=0; }
+  else return rollWeather(rand);
+  WEATHER.grip=1-0.26*WEATHER.level;
+  applyWeather();
+  return WEATHER.wet;
+}
 function rollWeather(rand){
   const r=(rand||Math.random)();
   WEATHER.wet = r < WET_CHANCE;
@@ -12940,7 +12958,7 @@ function raceStart(opts){
   /* A new race starts from nothing: held progress from the last one would
      classify everybody behind where they have not been yet. */
   RACE._gate=null; tvCarHint=0;
-  rollWeather();                      // three races in ten are wet
+  weatherFor(APEX_WX);                // Random is three races in ten
   for(const d of AIS) d._gate=null;
   if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
@@ -13875,6 +13893,7 @@ window.SIM={
       camY:+_rainC.y.toFixed(1), y0:rainPos?+rainPos[1].toFixed(1):null,
       wet:(typeof WEATHER!=='undefined')&&WEATHER.wet }; }catch(e){ return {err:String(e)}; } },
   spinState(){ return {spin:+(PLAYER.yawSpin||0).toFixed(3), slip:+(PLAYER.slipAng||0).toFixed(3)}; },
+  weatherFor(mode){ return weatherFor(mode); },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
                                  WEATHER.grip=1-0.26*WEATHER.level; applyWeather(); }
               return {...WEATHER, rainShown:document.body.classList.contains('wet')}; },
@@ -15937,6 +15956,8 @@ const APEX_ICON={
   flag:APEX_SVG('<path d="M6 20V4"/><path d="M6 5h11l-2.2 3.6L17 12H6z"/>'),
   bars:APEX_SVG('<path d="M5 19V13m4.7 6V8m4.6 11v-8m4.7 8V5"/>'),
   clock:APEX_SVG('<circle cx="12" cy="12" r="8.4"/><path d="M12 7.4V12l3 1.8"/>'),
+  rain:APEX_SVG('<path d="M7.5 15.5a4.2 4.2 0 0 1 .6-8.35 5.6 5.6 0 0 1 10.7 1.2 3.7 3.7 0 0 1-.6 7.15"/>'
+    +'<path d="M9 18.4l-1 2.2M13 18.4l-1 2.2M17 18.4l-1 2.2"/>'),
   sun:APEX_SVG('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4'
     +'M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>'),
   chequer:APEX_SVG('<rect x="4" y="4" width="16" height="16" rx="1.4"/>'
@@ -16468,10 +16489,23 @@ function apexPaintRace(){
   Array.prototype.forEach.call(light.querySelectorAll('.rpip'),b=>{
     b.onclick=()=>{ apexLight=+b.dataset.i; apexPaintRace(); };
   });
-  /* One weather. Saying "clear" and offering nothing else would be a control
-     that does not control anything, so it reads as a fact instead. */
-  wx.innerHTML=APEX_ICON.sun+'<span class="rlabel">Weather</span><b>Clear</b>';
-  wx.classList.add('fixed');
+  /* It used to say Clear and offer nothing, so it read as a fact rather than a
+     control. It is a choice now: leave it on Random and you find out on the
+     formation lap, or pick the one you want to drive. */
+  const wi=Math.max(0,WX_MODES.findIndex(m=>m.id===APEX_WX));
+  const W=WX_MODES[wi];
+  wx.classList.remove('fixed');
+  wx.innerHTML=(W.id==='wet'?APEX_ICON.rain:APEX_ICON.sun)
+    +'<span class="rlabel">Weather<i>'+W.note+'</i></span>'
+    +'<div class="rstepper"><button type="button" data-w="-1">&lsaquo;</button>'
+    +'<b>'+W.label+'</b><button type="button" data-w="1">&rsaquo;</button></div>';
+  Array.prototype.forEach.call(wx.querySelectorAll('button'),b=>{
+    b.onclick=()=>{
+      const n=WX_MODES.length;
+      APEX_WX=WX_MODES[((wi + +b.dataset.w)%n+n)%n].id;
+      apexPaintRace();
+    };
+  });
   lp.innerHTML=APEX_ICON.chequer+'<span class="rlabel">Laps</span>'
     +'<div class="rstepper"><button type="button" data-d="-1">&lsaquo;</button>'
     +'<b>'+apexLaps+'</b><button type="button" data-d="1">&rsaquo;</button></div>';
