@@ -8,6 +8,7 @@
 <script src="retirement-route.js"></script>
 <script src="collision-physics.js"></script>
 <script src="engine-sound.js"></script>
+<script src="slipstream.js"></script>
 <style>
   :root{
     --ink:#0b0c0d;
@@ -9971,7 +9972,7 @@ function makeCar(group, aids){
            surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
            aids: !!aids,
            // 1 is the player's grip; the AI's cars get more -- see yawFor
-           gripMul: 1 };
+           gripMul: 1, tow:0 };
 }
 let onLoose=false, looseFrac=0, looseSpray=0;
 let onGrass=false, grassFrac=0;
@@ -10144,7 +10145,8 @@ function resetToTrack(){
    not enough to get out of a gravel trap and back to the circuit before the
    race had gone. */
 const REV_MAX=100/3.6;                 // 100 kph
-function applyPedals(st, thr, brk, surf, dt, allowRev){
+function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
+  tow=clamp(tow||0,0,1);
   if(thr>0){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
     // thrust and drag cancel at MAXSPEED, so it eases in instead of clamping.
@@ -10160,7 +10162,9 @@ function applyPedals(st, thr, brk, surf, dt, allowRev){
        one number that follows from it. */
     const bog = surf.loose ? 1 - 0.121*surf.looseFrac
               : surf.grass ? 1 - 0.06*surf.grassFrac : 1;
-    st.speed += 26.0*(1.0 - v*v)*bog*dt*thr;
+    /* A wake reduces high-speed aerodynamic drag without changing launch or
+       corner acceleration. At full strength it is worth about 19 kph. */
+    st.speed += 26.0*(1.0 - v*v*(1-0.10*tow))*bog*dt*thr;
   }
   else if(brk>0){
     /* The brake is the brake down to a standstill and the reverse pedal below
@@ -10182,7 +10186,12 @@ function applyPedals(st, thr, brk, surf, dt, allowRev){
      with one that will. The drag curve above is untouched: the engine is the
      same, it simply runs out of road sooner, which is what a slower car feels
      like rather than a heavier one. */
-  st.speed=clamp(st.speed, allowRev?-REV_MAX:0, MAXSPEED*(st===carState?CAR_TOP:1));
+  const baseTop=MAXSPEED*(st===carState?CAR_TOP:1);
+  const towTop=baseTop*(1+0.055*tow);
+  st.speed=Math.max(allowRev?-REV_MAX:0,st.speed);
+  /* Do not snap an over-speeding car back to the ordinary limiter as it pulls
+     out of the wake. Aero brings it down progressively, capped at 3.5 m/s/s. */
+  if(st.speed>towTop) st.speed=Math.max(towTop,st.speed-3.5*dt);
   /* NO DAMAGE MODEL. There was one here: every barrier hit took a slice off the
      player's top speed, up to about 80 kph, so a scruffy race ended with the
      car unable to reach 360 down the Kemmel. It is gone at Wells's request --
@@ -10192,6 +10201,19 @@ function applyPedals(st, thr, brk, surf, dt, allowRev){
      A hit still LOOKS and FEELS like a hit: the sparks, the shake, the lurch,
      the weight going forward and the speed it scrubs off are all unchanged.
      What is gone is the ledger. */
+}
+
+function slipstreamLeaders(C){
+  const cars=[];
+  if(C!==PLAYER) cars.push(PLAYER.st);
+  if(typeof AIS!=='undefined') for(const d of AIS)
+    if(d.on && d.car && d.car!==C) cars.push(d.car.st);
+  return cars;
+}
+function updateSlipstream(C,dt){
+  const raw=Slipstream.strength(C.st,slipstreamLeaders(C));
+  C.tow=Slipstream.smooth(C.tow||0,raw,dt);
+  return C.tow;
 }
 /* The yaw the car actually gets for a given steering angle. The geometric
    rate alone would allow ~17 g at top speed, so it is capped at what the
@@ -10442,7 +10464,7 @@ function stepCar(C, inp, dt){
   const st=C.st;
   C._collisionPrev={wx:st.wx,wz:st.wz,hdg:st.hdg};
   if(C.impactYaw){const v=CollisionPhysics.velocity(C);st.hdg+=C.impactYaw*dt;CollisionPhysics.setVelocity(C,v.x,v.z);C.impactYaw*=Math.exp(-5*dt);}
-  applyPedals(st, inp.thr, inp.brk, C.surf, dt, inp.rev);
+  applyPedals(st, inp.thr, inp.brk, C.surf, dt, inp.rev, updateSlipstream(C,dt));
   steerRack(C, inp.steer, st.speed*3.6, dt, C.aids);
   // speed is read before the surface takes its cut, so a car entering gravel
   // covers the ground it had at the start of the frame, as it always has
@@ -10642,7 +10664,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, playerRev(brkMag,thrMag,kph,dt));
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, playerRev(brkMag,thrMag,kph,dt), 0);
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
@@ -12361,7 +12383,7 @@ function aiPlace(d, i, flying){
   st.wx=d.x[i]; st.wz=d.z[i];
   const j=(i+1)%n;
   st.hdg=Math.atan2(d.x[j]-d.x[i], d.z[j]-d.z[i]);
-  st.speed=flying?d.v[i]:0; d.car.steerIn=0; d.car.steerAng=0; d.car.slipAng=0;
+  st.speed=flying?d.v[i]:0; d.car.steerIn=0; d.car.steerAng=0; d.car.slipAng=0; d.car.tow=0;
   d.car.groundY=d.y[i]+RIDE;
   /* Prime the surface at the spawn. Without this the first few frames report
      no surface at all -- probeCar has not run yet -- which reads in a trace as
