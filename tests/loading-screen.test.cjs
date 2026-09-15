@@ -54,10 +54,13 @@ test('the tip label names the conditions it is drawn from',()=>{
   assert.match(qualifyingTipLabel({light:'sunset',wet:'auto'}),/mixed/i);
 });
 
-test('the screen keeps a way back out and dresses the lighting it loads into',()=>{
+test('the screen keeps a way back out, and is the helmet card both times',()=>{
   assert.match(source,/<button id="qualifying-cancel"/);
-  assert.match(source,/#qualifying-load\[data-light="night"\]/);
   assert.match(source,/qualifyingLoadEl\.dataset\.wet=/);
-  for(const f of ['spa-midday','spa-sunset','spa-night'])
-    assert.ok(fs.existsSync(path.join(__dirname,'..','assets','load',f+'.svg')),f+' art is present');
+  /* Both overlays carry the same card, and the only picture on it is the
+     helmet -- no scenery, no stock hero. */
+  assert.equal(source.match(/<div class="loadcard">/g).length,2);
+  assert.match(source,/\.loadcard \.lc-helm\{[^}]*assets\/home\/helmet-red\.webp/);
+  assert.doesNotMatch(source,/assets\/load\//);
+  assert.ok(fs.existsSync(path.join(__dirname,'..','assets','home','helmet-red.webp')));
 });
