@@ -186,15 +186,26 @@
             border:1px solid rgba(255,255,255,.16);
             box-shadow:0 6px 22px rgba(0,0,0,.5)}
   #trackmap.show{display:block}
-  #racepos{position:fixed;right:18px;bottom:26px;z-index:12;display:none;align-items:baseline;gap:7px;
-           font-family:var(--mono);color:#fff;background:rgba(10,13,19,.72);
-           border:1px solid rgba(255,255,255,.14);border-left:3px solid var(--amber);
-           border-radius:7px;padding:9px 14px}
-  #racepos.show{display:flex}
-  #racepos b{font-size:23px;font-weight:600;letter-spacing:.02em;font-variant-numeric:tabular-nums}
-  #racepos b.lap{font-size:17px}
-  #racepos small{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(223,231,241,.6)}
-  #racepos i{width:1px;height:17px;background:rgba(255,255,255,.18);margin:0 4px}
+  #racepos{position:fixed;right:18px;bottom:26px;z-index:12;display:none;
+           width:214px;font-family:var(--mono);color:#fff;overflow:hidden;
+           background:linear-gradient(145deg,rgba(7,13,22,.94),rgba(13,22,34,.82));
+           border:1px solid rgba(255,255,255,.16);border-radius:11px;
+           box-shadow:0 14px 38px rgba(0,0,0,.42),inset 3px 0 0 var(--amber);
+           backdrop-filter:blur(10px)}
+  #racepos.show{display:block}
+  #racepos .rp-main{display:flex;align-items:center;padding:11px 14px 10px 17px;gap:12px}
+  #racepos .rp-position{font-size:31px;line-height:1;font-weight:700;letter-spacing:-.04em;
+                        font-variant-numeric:tabular-nums;color:#fff}
+  #racepos .rp-meta{margin-left:auto;text-align:right}
+  #racepos .rp-meta b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
+  #racepos small{display:block;margin-top:2px;font-size:8px;letter-spacing:.16em;
+                 text-transform:uppercase;color:rgba(223,231,241,.58)}
+  #racepos .rp-order{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid rgba(255,255,255,.09)}
+  #racepos .rp-order span{min-width:0;padding:8px 10px 9px 16px;font-size:9px;color:#dce7f2;
+                          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #racepos .rp-order span+span{border-left:1px solid rgba(255,255,255,.09);padding-left:10px}
+  #racepos .rp-order em{display:block;margin-bottom:3px;color:#7f94aa;font-size:7px;
+                        font-style:normal;letter-spacing:.17em;text-transform:uppercase}
   #result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
           z-index:15;display:none;font-family:var(--mono);min-width:min(460px,88vw);
           background:linear-gradient(180deg,rgba(12,15,21,.95),rgba(8,10,14,.97));
@@ -10352,7 +10363,12 @@ function slipstreamPresentation(dt){
    to hold. */
 function yawFor(speed, steerAng, surf, gripMul){
   const dTyre=-steerAng/STEER_RATIO;                 // +ve = left
-  let yawRate=speed*Math.tan(dTyre)/WHEELBASE;
+  /* At the first kilometre an hour in reverse, geometric yaw was effectively
+     zero, so the speedo showed R while the car appeared unable to turn. A
+     low-speed reverse rack needs enough angular authority to point the nose;
+     translation still uses the real speed, so this does not make it slide. */
+  const yawSpeed=speed<0?-Math.max(Math.abs(speed),2.8):speed;
+  let yawRate=yawSpeed*Math.tan(dTyre)/WHEELBASE;
   const slick = surf.grass ? 1 - 0.465*surf.grassFrac : 1;
   /* Magnitude, not signed: in reverse `speed>0.5` was false, so the ceiling
      fell back to 8 rad/s and the car span on the spot. The sign belongs on
@@ -12612,70 +12628,101 @@ function raceClock(dt){
    search, not the car, and it is ignored -- which is the bug that used to leak
    straight into the standings.
    ========================================================================== */
-const GATE_MAX_STEP=40;              // ~160 m; more than that in one frame is a glitch
-function gateStep(rec, idx, t){
-  const N=tlSt.length;
-  if(!N || idx==null) return;
-  if(rec.i===undefined){ rec.i=idx; rec.n=0; rec.t=t; return; }
-  let d=idx-rec.i;
-  if(d >  N/2) d-=N;                 // wrapped back over the line
-  if(d < -N/2) d+=N;                 // wrapped forward over the line
-  if(d>0 && d<=GATE_MAX_STEP){ rec.n+=d; rec.i=idx; rec.t=t; }
+const POSITION_MARK_METRES=5;        // approximately one Formula car length
+const POSITION_MAX_JUMP_METRES=180;  // impossible in one frame: reject a bad lookup
+let positionOrigin=0, positionPlayerHint=0;
+function positionDelta(from,to,n){
+  let d=to-from;
+  if(d>n/2)d-=n;
+  if(d<-n/2)d+=n;
+  return d;
 }
-let tvCarHint=0;
-function tvCarStation(){
-  if(!tlSt.length) return null;
-  /* Its own cursor. tlStation walks from a hint, and sharing one between
-     callers is what once froze a car on P6 for a whole race. */
-  const st=tlStation(carState.wx, carState.wz, tvCarHint);
-  if(!st) return null;
-  tvCarHint=tlLastIdx;
-  return tlLastIdx;
+function positionNearest(x,z,hint){
+  if(!AI.n)return null;
+  const base=((hint|0)%AI.n+AI.n)%AI.n;
+  let at=base,best=Infinity;
+  for(let o=-20;o<=100;o++){
+    const i=(base+o+AI.n)%AI.n, q=(AI.x[i]-x)**2+(AI.z[i]-z)**2;
+    if(q<best){best=q;at=i;}
+  }
+  if(best>70*70){
+    for(let i=0;i<AI.n;i++){
+      const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2;
+      if(q<best){best=q;at=i;}
+    }
+  }
+  return at;
+}
+function positionTrack(rec,idx,t){
+  if(idx==null||!AI.n)return rec;
+  const ds=AI.ds||1, markerStep=Math.max(1,Math.round(POSITION_MARK_METRES/ds));
+  if(rec.i===undefined){
+    rec.i=idx;
+    rec.progress=positionDelta(positionOrigin,idx,AI.n);
+    rec.marker=Math.floor(rec.progress/markerStep);
+    rec.at=t;
+    return rec;
+  }
+  const d=positionDelta(rec.i,idx,AI.n);
+  if(Math.abs(d)*ds<=POSITION_MAX_JUMP_METRES){
+    rec.i=idx; rec.progress+=d;
+    const marker=Math.floor(rec.progress/markerStep);
+    if(marker!==rec.marker){rec.marker=marker;rec.at=t;}
+  }
+  return rec;
+}
+function positionReset(){
+  if(!AI.n)return;
+  const gate=TT.gates&&TT.gates[0];
+  positionOrigin=gate?positionNearest(gate.x,gate.z,0):positionNearest(SPAWN.x,SPAWN.z,0);
+  positionPlayerHint=positionNearest(carState.wx,carState.wz,positionOrigin);
+  RACE._position={};
+  positionTrack(RACE._position,positionPlayerHint,0);
+  for(const d of AIS){
+    if(!d.car)continue;
+    d._position={};
+    positionTrack(d._position,d.i,0);
+  }
 }
 function raceProgress(){
-  const t=(RACE.raceT||0);
-  const you=RACE._gate||(RACE._gate={});
-  gateStep(you, tvCarStation(), t);
-  const rows=[{you:true, name:'You', dsq:false, out:false,
-               n:you.n||0, at:you.t||0, fin:RESULT.you||0}];
+  const t=RACE.raceT||0;
+  if(!RACE._position)positionReset();
+  positionPlayerHint=positionNearest(carState.wx,carState.wz,positionPlayerHint);
+  const you=positionTrack(RACE._position||{},positionPlayerHint,t);
+  const rows=[{you:true,name:'You',driver:null,dsq:!!LIMITS.dsq,out:false,
+               progress:you.progress||0,marker:you.marker||0,at:you.at||0,fin:RESULT.you||0}];
   for(const d of AIS){
-    if(!d.car) continue;
-    /* d._tlHint is this car's own station index, already maintained every
-       frame for the track-limit room check -- the same gates you go through. */
-    /* Own property, not an inherited one. Every driver is Object.create(AI)
-       and AIS[0] IS AI, so `d._gate || (d._gate={})` reads straight through
-       the prototype to the leader's counter and the whole field shares one --
-       which is how nine cars came to be on exactly the same gate. */
-    if(!Object.prototype.hasOwnProperty.call(d,'_gate') || !d._gate) d._gate={};
-    const rec=d._gate;
-    gateStep(rec, d._tlHint, t);
-    rows.push({you:false, name:d.name||'AI', dsq:!!d.dsq, out:!d.on&&!d.finish,
-               n:rec.n||0, at:rec.t||0, fin:d.finish||0});
+    if(!d.car)continue;
+    if(!Object.prototype.hasOwnProperty.call(d,'_position')||!d._position)d._position={};
+    const rec=positionTrack(d._position,d.i,t);
+    rows.push({you:false,name:d.name||'AI',driver:d,dsq:!!d.dsq,out:!d.on&&!d.finish,
+               progress:rec.progress||0,marker:rec.marker||0,at:rec.at||0,fin:d.finish||0});
   }
   rows.sort((a,b)=>{
-    /* Out of the race is behind everyone still in it, however far they got --
-       and they stay on the sheet, so the field size is the field that started. */
-    if(a.dsq!==b.dsq) return a.dsq?1:-1;
-    if(a.out!==b.out) return a.out?1:-1;
-    if(a.fin&&b.fin)  return a.fin-b.fin;      // both home: by the clock
-    if(a.fin) return -1;
-    if(b.fin) return 1;
-    if(b.n!==a.n) return b.n-a.n;              // more gates is ahead
-    return a.at-b.at;                          // level: first there is ahead
+    if(a.dsq!==b.dsq)return a.dsq?1:-1;
+    if(a.out!==b.out)return a.out?1:-1;
+    if(a.fin&&b.fin)return a.fin-b.fin;
+    if(a.fin)return -1;
+    if(b.fin)return 1;
+    if(b.marker!==a.marker)return b.marker-a.marker;
+    if(b.progress!==a.progress)return b.progress-a.progress;
+    return a.at-b.at;
   });
   return rows;
 }
 function racePositions(){
-  const rows=raceProgress();
-  RACE.pos=rows.findIndex(r=>r.you)+1;
-  RACE.field=rows.length;
+  const rows=raceProgress(),mine=rows.findIndex(r=>r.you);
+  RACE.pos=mine+1; RACE.field=rows.length;
   const el=raceEl('racepos');
-  if(!el) return;
-  if(RACE.phase!=='racing' && !RESULT.on){ el.classList.remove('show'); return; }
+  if(!el)return;
+  if(RACE.phase!=='racing'&&!RESULT.on){el.classList.remove('show');return;}
   el.classList.add('show');
   const lap=Math.min(RACE_LAPS,(RACE.lapN||0)+1);
-  el.innerHTML='<b>P'+RACE.pos+'</b><small>of '+RACE.field+'</small>'
-              +'<i></i><b class="lap">'+lap+'</b><small>/ '+RACE_LAPS+' laps</small>';
+  const ahead=mine>0?rows[mine-1].name:'Race leader';
+  const behind=mine<rows.length-1?rows[mine+1].name:'Last car';
+  el.innerHTML='<div class="rp-main"><b class="rp-position">P'+RACE.pos+'</b>'
+    +'<div class="rp-meta"><b>Lap '+lap+' / '+RACE_LAPS+'</b><small>'+RACE.field+' cars</small></div></div>'
+    +'<div class="rp-order"><span><em>Ahead</em>'+ahead+'</span><span><em>Behind</em>'+behind+'</span></div>';
 }
 /* You crossing the line is the end of your race, not the end of the race. The
    first version classified everyone still out on the circuit as a
@@ -12985,14 +13032,19 @@ function careerScore(){
 }
 
 function raceResultRows(){
-  const L=TT.len||1;
+  const live=typeof raceProgress==='function'?raceProgress():[], runFor=d=>{
+    const r=live.find(q=>q.driver===d);
+    if(r)return r.progress;
+    if(d._position&&Number.isFinite(d._position.progress))return d._position.progress;
+    return (d.lapN||0)*(TT.len||1)+(d.i||0)*(d.ds||1);
+  };
   /* Disqualified is last, behind everyone still running, rather than a time
      with seconds added to it. */
   const rows=[{who:'You', t:LIMITS.dsq?null:RESULT.you, pen:LIMITS.pen,
                you:true, dsq:LIMITS.dsq, run:LIMITS.dsq?-1:0}];
   AIS.forEach((d,k)=>{ if(d.car&&(d.on||d.dsq))
     rows.push({who:d.name||GRID_NAMES[k%GRID_NAMES.length], t:d.dsq?null:d.finish||null, pen:0,dsq:!!d.dsq,
-               run:d.dsq?-1:(d.lapN||0)*L+(d.i||0)*d.ds}); });
+               run:d.dsq?-Infinity:runFor(d)}); });
   const done=rows.filter(r=>r.t), out=rows.filter(r=>!r.t);
   done.forEach(r=>r.total=r.t+r.pen);
   done.sort((a,b)=>a.total-b.total);
@@ -13177,9 +13229,9 @@ function raceStart(opts){
   RETIRE.on=false;RETIRE.parked=false;decisionClose();sessionLapInvalid=false;
   /* A new race starts from nothing: held progress from the last one would
      classify everybody behind where they have not been yet. */
-  RACE._gate=null; tvCarHint=0;
+  RACE._position=null; positionPlayerHint=0;
   weatherFor(APEX_WX);                // Random is three races in ten
-  for(const d of AIS) d._gate=null;
+  for(const d of AIS) d._position=null;
   if(CAREER.active && (careerTimedSession() || RESULT.on)) return false;
   if(!FREEROAM || TTREC.playing || NET.watching) return false;
   if(!RACE._ui){ RACE._ui=true; raceUI(); }   // wired on first use, not at load
@@ -13253,6 +13305,9 @@ function raceStart(opts){
     // A fresh independent draw for every car, including race restarts.
     d.react=aiReaction(d); d._react=0;
   }
+  /* Establish one shared zero after every car is sitting in its real grid box.
+     The live order is therefore correct before anybody moves. */
+  positionReset();
   document.getElementById('restartbtn').classList.add('on');
   RACE.on=true; RACE.phase='grid'; RACE.t=0; RACE.ready=false;
   limitsReset();
@@ -14150,7 +14205,8 @@ window.SIM={
                startPhase='go'; return n; },
   /* The live classification, exactly as the HUD reads it. */
   grid(){ return raceProgress().map((r,i)=>({p:i+1, who:r.name, you:!!r.you,
-            gates:r.n, at:+(r.at||0).toFixed(2), fin:+(r.fin||0).toFixed(2),
+            marker:r.marker, metres:+((r.progress||0)*(AI.ds||1)).toFixed(1),
+            at:+(r.at||0).toFixed(2), fin:+(r.fin||0).toFixed(2),
             dsq:!!r.dsq, out:!!r.out})); },
   /* Show a finish for a given position, to look at it. */
   celebrateAt(p){ celebrate(p||1); return true; },
