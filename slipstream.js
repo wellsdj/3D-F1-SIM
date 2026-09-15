@@ -3,7 +3,7 @@
   if(typeof module==='object' && module.exports) module.exports=api;
   else root.Slipstream=api;
 })(typeof self!=='undefined'?self:this, function(){
-  const MIN_SPEED=22, NEAR=4.5, FAR=55, MAX_LATERAL=4.2;
+  const MIN_SPEED=22, NEAR=4.5, MAX_TIME_GAP=1, MAX_LATERAL=2.2;
   const clamp01=v=>Math.max(0,Math.min(1,v));
   function smoothstep(v){ v=clamp01(v); return v*v*(3-2*v); }
 
@@ -15,12 +15,14 @@
       if(!lead || lead===follower || lead.speed<MIN_SPEED*0.75) continue;
       const dx=lead.wx-follower.wx, dz=lead.wz-follower.wz;
       const ahead=dx*fx+dz*fz;
-      if(ahead<=NEAR || ahead>=FAR) continue;
+      if(ahead<=NEAR) continue;
+      const timeGap=(ahead-NEAR)/Math.max(MIN_SPEED,follower.speed);
+      if(timeGap>=MAX_TIME_GAP) continue;
       const lateral=Math.abs(dx*fz-dz*fx);
       if(lateral>=MAX_LATERAL) continue;
       const heading=Math.cos(lead.hdg-follower.hdg);
       if(heading<0.88) continue;
-      const distanceFade=1-smoothstep((ahead-NEAR)/(FAR-NEAR));
+      const distanceFade=1-smoothstep(timeGap/MAX_TIME_GAP);
       const laneFade=1-smoothstep(lateral/MAX_LATERAL);
       const closingFade=clamp01((lead.speed-follower.speed+18)/18);
       best=Math.max(best,distanceFade*laneFade*heading*closingFade);
@@ -29,8 +31,8 @@
   }
 
   function smooth(current, target, dt){
-    const response=target>current?5.5:2.0;
+    const response=target>current?5.5:12;
     return current+(target-current)*(1-Math.exp(-response*Math.max(0,dt)));
   }
-  return {strength, smooth, MIN_SPEED, FAR, MAX_LATERAL};
+  return {strength, smooth, MIN_SPEED, MAX_TIME_GAP, MAX_LATERAL};
 });

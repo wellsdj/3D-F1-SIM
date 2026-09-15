@@ -4585,7 +4585,7 @@ let dustPts=null, dustPos=null, dustVel=null, dustLife=null, dustMax=null, dustW
   geo.setAttribute('color',new THREE.BufferAttribute(col,3));
   const mat=new THREE.PointsMaterial({
     size:1.5, sizeAttenuation:true, map:tex, vertexColors:true,
-    transparent:true, depthWrite:false, opacity:1.0 });
+    transparent:true, depthWrite:false, opacity:0.5 });
   dustPts=new THREE.Points(geo,mat);
   dustPts.frustumCulled=false;
   scene.add(dustPts);
@@ -10177,8 +10177,8 @@ function applyPedals(st, thr, brk, surf, dt, reverseEnabled, tow){
     const bog = surf.loose ? 1 - 0.121*surf.looseFrac
               : surf.grass ? 1 - 0.06*surf.grassFrac : 1;
     /* A wake reduces high-speed aerodynamic drag without changing launch or
-       corner acceleration. At full strength it is worth about 19 kph. */
-    st.speed += 26.0*(1.0 - v*v*(1-0.10*tow))*bog*dt*thr;
+       corner acceleration. The matching limiter below caps it at +10 km/h. */
+    st.speed += 26.0*(1.0 - v*v*(1-0.054*tow))*bog*dt*thr;
   }
   else if(brk>0){
     /* Never cross through zero in a braking frame. This clean separation is
@@ -10198,7 +10198,7 @@ function applyPedals(st, thr, brk, surf, dt, reverseEnabled, tow){
      same, it simply runs out of road sooner, which is what a slower car feels
      like rather than a heavier one. */
   const baseTop=MAXSPEED*(st===carState?CAR_TOP:1);
-  const towTop=baseTop*(1+0.055*tow);
+  const towTop=baseTop+(10/3.6)*tow;
   st.speed=Math.max(reverseEnabled?-REV_MAX:0,st.speed);
   /* Do not snap an over-speeding car back to the ordinary limiter as it pulls
      out of the wake. Aero brings it down progressively, capped at 3.5 m/s/s. */

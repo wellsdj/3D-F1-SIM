@@ -9,15 +9,19 @@ test('strong tow directly behind a nearby car',()=>{
 test('tow fades with distance and lateral offset',()=>{
   const near=Slipstream.strength(car(0,0),[car(0,12)]);
   assert.ok(near>Slipstream.strength(car(0,0),[car(0,45)]));
-  assert.ok(near>Slipstream.strength(car(0,0),[car(3.5,12)]));
+  assert.equal(Slipstream.strength(car(0,0),[car(2.3,12)]),0);
+});
+test('tow exists only inside a one-second gap',()=>{
+  assert.ok(Slipstream.strength(car(0,0,0,50),[car(0,54,0,50)])>0);
+  assert.equal(Slipstream.strength(car(0,0,0,50),[car(0,55,0,50)]),0);
 });
 test('no false tow behind, in opposing traffic, or at low speed',()=>{
   assert.equal(Slipstream.strength(car(0,0),[car(0,-10)]),0);
   assert.equal(Slipstream.strength(car(0,0),[car(0,10,Math.PI)]),0);
   assert.equal(Slipstream.strength(car(0,0,0,10),[car(0,10)]),0);
 });
-test('tow attacks quickly and releases progressively',()=>{
+test('tow attacks smoothly but disappears quickly when pulling out',()=>{
   const attack=Slipstream.smooth(0,1,0.1);
   const release=Slipstream.smooth(1,0,0.1);
-  assert.ok(attack>0 && attack<1 && release>attack);
+  assert.ok(attack>0 && attack<1 && release<attack);
 });
