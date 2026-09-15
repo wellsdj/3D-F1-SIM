@@ -291,17 +291,28 @@
   body.cinema #netbtn,body.cinema #netwrap{opacity:0;pointer-events:none;transition:opacity .4s}
   /* Below the status readout, not across it -- camera, aids, detail and frames
      are worth reading while you drive. */
-  #homebtn,#restartbtn{position:fixed;right:18px;top:118px;z-index:9;display:none;
+  #homebtn,#restartbtn,#returnbtn{position:fixed;right:18px;top:118px;z-index:9;display:none;
            font-family:var(--mono);font-size:10px;letter-spacing:.14em;
            text-transform:uppercase;color:var(--paper);cursor:pointer;
            background:#b91c2c;border:1px solid #ef5967;
            border-radius:7px;padding:8px 12px;backdrop-filter:blur(6px)}
-  #homebtn.on{display:block}
-  #homebtn:hover,#restartbtn:hover{background:#dc2639}
+  #homebtn.on,#returnbtn.on{display:block}
+  #homebtn:hover,#restartbtn:hover,#returnbtn:hover{background:#dc2639}
+  #returnbtn{right:104px;background:rgba(8,20,34,.88);border-color:rgba(92,196,255,.72);
+             color:#dff5ff;transition:left .24s ease,top .24s ease,right .24s ease,
+             transform .24s ease,padding .24s ease,font-size .24s ease,
+             box-shadow .24s ease,background .24s ease}
+  #returnbtn.urgent{left:50%;right:auto;top:64vh;transform:translate(-50%,-50%);
+             z-index:12;font-size:clamp(14px,1.6vw,20px);letter-spacing:.18em;
+             padding:16px 27px;background:rgba(6,20,34,.92);border-color:#61d0ff;
+             box-shadow:0 0 0 1px rgba(194,239,255,.18) inset,
+                        0 0 26px rgba(54,184,255,.48),0 12px 38px rgba(0,0,0,.45)}
+  #returnbtn.urgent::before{content:'OFF TRACK · ';color:#76d9ff;font-size:.65em}
   #restartbtn{top:158px}
   #restartbtn.on{display:block}
-  body.cinema #restartbtn,body.airmap #restartbtn,body.customizer-open #restartbtn{display:none}
-  #homebtn:focus-visible,#restartbtn:focus-visible{outline:3px solid white;outline-offset:3px}
+  body.cinema #restartbtn,body.airmap #restartbtn,body.customizer-open #restartbtn,
+  body.cinema #returnbtn,body.airmap #returnbtn,body.customizer-open #returnbtn{display:none}
+  #homebtn:focus-visible,#restartbtn:focus-visible,#returnbtn:focus-visible{outline:3px solid white;outline-offset:3px}
   body.cinema #homebtn{opacity:0;pointer-events:none;transition:opacity .4s ease}
   #tlbtn{position:fixed;right:18px;top:96px;z-index:8;font-family:var(--mono);
          font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper);
@@ -1063,6 +1074,7 @@ if('serviceWorker' in navigator){
 <div id="netbar"><span class="ttlbl">Watching</span><b id="netbarcode">------</b>
   <button id="netstop">Stop</button></div>
 <button id="homebtn">&larr; Home</button>
+<button id="returnbtn" type="button">Return to track</button>
 <button id="restartbtn" type="button">Restart race</button>
 <button id="tlbtn">Track limits</button>
 <button id="replaybtn" style="display:none">Watch best lap</button>
@@ -5867,6 +5879,7 @@ function ttStart(cinematic=true){
   lightsEl.classList.remove('show');
   document.getElementById('tt').classList.add('show');
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.add('on');
+  const rb=document.getElementById('returnbtn'); if(rb) rb.classList.add('on');
   const nb=document.getElementById('netbtn'); if(nb) nb.classList.add('on');
   netHost(); netLabel();
   ttHUD();
@@ -6272,6 +6285,7 @@ function goHome(){
   if(typeof pickEl!=='undefined' && pickEl) pickEl.style.display='';
   document.getElementById('restartbtn').classList.remove('on');
   const hb=document.getElementById('homebtn'); if(hb) hb.classList.remove('on');
+  const rb=document.getElementById('returnbtn'); if(rb) rb.classList.remove('on','urgent');
   const nb=document.getElementById('netbtn'); if(nb) nb.classList.remove('on');
   const nw=document.getElementById('netwrap'); if(nw) nw.classList.remove('on');
   netPanel(false);
@@ -9142,6 +9156,7 @@ function lineInfo(){
                 : ' · drag a point to move the line');
 }
 document.getElementById('homebtn').onclick=goHome;
+document.getElementById('returnbtn').onclick=returnToRacingLine;
 document.getElementById('netbtn').onclick=()=>controllerPanelToggle();
 document.getElementById('controller-close').onclick=()=>controllerPanelToggle(false);
 document.getElementById('netcancel').onclick=()=>netPanel(false);
@@ -9674,12 +9689,17 @@ function tlPoliced(){
 }
 let _tlPoliceHint=0;
 function tlCheck(dt){
-  if(RETIRE.on || !TT.live || TT.cd>0 || CARPTS.length!==4) return;
+  const returnBtn=document.getElementById('returnbtn');
+  if(RETIRE.on || !TT.live || TT.cd>0 || CARPTS.length!==4){
+    if(returnBtn) returnBtn.classList.remove('urgent');
+    return;
+  }
   let on=0;
   for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
-  if(on>0){ _tlOff=0; _tlCounted=false; return; }
+  if(on>0){ _tlOff=0; _tlCounted=false; if(returnBtn)returnBtn.classList.remove('urgent'); return; }
   if(_tlOff===0) _tlPosWas=RACE.pos||0;      // the order on the way off
   _tlOff+=(dt||STEP);
+  if(returnBtn) returnBtn.classList.toggle('urgent',_tlOff>=3);
   if(_tlOff<TL_GRACE || _tlCounted || _tlLock>0) return;
   /* ONLY THE LAST THIRD OF THE LAP.
 
@@ -9689,7 +9709,10 @@ function tlCheck(dt){
      the run to the end of the lap, so that is where it is policed. Earlier on
      you still lose the time the grass costs you -- that is the whole penalty
      there, and it is a fair one. */
-  if(!tlPoliced()){ _tlOff=0; return; }
+  /* Keep the off-track clock running outside the penalty sector. Returning to
+     the road is useful everywhere, even where leaving it earns no advantage;
+     only the offence itself remains limited to the policed part of the lap. */
+  if(!tlPoliced()) return;
   _tlCounted=true;
   _tlLock=TL_QUIET;
   sessionLapInvalid=true;
@@ -10161,6 +10184,39 @@ function resetToTrack(){
   clearDebris();
 }
 
+/* Put the player on the closest point of the actual racing line. The car is
+   stopped first and held just above the road; placeCar then gives it one short
+   gravity fall before handing it back to the normal suspension. */
+function returnToRacingLine(){
+  if(!TT.live || RETIRE.on) return;
+  if(FREEROAM){
+    if(!AI.n && !aiBuild()) return;
+    let at=0, best=Infinity;
+    for(let i=0;i<AI.n;i++){
+      const d=(AI.x[i]-carState.wx)**2+(AI.z[i]-carState.wz)**2;
+      if(d<best){ best=d; at=i; }
+    }
+    const next=(at+1)%AI.n;
+    carState.wx=AI.x[at]; carState.wz=AI.z[at];
+    carState.hdg=Math.atan2(AI.x[next]-AI.x[at],AI.z[next]-AI.z[at]);
+    carState.speed=0; carState.n=0; carState.psi=0;
+    const g=groundAt(carState.wx,carState.wz,1e9);
+    const floor=(g.hit?g.y:(AI.y[at]||0))+RIDE;
+    PLAYER.groundY=floor+0.16;
+    PLAYER.returnDrop={floor,vy:0};
+  }else{
+    carState.n=0; carState.psi=0; carState.speed=0;
+    PLAYER.returnDrop={floor:PLAYER.groundY,vy:0};
+    PLAYER.groundY+=0.16;
+  }
+  PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.bumpX=0; PLAYER.bumpZ=0;
+  PLAYER.yawSpin=0; PLAYER.slipAng=0; PLAYER.impactYaw=0;
+  pitch=0; roll=0; headLean=0; spdPrev=0;
+  _tlOff=0; _tlCounted=false; _tlLock=TL_QUIET;
+  const b=document.getElementById('returnbtn'); if(b)b.classList.remove('urgent');
+  clearDebris();
+}
+
 /* ------------------------------------------------------- shared physics core
    One copy of the engine, the brakes and the grip ceiling, called by both the
    player's drive() and the preview car. It used to be two copies, and they
@@ -10595,7 +10651,15 @@ function placeCar(C, dt, t){
      any speed, no overshoot, no float -- the smoothing that makes this look
      right is entirely spatial, since each wheel already reads the mean of a
      half-metre patch. */
-  if(tgt!==null){ C.groundY=tgt; C.carVY=0; }
+  if(tgt!==null && C.returnDrop){
+    /* A deliberately small visual drop: enough to read as the car being put
+       down, never enough to bounce or damage it. The live ground wins over the
+       stored floor so cambers and uneven road still settle correctly. */
+    C.returnDrop.floor=tgt;
+    C.returnDrop.vy-=9.81*dt;
+    C.groundY+=C.returnDrop.vy*dt;
+    if(C.groundY<=tgt){ C.groundY=tgt; C.carVY=0; C.returnDrop=null; }
+  }else if(tgt!==null){ C.groundY=tgt; C.carVY=0; }
   // the tail steps out on gravel and grass: attitude only, the path is unchanged
   const slipSrc = C.surf.loose ? C.surf.looseFrac*1.0
                 : C.surf.grass ? C.surf.grassFrac*1.01 : 0;
