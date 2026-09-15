@@ -25,3 +25,7 @@ test('tow attacks smoothly but disappears quickly when pulling out',()=>{
   const release=Slipstream.smooth(1,0,0.1);
   assert.ok(attack>0 && attack<1 && release<attack);
 });
+test('presentation identifies straights without changing corner physics',()=>{
+  assert.equal(Slipstream.isStraight({x:0,z:0},{x:0,z:10},{x:0,z:20}),true);
+  assert.equal(Slipstream.isStraight({x:0,z:0},{x:0,z:10},{x:10,z:10}),false);
+});

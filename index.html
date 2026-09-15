@@ -530,6 +530,21 @@
   /* The lap card sits where the gantry hangs, and a clock reading zero is not
      what you are looking at on the grid anyway. It comes back at lights out. */
   body.racestart #tt,body.racestart #netwrap,body.racestart #netbtn{opacity:0;transition:opacity .3s ease}
+  /* Slipstream presentation. The empty centre keeps the circuit unobscured;
+     light lives only at the viewport edge and in the small top label. */
+  #slipstream-fx{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;
+      transition:opacity .16s ease;overflow:hidden}
+  #slipstream-fx:before{content:"";position:absolute;inset:8px;border:2px solid rgba(52,174,255,.78);
+      border-radius:18px;box-shadow:inset 0 0 28px rgba(22,139,255,.32),0 0 22px rgba(39,157,255,.28)}
+  #slipstream-fx .slip-label{position:absolute;top:54px;left:50%;transform:translateX(-50%);
+      color:#dff4ff;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.32em;
+      text-transform:uppercase;white-space:nowrap;text-shadow:0 0 16px #159cff,0 2px 8px #00182d}
+  #slipstream-fx .slip-label:before,#slipstream-fx .slip-label:after{content:"";display:inline-block;
+      width:46px;height:1px;margin:0 15px 4px;background:linear-gradient(90deg,transparent,#45b8ff)}
+  #slipstream-fx .slip-label:after{background:linear-gradient(90deg,#45b8ff,transparent)}
+  #slipstream-fx.on{opacity:1;animation:slip-pulse .82s ease-in-out infinite alternate}
+  @keyframes slip-pulse{from{filter:brightness(.82)}to{filter:brightness(1.28)}}
+  @media (prefers-reduced-motion:reduce){#slipstream-fx.on{animation:none}}
   /* The count sits in the middle of the screen, not at the top: at the top it
      was behind the lap card and you could not see it at all. */
   #golabel{position:fixed;left:50%;top:26vh;transform:translateX(-50%);
@@ -1084,6 +1099,7 @@ if('serviceWorker' in navigator){
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
+<div id="slipstream-fx" aria-hidden="true"><div class="slip-label">Slipstream activated</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake &nbsp; <kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
@@ -10226,6 +10242,33 @@ function updateSlipstream(C,dt){
   C.tow=Slipstream.smooth(C.tow||0,raw,dt);
   return C.tow;
 }
+
+let slipstreamKick=0, slipstreamWasOn=false;
+function slipstreamStraight(){
+  /* Compare the circuit direction ten survey points either side of the car.
+     This identifies the road itself as straight, so moving across it to pass
+     does not incorrectly hide the message. */
+  if(typeof tlSt!=='undefined' && tlSt.length>24){
+    const here=tlStation(carState.wx,carState.wz);
+    if(here){
+      const n=tlSt.length,i=tlLastIdx;
+      const a=tlSt[(i-10+n)%n],m=tlSt[i],b=tlSt[(i+10)%n];
+      return Slipstream.isStraight(a,m,b);
+    }
+  }
+  return Math.abs(PLAYER.steerAng/STEER_RATIO)<0.025;
+}
+function slipstreamPresentation(dt){
+  const physicsOn=PLAYER.tow>0.07 && carState.speed>Slipstream.MIN_SPEED;
+  const show=physicsOn && slipstreamStraight() &&
+             document.body.classList.contains('driving') && !RESULT.on;
+  const el=document.getElementById('slipstream-fx');
+  if(el) el.classList.toggle('on',show);
+  if(physicsOn&&!slipstreamWasOn) slipstreamKick=1;
+  slipstreamWasOn=physicsOn;
+  slipstreamKick*=Math.exp(-2.8*dt);
+  return slipstreamKick;
+}
 /* The yaw the car actually gets for a given steering angle. The geometric
    rate alone would allow ~17 g at top speed, so it is capped at what the
    tyres could hold -- which is also what gives the car its understeer, and
@@ -14386,6 +14429,7 @@ function frame(now){
   PROF.phys+=performance.now()-_t0; PROF.steps+=steps; PROF.frames++;
   tmDraw();
   const dt=Math.max(raw,1e-4);          // the picture's own dt, for the camera
+  const slipZoom=slipstreamPresentation(dt);
   /* Below the declaration of dt, not above it. Placing these two lines where
      the frame counters are read looked tidy and put them two lines before dt
      exists, which is a dead-zone throw on the first frame and takes the whole
@@ -14713,6 +14757,9 @@ function frame(now){
     camera.rotateZ(headLean   + (b2*0.55 + n1*1.20)*0.0110*amp);
     camera.fov = C.fov + sp*C.zoom;
   }
+  /* A short, two-degree lens pull marks entering the tow without changing TV,
+     look-back, orbit or free-look cameras. Physics remains active everywhere. */
+  if(!C.tv&&!orbit&&!freeLook&&!LOOKBACK) camera.fov-=2.2*slipZoom;
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   skyDome.position.copy(camera.position);   // the dome is finite; keep it centred

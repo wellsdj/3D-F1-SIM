@@ -34,5 +34,10 @@
     const response=target>current?5.5:12;
     return current+(target-current)*(1-Math.exp(-response*Math.max(0,dt)));
   }
-  return {strength, smooth, MIN_SPEED, MAX_TIME_GAP, MAX_LATERAL};
+  function isStraight(a,m,b,cosLimit=0.9985){
+    const ax=m.x-a.x,az=m.z-a.z,bx=b.x-m.x,bz=b.z-m.z;
+    const al=Math.hypot(ax,az)||1,bl=Math.hypot(bx,bz)||1;
+    return (ax*bx+az*bz)/(al*bl)>cosLimit;
+  }
+  return {strength, smooth, isStraight, MIN_SPEED, MAX_TIME_GAP, MAX_LATERAL};
 });
