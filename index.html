@@ -19,6 +19,22 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--ink);overflow:hidden}
+  #startup-load{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;
+    background:radial-gradient(circle at 50% 43%,rgba(26,36,52,.96),rgba(3,6,11,.995) 58%);
+    color:var(--paper);font-family:var(--mono);transition:opacity .38s ease,visibility .38s ease}
+  #startup-load.done{opacity:0;visibility:hidden;pointer-events:none}
+  #startup-load .startup-core{display:grid;justify-items:center;gap:18px;text-align:center}
+  #startup-load .startup-ring{position:relative;width:86px;height:86px;border-radius:50%;
+    border:1px solid rgba(236,234,228,.16);box-shadow:inset 0 0 28px rgba(242,162,12,.08)}
+  #startup-load .startup-ring:before{content:"";position:absolute;inset:-2px;border-radius:50%;
+    border:3px solid transparent;border-top-color:#f2a20c;border-right-color:rgba(255,91,40,.72);
+    filter:drop-shadow(0 0 9px rgba(242,162,12,.58));animation:startup-spin .82s linear infinite}
+  #startup-load .startup-ring:after{content:"";position:absolute;width:8px;height:8px;left:50%;top:-5px;
+    border-radius:50%;background:#fff3cf;box-shadow:0 0 15px #f2a20c;transform:translateX(-50%)}
+  #startup-load b{font-size:15px;letter-spacing:.28em;text-transform:uppercase;font-weight:600}
+  #startup-load span{font-size:9px;letter-spacing:.2em;text-transform:uppercase;opacity:.55}
+  @keyframes startup-spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){#startup-load .startup-ring:before{animation-duration:1.8s}}
   canvas#c{display:block;width:100%;height:100%}
   #vignette{
     position:fixed;inset:0;pointer-events:none;
@@ -994,6 +1010,13 @@ if('serviceWorker' in navigator){
 <link rel="stylesheet" href="home-apex.css">
 </head>
 <body>
+<div id="startup-load" role="status" aria-live="polite" aria-label="Loading game">
+  <div class="startup-core">
+    <div class="startup-ring" aria-hidden="true"></div>
+    <b>Loading Slipstream</b>
+    <span id="startup-load-status">Preparing the garage</span>
+  </div>
+</div>
 <div id="perf"></div>
 <style>
 #perf{position:fixed;left:12px;top:12px;z-index:60;display:none;
@@ -14984,6 +15007,15 @@ function frame(now){
    cannot be built until a track is chosen -- and for an imported one, not until
    its model has arrived and given up its centreline. */
 let booted=false, assetsDone=false, worldDone=false;
+let pageDone=document.readyState==='complete';
+const startupLoadEl=document.getElementById('startup-load');
+const startupLoadStatusEl=document.getElementById('startup-load-status');
+function startupLoadFinish(){
+  if(!pageDone||!assetsDone)return;
+  startupLoadEl.classList.add('done');
+  startupLoadEl.setAttribute('aria-hidden','true');
+}
+addEventListener('load',()=>{pageDone=true;startupLoadFinish();},{once:true});
 /* Every stage of getting onto a circuit reports here. A load that is still
    moving keeps resetting the clock; one that has stopped -- a dropped
    connection, a texture that never answers, an asset the counter is still
@@ -14993,7 +15025,10 @@ const LOAD_STALL_MS=25000;
 let loadLast=performance.now(), loadWhat='starting';
 function loadTick(what){
   loadLast=performance.now();
-  if(what){ loadWhat=what; qualifyingLoadSetStatus(what); }
+  if(what){
+    loadWhat=what; qualifyingLoadSetStatus(what);
+    if(startupLoadStatusEl&&!assetsDone)startupLoadStatusEl.textContent=what;
+  }
 }
 
 function applyTrackConstants(t){
@@ -15050,7 +15085,7 @@ function maybeStart(){
   runFrame();
   qualifyingLoadReady();
 }
-function ready(){ assetsDone=true; loadTick('Assets ready'); maybeStart(); }
+function ready(){ assetsDone=true; loadTick('Assets ready'); startupLoadFinish(); maybeStart(); }
 
 const bootEl=document.getElementById('boot');
 const pickEl=document.getElementById('pick');
