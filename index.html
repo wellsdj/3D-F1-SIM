@@ -5420,11 +5420,13 @@ addEventListener('keydown',e=>{
     }
     if(k==='c'){ lineCopy(); e.preventDefault(); return; }
   }
-  /* G opens the circuit from above with the brush in hand. The button that used
-     to do this is set to display:none -- it was tidied off the screen as a tool
-     rather than a control -- so until now there was no way to reach the paint at
-     all, which is why it could not be found. */
-  if(k==='g' && EDITOR_KEYS && FREEROAM && !TTREC.playing && !NET.watching){
+  /* G opens the circuit from above with the barrier brush in hand, and is back
+     on the keyboard by request: the walls a circuit needs are found by driving
+     into the places that do not have one -- usually while watching a car do
+     exactly that, mid-race -- and having to reach for SIM at that moment is how
+     they never get drawn. So it opens whenever the circuit is up, race or not.
+     It is the barrier tool only; the line editor stays behind EDITOR_KEYS. */
+  if(k==='g' && FREEROAM && !TTREC.playing && !NET.watching){
     if(!m2On){ m2Tool='wall'; wallEnd(); }
     m2Show(!m2On);
   }
@@ -7183,6 +7185,8 @@ function wallsBake(){
   };
   BARR_SEGS=wallsIndexBuild(nearRoad);
   barrSave();
+  /* And the rivals are told: a wall you draw is room they no longer have. */
+  if(typeof aiWallRoomBuild==='function') aiWallRoomBuild();
   return BARR.count;
 }
 /* Split, because which one removed a wall is the whole diagnosis: the paint is
@@ -7198,14 +7202,19 @@ function wallsPack(){
   return JSON.stringify(WALLS.map(l=>{
     const flat=[];
     for(const p of l) flat.push(+p.x.toFixed(2), +p.z.toFixed(2));
-    return flat;
+    /* A hand-drawn wall says so, so that it is still exempt from the
+       mis-trace rule after a reload. Everything else stays a flat run. */
+    return l.hand ? {h:1, p:flat} : flat;
   }));
 }
 function wallsUnpack(txt){
   const d=JSON.parse(txt);
   if(!Array.isArray(d)) return false;
   const out=[];
-  for(const l of d){
+  for(let l of d){
+    /* {h:1,p:[…]} is a hand-drawn wall; a bare run is a traced one. */
+    let hand=false;
+    if(l && !Array.isArray(l) && Array.isArray(l.p)){ hand=!!l.h; l=l.p; }
     if(!Array.isArray(l)) continue;
     const pts=[];
     /* Both spellings read: flat runs, and the [x,z] pairs an earlier save
@@ -7213,7 +7222,7 @@ function wallsUnpack(txt){
        got more compact afterwards. */
     if(Array.isArray(l[0])){ for(const p of l) pts.push({x:+p[0], z:+p[1]}); }
     else { for(let i=0;i+1<l.length;i+=2) pts.push({x:+l[i], z:+l[i+1]}); }
-    if(pts.length>1) out.push(pts);
+    if(pts.length>1){ if(hand) pts.hand=true; out.push(pts); }
   }
   if(!out.length) return false;
   WALLS.length=0;
@@ -7282,6 +7291,11 @@ function wallsUndo(){
    pressing G by accident cannot lose a wall halfway through. */
 function wallCommit(){
   if(!wallDraw || wallDraw.length<2) return;
+  /* Drawn by hand, and marked as such. The mis-trace rule below throws away a
+     wall that lies mostly within half a metre of the road, because that is
+     what a mis-detected kerb edge looks like -- but a barrier somebody drew
+     there drew it there on purpose, and it is kept whole. */
+  wallDraw.hand=true;
   if(wallDrawIdx<0){ WALLS.push(wallDraw); wallDrawIdx=WALLS.length-1; }
   else WALLS[wallDrawIdx]=wallDraw;
   wallsSave(); wallsBake();
@@ -9501,7 +9515,7 @@ function wallsIndexBuild(near){
        kerb edge or a white line the detector mistook for one -- and all of it
        goes. Nothing is ever half-kept. */
     let inside=0, total=0;
-    if(near){
+    if(near && !line.hand){
       for(let i=0;i+1<line.length;i++){
         const ax=line[i].x, az=line[i].z, bx=line[i+1].x, bz=line[i+1].z;
         const d=Math.hypot(bx-ax, bz-az);
@@ -11453,6 +11467,7 @@ function aiApplyAdj(lo, hi){
     for(let m=Math.round(100/AI.ds);m<Math.round(650/AI.ds);m++){const i=(start-m+n)%n,k=Math.abs(AI.ks[i]);if(k>peak){peak=k;AI.lastApex=i;}}
   }
   AI.v=aiProfile(AI.k, AI._margin||AI_MARGIN);
+  aiWallRoomBuild();          // the line moved, so what the barriers leave moved with it
   aiBuildLines(AI._margin||AI_MARGIN);
   aiPedalMap();
   return true;
@@ -12002,11 +12017,72 @@ function aiRivalRel(d){
   }
   return best;
 }
-/* How much room there is either side of the line here, from the survey. */
+/* WHAT THE DRAWN BARRIERS LEAVE, STATION BY STATION.
+
+   The survey says where the road is, and until now that was the only thing the
+   AI's room answered to -- so a barrier drawn inside the surveyed edge (which
+   is exactly where you would draw one, to close off somewhere they keep
+   ending up) was invisible to them and they drove into it. Every wall in
+   WALLS is walked once, each point filed against the station it is beside, and
+   the nearest one on each side becomes room the same way an edge is.
+
+   Rebuilt when the walls change or the line does, never per frame: one pass
+   over the drawn lines against a coarse grid of the stations. */
+let AI_WALLROOM=null;
+const AI_WALL_KEEP=1.7;            // half a car and a margin: they do not brush it
+const AI_WALL_REACH=14;            // metres either side of the line worth knowing about
+function aiWallRoomBuild(){
+  AI_WALLROOM=null;
+  const n=AI.n;
+  if(!n || !AI.x || !AI.nx || !WALLS.length) return 0;
+  const room=new Float32Array(n*2).fill(99);      // [i*2]=left, [i*2+1]=right
+  const CELL=16, grid=new Map();
+  for(let i=0;i<n;i++){
+    const k=Math.floor(AI.x[i]/CELL)+','+Math.floor(AI.z[i]/CELL);
+    let L=grid.get(k); if(!L) grid.set(k,L=[]); L.push(i);
+  }
+  let seen=0;
+  const put=(px,pz)=>{
+    const a=Math.floor(px/CELL), b=Math.floor(pz/CELL);
+    for(let da=-1;da<=1;da++) for(let db=-1;db<=1;db++){
+      const L=grid.get((a+da)+','+(b+db)); if(!L) continue;
+      for(const i of L){
+        const dx=px-AI.x[i], dz=pz-AI.z[i];
+        const lat=dx*AI.nx[i]+dz*AI.nz[i];                 // +ve to the right
+        const lon=dx*(-AI.nz[i])+dz*AI.nx[i];              // along the line
+        if(Math.abs(lon)>AI.ds || Math.abs(lat)>AI_WALL_REACH) continue;
+        const s=lat>=0?1:0;
+        const m=Math.abs(lat);
+        if(m<room[i*2+s]){ room[i*2+s]=m; seen++; }
+      }
+    }
+  };
+  for(const line of WALLS){
+    for(let i=0;i+1<line.length;i++){
+      const ax=line[i].x, az=line[i].z, bx=line[i+1].x, bz=line[i+1].z;
+      const len=Math.hypot(bx-ax,bz-az), steps=Math.max(1,Math.ceil(len/0.6));
+      for(let s=0;s<=steps;s++) put(ax+(bx-ax)*s/steps, az+(bz-az)*s/steps);
+    }
+  }
+  AI_WALLROOM=room;
+  return seen;
+}
+/* The least room a wall leaves near here. A line is driven with a lag, so the
+   wall twenty metres up the road is the one that matters as much as this one. */
+function aiWallRoom(i, side){
+  if(!AI_WALLROOM) return 99;
+  const n=AI.n, s=side>0?1:0;
+  let r=99;
+  for(let o=-4;o<=20;o+=4) r=Math.min(r, AI_WALLROOM[(((i+Math.round(o/AI.ds))%n+n)%n)*2+s]);
+  return r;
+}
+/* How much room there is either side of the line here: the survey, and any
+   barrier that has been drawn inside it. */
 function aiRoom(i, side, keep){
   const st=tlStation(AI.x[i], AI.z[i]);
-  if(!st) return 6;
-  return Math.max(0, (side>0?st.dR:st.dL) - (keep||1.3));   // half a car, and a little
+  const wall=aiWallRoom(i, side)-AI_WALL_KEEP;
+  if(!st) return Math.max(0, Math.min(6, wall));            // off the survey, as before
+  return Math.max(0, Math.min((side>0?st.dR:st.dL), wall) - (keep||1.3));  // half a car, and a little
 }
 /* The least room there is on this side anywhere near here. A line is planned
    metres in advance and driven with a lag, so an offset that fits at this
@@ -12103,6 +12179,12 @@ function aiTraffic(d,dt){
     if(score<best){best=score;want=lat;}
   }
   if(d.forced&&d.field[d.forced])want=clamp(d.field[d.forced][d.i],-left,right);
+  /* A barrier the line itself runs too close to does not merely cap the
+     offset, it pushes the car off: this is what stops them diving down the
+     inside of La Source into a wall that was drawn exactly to stop that. */
+  const pushR=AI_WALL_KEEP-aiWallRoom(d.i,1), pushL=AI_WALL_KEEP-aiWallRoom(d.i,-1);
+  if(pushR>0) want=clamp(Math.min(want,-pushR),-left,right);
+  if(pushL>0) want=clamp(Math.max(want, pushL),-left,right);
   d.line='race';d.mode=Math.abs(want-base)>.4?'pass':'clear';d.want=want;
   d.speedK=1;d.capV=Infinity;d.vAct=d.v;d.pinned=false;
   const grid=d._gridT===undefined?1:clamp(.25+d._gridT/2,.25,1);
@@ -12211,20 +12293,27 @@ function aiFirstProgress(d,q=d.i){
    The car ends up on the power earlier while still cornering at exactly the
    speed the grip allows, which is what a real one does. The entry stays close
    to where it was, because loosening that is how cars end up in the gravel. */
+/* The cap lets go a few metres BEFORE the inside kerb, not at the apex. Waiting
+   for the apex meant the field was still being held to a hairpin speed while
+   already unwinding the wheel; a driver is hard on the power from the middle of
+   La Source, and the grip-limited profile underneath is what should be deciding
+   from there -- which it now does, because the cap stops binding. */
 function aiFirstLimit(d,q){
   const F=(typeof AI_FINAL!=='undefined')?AI_FINAL
-        :{t1entry:36,t1exitA:18,t1exitD:4};
+        :{t1entry:36,t1exitA:28,t1exitD:0,t1exitFrom:-9};
+  const from=(F.t1exitFrom===undefined?-9:F.t1exitFrom);
   const p=aiFirstProgress(d,q);
   if(p < -160 || p > 120)return Infinity;
-  return p<0 ? Math.sqrt(22*22+2*F.t1entry*Math.max(0,-p-22))
-             : Math.sqrt(22*22+2*F.t1exitA*Math.max(0,p-F.t1exitD));
+  return p<from ? Math.sqrt(22*22+2*F.t1entry*Math.max(0,-p-22))
+                : Math.sqrt(22*22+2*F.t1exitA*Math.max(0,p-from-F.t1exitD));
 }
 /* The last corner's tuning, in one place and reachable from SIM.finalTune so
    it can be measured rather than guessed at. */
 const AI_FINAL={ late:2.0, exit:140, hold:0.93, brake:44.8,
-                 /* turn one: entry decel, exit accel, and the dead zone after
-                    the apex before any of it is allowed */
-                 t1entry:36, t1exitA:18, t1exitD:4 };
+                 /* turn one: entry decel, exit accel, where the exit ramp
+                    starts relative to the apex (negative is before it), and a
+                    dead zone after that before any of it is allowed */
+                 t1entry:36, t1exitA:28, t1exitD:0, t1exitFrom:-9 };
 function aiPedals(d, C){
   /* Read through a guard: tests/contact-tuning lifts this function out and
      runs it in a sandbox, so it cannot depend on an outer binding existing.
@@ -12262,8 +12351,9 @@ function aiPedals(d, C){
      traffic anyway: aiTraffic moves the car sideways and leaves the pace to
      the reference lap. */
   const firstProg=aiFirstProgress(d);
+  const t1From=(F.t1exitFrom===undefined?-9:F.t1exitFrom);
   const onExit=(finalProgress>=0 && finalProgress<F.exit)
-            || (firstProg>=0 && firstProg<F.exit);
+            || (firstProg>=t1From && firstProg<F.exit);
   const BRAKE=finalApproach?F.brake:44; // reserve below the physical 46 m/s² limit
   /* The floor has to allow the late-braking offset through -- at -3.4 the
      clamp was eating most of it and the car braked five metres later instead
@@ -12289,7 +12379,7 @@ function aiPedals(d, C){
   const la=Math.max(3,v*.35),j=(d.i+Math.round(la/d.ds))%d.n;
   let tgt=target(j);
   const first=aiFirstProgress(d);
-  if(first>20&&first<120)tgt=Math.min(Math.max(tgt,V[(d.i+Math.round(35/d.ds))%d.n]*K),aiFirstLimit(d,d.i)*K);
+  if(first>t1From&&first<120)tgt=Math.min(Math.max(tgt,V[(d.i+Math.round(35/d.ds))%d.n]*K),aiFirstLimit(d,d.i)*K);
   const mark=(AI.mark&&AI.mark[d.i])||0;
   if(mark>0)tgt=Math.max(tgt,target((d.i+Math.round(100/d.ds))%d.n));
   if(mark<0)return {thr:0,brk:0};
@@ -12827,6 +12917,10 @@ function raceFinish(){
 const COOL={ on:false, t:0, v0:0, driver:null, card:null, scene:false, done:false };
 const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
 const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
+const COOL_RACE_T=4.5;     // seconds of driving it exactly as a rival would
+const COOL_PARK_OFF=4.0;   // metres right of the line it aims to stop at
+const COOL_PULL_RATE=0.9;  // how fast it walks across, m/s
+const COOL_STOP_V=13;      // m/s: below this it brakes itself to a stop
 function coolStart(){
   if(COOL.on || !AI.x || !AI.x.length) return;
   COOL.on=true; COOL.t=0; COOL.done=false; COOL.scene=false;
@@ -12863,15 +12957,31 @@ function coolInputs(dt){
      target that eases off the speed you crossed at, floored so it still gets
      round rather than stopping on the circuit. The AI's own corner speed still
      caps it, so it brakes for the corners on the way home. */
-  d.speedK=0.7; d.mode='clear'; d.line='race';
-  const corner=(d.v && d.v[d.i]) ? d.v[d.i]*0.72 : Infinity;
-  const ease=Math.max(0.40, 1-COOL.t*0.055);
-  const want=Math.max(22, Math.min((COOL.v0||st.speed)*ease, corner));
+  d.speedK=1; d.mode='clear'; d.line='race';
   const v=st.speed;
-  const thr = v < want-1.5 ? 0.34 : 0;
-  const brk = v > want+2.0 ? 0.30 : 0;
-  d._thr=thr; d._brk=brk;
-  return { thr, brk, steer:aiSteer(d, C, dt) };
+  const p=aiPedals(d, C);
+  /* FIRST, EXACTLY WHAT A RIVAL WOULD DO HERE.
+     The takeover used to drop straight to a crawl, which looks nothing like a
+     driver finishing a race: the flag falls and the car carries on at racing
+     pace for a few seconds, on the line, braking for whatever is in front of
+     it, because that is what actually happens. */
+  if(COOL.t < COOL_RACE_T){
+    d.lat += clamp(0-d.lat, -1.8*dt, 1.8*dt);
+    d._thr=p.thr; d._brk=p.brk;
+    return { thr:p.thr, brk:p.brk, steer:aiSteer(d, C, dt) };
+  }
+  /* THEN OFF THE THROTTLE, AND OVER TO THE SIDE.
+     No throttle from here at all -- it coasts down, keeps whatever braking the
+     corners genuinely need so it does not sail off at Eau Rouge, and walks
+     across to the right-hand edge as it slows. Below walking pace it brakes
+     itself to a stop and holds there. */
+  const edge=Math.max(0, aiRoom(d.i, 1, 1.6));
+  const park=Math.min(edge, COOL_PARK_OFF);
+  d.lat += clamp(park-d.lat, -COOL_PULL_RATE*dt, COOL_PULL_RATE*dt);
+  let brk=p.brk;
+  if(v < COOL_STOP_V) brk=Math.max(brk, v>0.5 ? 0.24 : 1);
+  d._thr=0; d._brk=brk;
+  return { thr:0, brk, steer:aiSteer(d, C, dt) };
 }
 function coolStep(dt){
   if(!COOL.on) return;
@@ -13767,6 +13877,29 @@ window.SIM={
     c.dispatchEvent(new PointerEvent('pointerup',{clientX:sx,clientY:sy,bubbles:true}));
     return {handle:bi, brush:m2Brush};
   },
+  /* Draw a barrier the way the G editor does -- hand-marked, baked, and told
+     to the rivals -- and report what it left them. Used to check that a wall
+     put somewhere they keep ending up is a wall they stop going to. */
+  wallDrawn(pts){
+    if(pts){
+      const line=pts.map(p=>({x:p[0], z:p[1]}));
+      line.hand=true;
+      WALLS.push(line);
+      wallsBake();
+    }
+    const at=(x,z)=>{
+      let bi=0,bd=Infinity;
+      for(let i=0;i<AI.n;i++){ const q=(AI.x[i]-x)**2+(AI.z[i]-z)**2; if(q<bd){bd=q;bi=i;} }
+      return {i:bi, left:+aiWallRoom(bi,-1).toFixed(2), right:+aiWallRoom(bi,1).toFixed(2),
+              roomL:+aiRoom(bi,-1).toFixed(2), roomR:+aiRoom(bi,1).toFixed(2)};
+    };
+    return { walls:WALLS.length, segs:SEG.n, mapped:!!AI_WALLROOM,
+             at: pts?at(pts[0][0], pts[0][1]):null };
+  },
+  aiRoomAt(i,side){ return aiRoom(i,side); },
+  /* Take the barriers out of what the rivals know, to measure against it. */
+  aiWalls(on){ if(on===false) AI_WALLROOM=null; else if(on===true) aiWallRoomBuild();
+               return !!AI_WALLROOM; },
   driver(i){ return AIS[i]; },
   lateBrake(on){ AI_LATE_BRAKE=!!on; return AI_LATE_BRAKE; },
   allLaps(){ return AIS.map(d=>d.laps||[]); },
@@ -13788,10 +13921,13 @@ window.SIM={
       d.i=i; d._onBrakes=false; d._brkS=0; d.car.st.speed=vIn;
       if(aiPedals(d,d.car).brk>0.02){ brakePoint=+(m*AI.ds).toFixed(1); break; }
     }
-    const step=Math.max(1,Math.round(20/AI.ds)), exit=[];
+    /* From thirty metres BEFORE the apex, because that is where the question
+       now is: the exit cap lets go before the inside kerb, so the throttle
+       before the apex is part of the measurement. */
+    const step=Math.max(1,Math.round(10/AI.ds)), exit=[];
     d._exitThr=0;
-    for(let m=0;m<Math.round(160/AI.ds);m+=step){
-      const i=(AI.firstApex+m)%AI.n;
+    for(let m=-Math.round(30/AI.ds);m<Math.round(160/AI.ds);m+=step){
+      const i=(((AI.firstApex+m)%AI.n)+AI.n)%AI.n;
       d.i=i; d._onBrakes=false; d._brkS=0; d.car.st.speed=AI.v[i];
       exit.push([+(m*AI.ds).toFixed(0), +aiPedals(d,d.car).thr.toFixed(2)]);
     }
@@ -14301,7 +14437,10 @@ window.SIM={
   celebrateAt(p){ celebrate(p||1); return true; },
   coolState(){ return {on:COOL.on, t:+COOL.t.toFixed(1), card:!!COOL.card, done:COOL.done,
                        kph:+(Math.abs(carState.speed)*3.6).toFixed(0),
-                       thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2)}; },
+                       thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2),
+                       brk:+(COOL.driver?COOL.driver._brk||0:0).toFixed(2),
+                       /* how far it has walked across towards the edge */
+                       lat:+(COOL.driver?COOL.driver.lat||0:0).toFixed(2)}; },
   aiPin(i,on){ const d=AIS[i]; if(!d) return false;
     d._pinTest=!!on;
     if(on){ d.hold=false; d.react=0; }   // released, then wedged
