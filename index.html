@@ -70,7 +70,7 @@
               background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:3px;
               padding:6px 10px;cursor:pointer}
   #joybtn:hover{background:rgba(255,255,255,.12)}
-  #joybtn.on{background:rgba(120,220,140,.18);border-color:rgba(120,220,140,.55);color:#c9ffd6}
+  #joybtn.on{background:rgba(218,36,62,.28);border-color:rgba(255,92,112,.7);color:#fff}
   /* --------------------------------------------- track limits, by hand */
 
   /* ------------------------------------------ track limits, seen from above */
@@ -1011,7 +1011,7 @@ if('serviceWorker' in navigator){
 <div class="hud" id="tag"><b>Circuit 01 — Pinewood</b><span id="tagsub">Solis SR-9</span></div>
 <div class="hud" id="status">Camera <em id="camname">Nose cam</em><br>Aids <em id="aname">On</em><br>Detail <em id="dname">Full</em><br>Frames <em id="fname">60</em><br>Joystick <em id="jname">Not connected</em></div>
 <button id="gridtoggle" style="display:none">Editor</button>
-<button id="joybtn">Connect Joystick</button>
+<button id="joybtn" type="button" aria-pressed="false">Mute engine sound</button>
 <div id="m2wrap">
   <canvas id="m2canvas" width="1600" height="1000"></canvas>
   <div id="m2hint">Click to drop a point, click again for the next &mdash; the line joins them up
@@ -5254,6 +5254,13 @@ function drawCornerMap(){
 const engineAudio=new EngineSound.Player(ASSETS.snd);
 function initAudio(){engineAudio.unlock();}
 function unlockAudio(){engineAudio.unlock();}
+function paintEngineMute(){
+  const button=document.getElementById('joybtn');
+  if(!button)return;
+  button.classList.toggle('on',engineAudio.muted);
+  button.setAttribute('aria-pressed',String(engineAudio.muted));
+  button.textContent=engineAudio.muted?'Engine sound muted':'Mute engine sound';
+}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)engineAudio.stop();});
 window.addEventListener('pagehide',()=>engineAudio.stop());
 
@@ -5494,7 +5501,10 @@ async function joyConnect(){
 if(navigator.serial){
   navigator.serial.getPorts().then(ports=>{ if(ports.length) joyPort=ports[0]; }).catch(()=>{});
 }
-document.getElementById('joybtn').addEventListener('click',joyConnect);
+document.getElementById('joybtn').addEventListener('click',()=>{
+  engineAudio.toggleMute();
+  paintEngineMute();
+});
 
 /* Camera rig. Cockpit p is a point in the car model's own space (metres
    before the fit-to-5.6 m scale). Chase rides the centreline behind the car. */
@@ -5531,8 +5541,7 @@ function updateStatus(){
   const jn=document.getElementById('jname');
   if(jn) jn.textContent = !navigator.serial ? 'Unsupported browser'
                          : joyConnected ? 'Connected (click again to recentre)' : 'Not connected';
-  const jb=document.getElementById('joybtn');
-  if(jb) jb.classList.toggle('on', joyConnected);
+  paintEngineMute();
 }
 /* Full detail by default, and nothing downgrades it behind your back -- the
    old adaptive check dropped the scene to Low a couple of seconds after load
@@ -8668,10 +8677,11 @@ function tvUpdate(t,dt){
    triangles should never cost somebody a lap. */
 const TL_KEY='f1sim.tt.limits.v2';
 const TL_OFF=Infinity;
-let TL_TOL=1;
+const TL_SLOP=.25;                    // roughly one eighth of an F1 car width
+let TL_TOL=TL_SLOP;
 let _tlFrames=0;
-function tlLoad(){TL_TOL=1;}
-function tlSet(){TL_TOL=1;try{localStorage.setItem(TL_KEY,'1');}catch(e){}}
+function tlLoad(){TL_TOL=TL_SLOP;}
+function tlSet(){TL_TOL=TL_SLOP;try{localStorage.setItem(TL_KEY,String(TL_SLOP));}catch(e){}}
 /* Where the white lines are, measured once off the model's own geometry.
 
    No material test can do this here. The circuit's asphalt is asph_new and
@@ -9103,7 +9113,7 @@ function tlWheelOn(lx,lz){
      picked up the brush. */
   const painted=surfOn(wx,wz);
   if(painted===true)return true;
-  if(painted===false)return [[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]].some(([x,z])=>surfOn(wx+x,wz+z)===true);
+  if(painted===false)return [[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]].some(([x,z])=>surfOn(wx+x*TL_SLOP,wz+z*TL_SLOP)===true);
   const st=tlStation(wx,wz);
   if(!st) return true;                  // nothing measured: never take a lap away
   const off=(wx-st.x)*st.rx + (wz-st.z)*st.rz;    // + is right of the line
@@ -9356,15 +9366,14 @@ document.getElementById('tlcopy').onclick=e=>{ const t=tleText();
   console.log('track limit edges (model coordinates):\n'+t); copyFlash(e.currentTarget,t); };
 /* Track limits.
 
-   All four wheels have to be on the paint. Being off is not the offence,
-   though: staying off is. A wheel clipping the far side of a kerb for a tenth
-   of a second is racing, so the clock only starts once every wheel is past the
-   paint and only counts as an offence after three tenths of a second. Come
-   back inside before that and nothing happened.
+   One wheel on the paint keeps the car legal. The clock starts once all four
+   wheels are more than 25 cm beyond it, and a race offence is called after a
+   tenth of a second. That small allowance stops line-edge noise from becoming
+   a warning while still catching a car that has clearly left the circuit.
 
    The lap is no longer deleted for it. Deleting a lap says nothing during a
    race, and a race is the only thing being driven at the moment. */
-const TL_GRACE=0.30;
+const TL_GRACE=0.10;
 /* And once it has said something, it says nothing for five seconds.
 
    Coming back onto the circuit after a wide moment often means clipping the
@@ -9714,7 +9723,8 @@ function tlCheck(dt){
   _tlOff+=(dt||STEP);
   if(returnBtn) returnBtn.classList.toggle('urgent',_tlOff>=3);
   if(_tlOff<TL_GRACE || _tlCounted || _tlLock>0) return;
-  /* ONLY THE LAST THIRD OF THE LAP.
+  /* Non-race timed runs retain the final-sector rule. A race is policed around
+     the whole lap, so leaving the track at any corner is treated consistently.
 
      Most of this circuit runs kerb-to-grass with nothing gained by touching
      it, and having every one of those count made the flag something you
@@ -9725,7 +9735,7 @@ function tlCheck(dt){
   /* Keep the off-track clock running outside the penalty sector. Returning to
      the road is useful everywhere, even where leaving it earns no advantage;
      only the offence itself remains limited to the policed part of the lap. */
-  if(!tlPoliced()) return;
+  if(!RACE.on && !tlPoliced()) return;
   _tlCounted=true;
   _tlLock=TL_QUIET;
   sessionLapInvalid=true;
@@ -9793,7 +9803,7 @@ function limitsGained(){
 }
 function limitsHit(){
   if(LIMITS.dsq) return;
-  if(!limitsGained()){
+  if(!RACE.on && !limitsGained()){
     limitsSay('OFF THE TRACK','no lasting advantage — not counted');
     return;
   }

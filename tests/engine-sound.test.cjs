@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {Model,Renderer,CLIPS,accelerationOffset,prepare}=require('../engine-sound.js');
+const {Model,Renderer,Player,CLIPS,accelerationOffset,prepare}=require('../engine-sound.js');
 const input=(speed,throttle=1,brake=0)=>({speed:speed/3.6,throttle,brake});
 const run=(m,i,seconds)=>{let p;for(let t=0;t<seconds;t+=.02)p=m.update(i,.02);return p;};
 test('grid always uses idle and never advances acceleration',()=>{
@@ -94,6 +94,14 @@ test('kerb recording is a separate quieter looping layer',()=>{
  r.apply({key:1,mode:'accel',offset:0,rate:1,volume:.85,kerbVolume:.5,kerbRate:.7},0);
  assert.equal(ctx.sources.length,2);assert.equal(ctx.sources[1].playbackRate.value,.7);
  assert.ok(r.kerbVoice.volume<.85);r.stop();
+});
+test('engine mute controls the master mix and survives renderer creation',()=>{
+ const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end,gain:1}]));
+ const renderer=new Renderer(ctx,bank);renderer.setMuted(true);
+ assert.equal(renderer.muted,true);assert.equal(renderer.master.gain.value,0);
+ renderer.setMuted(false);assert.equal(renderer.master.gain.value,.65);
+ const player=new Player({});player.context=ctx;player.setMuted(true);
+ assert.equal(player.status().muted,true);assert.equal(player.toggleMute(),false);
 });
 test('renderer reuses held clip, bounds crossfades, and stops every source',()=>{
  const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end}]));

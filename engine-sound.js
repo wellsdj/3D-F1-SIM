@@ -169,6 +169,12 @@
    this.limiter=ctx.createDynamicsCompressor();this.limiter.threshold.value=-3;this.limiter.knee.value=2;this.limiter.ratio.value=12;this.limiter.attack.value=.003;this.limiter.release.value=.12;
    this.master.connect(this.filter);this.filter.connect(this.limiter);this.limiter.connect(ctx.destination);
   }
+  setMuted(muted,now=this.ctx.currentTime){
+   this.muted=!!muted;
+   const target=this.muted?0:.65,current=this.master.gain.value;
+   this.master.gain.cancelScheduledValues(now);this.master.gain.setValueAtTime(current,now);
+   this.master.gain.linearRampToValueAtTime(target,now+.06);
+  }
   remove(v){v.source.disconnect();v.gain.disconnect();this.voices.delete(v);if(this.current===v)this.current=null;}
   applyKerb(plan,now){
    const clip=this.buffers.kerb,volume=plan.kerbVolume||0;
@@ -217,7 +223,7 @@
   dispose(){this.stop();this.master.disconnect();this.filter.disconnect();this.limiter.disconnect();}
  }
  class Player{
-  constructor(assets){this.assets=assets;this.context=null;this.renderer=null;this.model=new Model();this.loading=null;this.lastTime=null;this.errors=[];}
+  constructor(assets){this.assets=assets;this.context=null;this.renderer=null;this.model=new Model();this.loading=null;this.lastTime=null;this.errors=[];this.muted=false;}
   unlock(){
    if(!this.context){const AC=typeof window!=='undefined'&&(window.AudioContext||window.webkitAudioContext);if(!AC)return;this.context=new AC();}
    if(this.context.state==='suspended')this.context.resume().catch(()=>{});
@@ -229,8 +235,10 @@
     try{const r=await fetch(url);if(!r.ok)throw Error('HTTP '+r.status);buffers[name]=prepare(this.context,await this.context.decodeAudioData(await r.arrayBuffer()),CLIPS[name]);}
     catch(e){this.errors.push(name+': '+e.message);console.warn('Engine audio unavailable:',name,e.message);}
    }));
-   this.renderer=new Renderer(this.context,buffers);
+   this.renderer=new Renderer(this.context,buffers);this.renderer.setMuted(this.muted);
   }
+  setMuted(muted){this.muted=!!muted;if(this.renderer)this.renderer.setMuted(this.muted);return this.muted;}
+  toggleMute(){return this.setMuted(!this.muted);}
   update(input){
    if(!this.renderer||this.context.state!=='running')return;
    const now=this.context.currentTime,dt=this.lastTime==null?0:now-this.lastTime;this.lastTime=now;
@@ -238,7 +246,7 @@
   }
   stop(){this.lastTime=null;if(this.renderer)this.renderer.stop();this.model.reset();}
   reset(){this.stop();}
-  status(){return {ready:!!this.renderer,mode:this.model.mode,offset:this.model.cursor,voices:this.renderer?this.renderer.voices.size:0,errors:this.errors.slice()};}
+  status(){return {ready:!!this.renderer,muted:this.muted,mode:this.model.mode,offset:this.model.cursor,voices:this.renderer?this.renderer.voices.size:0,errors:this.errors.slice()};}
  }
  return {CLIPS,accelerationOffset,advance,prepare,Model,Renderer,Player};
 });
