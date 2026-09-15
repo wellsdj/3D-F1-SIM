@@ -530,21 +530,26 @@
   /* The lap card sits where the gantry hangs, and a clock reading zero is not
      what you are looking at on the grid anyway. It comes back at lights out. */
   body.racestart #tt,body.racestart #netwrap,body.racestart #netbtn{opacity:0;transition:opacity .3s ease}
-  /* Slipstream presentation. The empty centre keeps the circuit unobscured;
-     light lives only at the viewport edge and in the small top label. */
-  #slipstream-fx{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;
-      transition:opacity .16s ease;overflow:hidden}
-  #slipstream-fx:before{content:"";position:absolute;inset:8px;border:2px solid rgba(52,174,255,.78);
-      border-radius:18px;box-shadow:inset 0 0 28px rgba(22,139,255,.32),0 0 22px rgba(39,157,255,.28)}
-  #slipstream-fx .slip-label{position:absolute;top:54px;left:50%;transform:translateX(-50%);
-      color:#dff4ff;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.32em;
-      text-transform:uppercase;white-space:nowrap;text-shadow:0 0 16px #159cff,0 2px 8px #00182d}
-  #slipstream-fx .slip-label:before,#slipstream-fx .slip-label:after{content:"";display:inline-block;
-      width:46px;height:1px;margin:0 15px 4px;background:linear-gradient(90deg,transparent,#45b8ff)}
-  #slipstream-fx .slip-label:after{background:linear-gradient(90deg,#45b8ff,transparent)}
-  #slipstream-fx.on{opacity:1;animation:slip-pulse .82s ease-in-out infinite alternate}
-  @keyframes slip-pulse{from{filter:brightness(.82)}to{filter:brightness(1.28)}}
-  @media (prefers-reduced-motion:reduce){#slipstream-fx.on{animation:none}}
+  /* Slipstream presentation: a clear centre, soft edge wash and fine streaks
+     radiating from the road ahead. Strength is supplied continuously by JS. */
+  #slipstream-fx{--slip:0;position:fixed;inset:0;z-index:8;pointer-events:none;
+      opacity:var(--slip);overflow:hidden}
+  #slipstream-fx:before{content:"";position:absolute;inset:-7%;
+      background:radial-gradient(ellipse at 50% 52%,transparent 0 43%,rgba(77,196,255,.055) 60%,rgba(35,160,238,.22) 79%,rgba(107,214,255,.38) 100%);
+      filter:blur(7px)}
+  #slipstream-fx:after{content:"";position:absolute;inset:-35%;
+      background:repeating-conic-gradient(from 0deg at 50% 50%,transparent 0deg 5.8deg,rgba(174,229,255,.34) 5.9deg 6deg,transparent 6.1deg 11.7deg);
+      -webkit-mask:radial-gradient(circle at 50% 50%,transparent 0 31%,#000 57% 100%);
+      mask:radial-gradient(circle at 50% 50%,transparent 0 31%,#000 57% 100%);
+      filter:blur(.45px);animation:slip-rush .72s linear infinite}
+  #slipstream-fx .slip-label{position:absolute;top:66vh;left:50%;transform:translate(-50%,-50%) skewX(-9deg);
+      color:rgba(214,244,255,.95);font-family:Arial,sans-serif;font-size:clamp(22px,3.3vw,47px);
+      font-weight:300;font-style:italic;letter-spacing:.055em;text-transform:uppercase;white-space:nowrap;
+      text-shadow:0 0 7px rgba(56,189,255,.95),0 0 24px rgba(30,151,232,.75),0 2px 8px #00182d}
+  #slipstream-fx .slip-label:after{content:"";display:block;width:88%;height:2px;margin:7px auto 0;
+      background:linear-gradient(90deg,transparent,#a8e8ff 18% 82%,transparent);box-shadow:0 0 12px #40bfff}
+  @keyframes slip-rush{from{transform:scale(.91)}to{transform:scale(1.08)}}
+  @media (prefers-reduced-motion:reduce){#slipstream-fx:after{animation:none}}
   /* The count sits in the middle of the screen, not at the top: at the top it
      was behind the lap card and you could not see it at all. */
   #golabel{position:fixed;left:50%;top:26vh;transform:translateX(-50%);
@@ -1099,7 +1104,7 @@ if('serviceWorker' in navigator){
 <canvas id="map" width="372" height="372"></canvas>
 <canvas id="cmap" width="372" height="428"></canvas>
 <div class="hud" id="speed"><div id="kmh">0</div><div id="unit">km/h</div></div>
-<div id="slipstream-fx" aria-hidden="true"><div class="slip-label">Slipstream activated</div></div>
+<div id="slipstream-fx" aria-hidden="true"><div class="slip-label">Slipstream</div></div>
 <div class="hud" id="keys">
   <div><kbd>W</kbd><kbd>S</kbd> throttle · brake &nbsp; <kbd>A</kbd><kbd>D</kbd> steering</div>
   <div><kbd>C</kbd> camera &nbsp; <kbd>Q</kbd> detail · full, balanced, fast</div>
@@ -9731,8 +9736,8 @@ function limitsReset(){
    Going off is only worth punishing if it helped. Three cases where it plainly
    did not, and none of them count:
 
-     - the car was in the gravel or on the grass. That is a mistake that has
-       already cost more time than any penalty would;
+     - the car was in the gravel. That is a mistake that has already cost more
+       time than any penalty would. Grass is no longer exempt;
      - the car hit a barrier. Same, and worse;
      - the car came out of it further down the order than it went in. Losing a
        place is the punishment; adding five seconds to it is punishing the same
@@ -9744,7 +9749,7 @@ function limitsReset(){
    answer rather than a guess. */
 let _tlPosWas=0;
 function limitsGained(){
-  if(PLAYER && PLAYER.surf && (PLAYER.surf.loose || PLAYER.surf.grass)) return false;
+  if(PLAYER && PLAYER.surf && PLAYER.surf.loose) return false;
   if(typeof BARR_HIT!=='undefined' && BARR_HIT>0) return false;
   if(_tlPosWas && RACE.pos > _tlPosWas) return false;
   return true;
@@ -10243,7 +10248,7 @@ function updateSlipstream(C,dt){
   return C.tow;
 }
 
-let slipstreamKick=0, slipstreamWasOn=false;
+let slipstreamKick=0, slipstreamWasOn=false, slipstreamVisual=0;
 function slipstreamStraight(){
   /* Compare the circuit direction ten survey points either side of the car.
      This identifies the road itself as straight, so moving across it to pass
@@ -10259,13 +10264,19 @@ function slipstreamStraight(){
   return Math.abs(PLAYER.steerAng/STEER_RATIO)<0.025;
 }
 function slipstreamPresentation(dt){
-  const physicsOn=PLAYER.tow>0.07 && carState.speed>Slipstream.MIN_SPEED;
+  const physicsOn=PLAYER.tow>0.01 && carState.speed>Slipstream.MIN_SPEED;
   const show=physicsOn && slipstreamStraight() &&
              document.body.classList.contains('driving') && !RESULT.on;
+  const target=show?clamp((PLAYER.tow-0.01)/0.72,0,1):0;
+  /* Its own envelope prevents a weak or fluctuating wake from flashing the UI.
+     It takes most of a second to gather and eases away instead of switching. */
+  const tau=target>slipstreamVisual?0.58:0.42;
+  slipstreamVisual+=(target-slipstreamVisual)*(1-Math.exp(-dt/tau));
   const el=document.getElementById('slipstream-fx');
-  if(el) el.classList.toggle('on',show);
-  if(physicsOn&&!slipstreamWasOn) slipstreamKick=1;
-  slipstreamWasOn=physicsOn;
+  if(el) el.style.setProperty('--slip',slipstreamVisual.toFixed(3));
+  const cameraOn=PLAYER.tow>0.07 && carState.speed>Slipstream.MIN_SPEED;
+  if(cameraOn&&!slipstreamWasOn) slipstreamKick=1;
+  slipstreamWasOn=cameraOn;
   slipstreamKick*=Math.exp(-2.8*dt);
   return slipstreamKick;
 }
