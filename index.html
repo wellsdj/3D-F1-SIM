@@ -678,6 +678,10 @@
   /* The bar has no number behind it, so it does not pretend to: a lit block
      sweeps the rail while the status line underneath says the true stage. */
   .loadcard .lc-bar{position:relative;height:2px;background:rgba(236,234,228,.13);overflow:hidden}
+  /* The measured part of the load fills the rail; the sweep above it says
+     the parts that have no number are still running. */
+  .loadcard .lc-fill{position:absolute;inset:0 auto 0 0;width:0;background:#d72638;
+    box-shadow:0 0 12px rgba(215,38,56,.75);transition:width .25s ease}
   .loadcard .lc-bar:after{content:"";position:absolute;inset:0 auto 0 0;width:38%;
     background:linear-gradient(90deg,transparent,#ff3b4e,transparent);box-shadow:0 0 14px rgba(255,59,78,.8);
     animation:load-sweep 1.5s cubic-bezier(.5,0,.5,1) infinite}
@@ -1036,7 +1040,7 @@ if('serviceWorker' in navigator){
     <div class="lc-body">
       <div class="lc-kicker">Slipstream</div>
       <div class="lc-word">Warming <em>up.</em></div>
-      <div class="lc-bar" aria-hidden="true"></div>
+      <div class="lc-bar" aria-hidden="true"><i class="lc-fill" id="startup-load-fill"></i></div>
       <div class="lc-status" id="startup-load-status">Preparing the garage</div>
     </div>
   </div>
@@ -1350,7 +1354,7 @@ if('serviceWorker' in navigator){
       <div class="lc-kicker">Spa · Ardennes · 7.0 km</div>
       <div class="lc-word">Heading <em>out.</em></div>
       <div class="lc-chips" id="qualifying-load-chips"></div>
-      <div class="lc-bar" aria-hidden="true"></div>
+      <div class="lc-bar" aria-hidden="true"><i class="lc-fill" id="qualifying-load-fill"></i></div>
       <div class="lc-status" id="qualifying-load-status">Preparing the circuit</div>
       <div class="lc-tip" id="qualifying-load-tip">
         <b id="qualifying-load-tip-label">Track note</b>
@@ -1842,6 +1846,11 @@ const TRACKS={
        nothing. Only the normals are packed, at 12 bits, and those are lighting.
        The decoder was already wired up for the car. */
     procedural:false, glb:'spa2022-fast.glb', freeRoam:true, scenery:false,
+    /* What the file weighs. A compressed transfer, or one answered out of the
+       cache, does not tell the progress event a total -- and a loading screen
+       that counts megabytes up to a number you do not know is not progress.
+       With the size written down, it is always a percentage. */
+    bytes:22869428,
     /* Where to start, in the model's own coordinates: [x, z, heading degrees].
        Measured by parking the car on the line rather than inferred from the
        geometry, which put it in a car park three times. With this set, none of
@@ -15065,10 +15074,21 @@ addEventListener('load',()=>{pageDone=true;startupLoadFinish();},{once:true});
    status line that never changes and nothing in the console. */
 const LOAD_STALL_MS=25000;
 let loadLast=performance.now(), loadWhat='starting';
+/* Whatever percentage the stage reports drives the rail as well as the line,
+   so the bar is a measurement wherever there is one and just a sweep where
+   there is not (parsing, building the world). */
+const startupLoadFillEl=document.getElementById('startup-load-fill');
+const qualifyingLoadFillEl=document.getElementById('qualifying-load-fill');
+function loadFill(what){
+  const m=/(\d+)\s*%/.exec(what);
+  const w=m?Math.max(0,Math.min(100,+m[1]))+'%':'';
+  if(qualifyingLoadFillEl) qualifyingLoadFillEl.style.width=w;
+  if(startupLoadFillEl) startupLoadFillEl.style.width=w;
+}
 function loadTick(what){
   loadLast=performance.now();
   if(what){
-    loadWhat=what; qualifyingLoadSetStatus(what);
+    loadWhat=what; qualifyingLoadSetStatus(what); loadFill(what);
     if(startupLoadStatusEl&&!assetsDone)startupLoadStatusEl.textContent=what;
   }
 }
@@ -16091,11 +16111,15 @@ function startTrack(id, opts){
   }, ev=>{
     if(generation!==qualifyingLoadGeneration)return;
     gotBytes=ev.loaded||0;
-    if(ev.lengthComputable){
-      const pct=Math.round(ev.loaded/ev.total*100);
-      bootMsg.textContent='Loading '+t.name+' '+pct+'%';
-      loadTick('Loading '+t.name+' '+pct+'%');
-    } else loadTick('Loading '+t.name+' '+(gotBytes/1048576).toFixed(1)+' MB');
+    /* Percent, always: the event's own total when it has one, the size we
+       wrote down when it does not. The last percent is held back until the
+       model is actually in, so 100% is never on screen while it parses. */
+    const total=(ev.lengthComputable&&ev.total)||t.bytes||0;
+    const text=total
+      ? 'Loading '+t.name+' '+Math.min(99,Math.round(gotBytes/total*100))+'%'
+      : 'Loading '+t.name+' '+(gotBytes/1048576).toFixed(1)+' MB';
+    bootMsg.textContent=text;
+    loadTick(text);
   }, err=>{
     clearInterval(watchdog);
     if(generation!==qualifyingLoadGeneration)return;

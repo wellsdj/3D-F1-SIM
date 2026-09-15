@@ -54,6 +54,17 @@ test('the tip label names the conditions it is drawn from',()=>{
   assert.match(qualifyingTipLabel({light:'sunset',wet:'auto'}),/mixed/i);
 });
 
+test('circuit loading reports a percentage even when the transfer has no length',()=>{
+  /* A compressed or cached response gives the progress event no total, which
+     used to leave the screen counting megabytes towards a number the driver
+     has no way of knowing. The size is written down for exactly this. */
+  assert.match(source,/bytes:22869428/);
+  assert.match(source,/const total=\(ev\.lengthComputable&&ev\.total\)\|\|t\.bytes\|\|0;/);
+  assert.match(source,/Math\.min\(99,Math\.round\(gotBytes\/total\*100\)\)\+'%'/);
+  /* And the rail fills to whatever percentage the line is reporting. */
+  assert.match(source,/function loadFill\(what\)\{[\s\S]*?\/\(\\d\+\)\\s\*%\//);
+});
+
 test('the screen keeps a way back out, and is the helmet card both times',()=>{
   assert.match(source,/<button id="qualifying-cancel"/);
   assert.match(source,/qualifyingLoadEl\.dataset\.wet=/);
