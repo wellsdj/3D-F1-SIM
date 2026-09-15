@@ -1437,7 +1437,8 @@ const ASSETS = {
   car:   "car.glb",
   podium:"podium_art.glb",
   snd: {accel:'assets/audio/direct-recordings/acceleration.mp3',brake:'assets/audio/direct-recordings/braking.mp3',idle:'assets/audio/direct-recordings/idle.mp3',
-        coastLow:'assets/audio/direct-recordings/coast-low.mp3',coastHigh:'assets/audio/direct-recordings/coast-high.mp3'}
+        coastLow:'assets/audio/direct-recordings/coast-low.mp3',coastHigh:'assets/audio/direct-recordings/coast-high.mp3',
+        kerb:'assets/audio/kerb.mp3'}
 };
 </script>
 <script>
@@ -10040,7 +10041,7 @@ function makeCar(group, aids){
            group,
            steerIn:0, steerAng:0, lockF:1,
            groundY:0, carVY:0, carPitch:0, carRoll:0, slipAng:0,
-           surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,ok:false,y:null},
+           surf:{loose:false,looseFrac:0,grass:false,grassFrac:0,kerb:false,kerbFrac:0,ok:false,y:null},
            aids: !!aids,
            // 1 is the player's grip; the AI's cars get more -- see yawFor
            gripMul: 1, tow:0 };
@@ -10484,13 +10485,13 @@ function probeCar(wx,wz,hdg,refY,out){
   PROF.probes++;
   const fx=Math.sin(hdg), fz=Math.cos(hdg);
   const fresh=!(refY<1e8);       // "no history, give me the topmost" -- no band
-  let looseHits=0, grassHits=0, tried=0, banded=true;
+  let looseHits=0, grassHits=0, kerbHits=0, tried=0, banded=true;
   const probe1=(lx,lz)=>{
     tried++;
     const g=groundAt(wx + lx*fz + lz*fx, wz - lx*fx + lz*fz, refY);
     if(!g.hit) return null;
     if(banded && !fresh && Math.abs(g.y-refY)>LAYER) return null;   // another layer
-    if(g.loose) looseHits++; else if(g.grass) grassHits++;
+    if(g.loose) looseHits++; else if(g.grass) grassHits++; else if(g.kerb) kerbHits++;
     return g.y;
   };
   /* Each wheel reads the mean of a patch, not a point. The road is 1683
@@ -10504,7 +10505,7 @@ function probeCar(wx,wz,hdg,refY,out){
     return n?sum/n:null;
   };
   const sweep=()=>{
-    looseHits=0; grassHits=0; tried=0;
+    looseHits=0; grassHits=0; kerbHits=0; tried=0;
     let n=0;
     for(let i=0;i<4;i++){ _PROBE_Y[i]=probe(CARPTS[i].x,CARPTS[i].z);
                           if(_PROBE_Y[i]!==null) n++; }
@@ -10538,6 +10539,10 @@ function probeCar(wx,wz,hdg,refY,out){
   out.loose     = out.looseFrac > 0;
   out.grassFrac = clamp((rawG-0.15)/0.25, 0, 1);
   out.grass     = out.grassFrac > 0 && out.looseFrac <= 0;  // gravel wins where they meet
+  /* Kerbs are sound rather than drag. Keep the real fraction so one tyre gives
+     a lighter rumble and two tyres on the strip give the full recording. */
+  out.kerbFrac  = tried>0 ? clamp((kerbHits/tried)/0.22,0,1) : 0;
+  out.kerb      = out.kerbFrac>0;
   return out;
 }
 
@@ -10913,7 +10918,7 @@ function presentCar(dt, thr, brk, gridded, yawRate){
   const wSpd=carState.speed;
   if(careerQuiet()||document.hidden)engineAudio.stop();
   else engineAudio.update({speed:wSpd,throttle:Number(thr),brake:Number(brk),gridded,
-                           impact:BARR_HIT});
+                           impact:BARR_HIT,kerb:PLAYER.surf.kerbFrac||0});
 
   kmhEl.textContent = Math.round(Math.abs(wSpd)*3.6);
   /* Backwards is still a speed. The number stays positive and the unit says

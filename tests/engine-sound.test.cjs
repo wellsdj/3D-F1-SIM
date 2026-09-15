@@ -58,6 +58,17 @@ test('the brake is steady and the coast sags',()=>{
  assert.ok(b.rate<a.rate,'the coast bends down');
  assert.ok(b.rate>=.70,'and stops at the floor');
 });
+test('a stop passes briefly through braking before idle fades in',()=>{
+ const m=new Model();run(m,input(12,0),.2);
+ let p=m.update(input(1,0),.02);assert.equal(p.mode,'brake');
+ p=run(m,input(0,0),.12);assert.equal(p.mode,'idle');
+});
+test('kerb level and pitch rise with road speed',()=>{
+ const m=new Model(),slow=m.update({...input(30,1),kerb:1},.02);
+ const fast=m.update({...input(250,1),kerb:1},.02);
+ assert.ok(slow.kerbVolume>0&&slow.kerbVolume<fast.kerbVolume);
+ assert.ok(slow.kerbRate<fast.kerbRate);assert.ok(fast.kerbVolume<fast.volume);
+});
 test('pedal chatter does not restart the transport',()=>{
  const m=new Model();const a=run(m,input(150,0),.1),b=run(m,input(150,0),.1);
  assert.equal(a.key,b.key);assert.ok(b.offset>a.offset);
@@ -67,8 +78,23 @@ test('pedal chatter does not restart the transport',()=>{
 function context(){
  const param=()=>({value:0,setValueAtTime(v){this.value=v;},setTargetAtTime(v){this.value=v;},linearRampToValueAtTime(v){this.value=v;},cancelScheduledValues(){}});
  const node=()=>({connect(){},disconnect(){this.disconnected=true;}});
- return {currentTime:0,destination:{},sources:[],createGain(){return {...node(),gain:param()};},createBiquadFilter(){return {...node(),frequency:param()};},createDynamicsCompressor(){return {...node(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};},createBufferSource(){const s={...node(),playbackRate:param(),start(t,o){this.offset=o;},stop(){this.stopped=true;}};this.sources.push(s);return s;},createBuffer(c,n,sr){const data=Array.from({length:c},()=>new Float32Array(n));return {numberOfChannels:c,length:n,sampleRate:sr,duration:n/sr,getChannelData:i=>data[i]};}};
+ return {currentTime:0,destination:{},sources:[],createGain(){return {...node(),gain:param()};},createBiquadFilter(){return {...node(),frequency:param()};},createDynamicsCompressor(){return {...node(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};},createBufferSource(){const s={...node(),playbackRate:param(),start(t,o){this.offset=o;},stop(t){this.stopped=true;this.stopAt=t;}};this.sources.push(s);return s;},createBuffer(c,n,sr){const data=Array.from({length:c},()=>new Float32Array(n));return {numberOfChannels:c,length:n,sampleRate:sr,duration:n/sr,getChannelData:i=>data[i]};}};
 }
+test('idle overlaps acceleration for half a second instead of cutting out',()=>{
+ const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end,gain:1}]));
+ const r=new Renderer(ctx,bank);
+ r.apply({key:1,mode:'idle',offset:0,rate:1,volume:.6},0);
+ ctx.currentTime=.1;r.apply({key:2,mode:'accel',offset:0,rate:1,volume:.85},.1);
+ assert.ok(ctx.sources[0].stopAt>=.6,'idle tail remains for the requested half second');
+ r.stop();
+});
+test('kerb recording is a separate quieter looping layer',()=>{
+ const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end,gain:1}]));
+ const r=new Renderer(ctx,bank);
+ r.apply({key:1,mode:'accel',offset:0,rate:1,volume:.85,kerbVolume:.5,kerbRate:.7},0);
+ assert.equal(ctx.sources.length,2);assert.equal(ctx.sources[1].playbackRate.value,.7);
+ assert.ok(r.kerbVoice.volume<.85);r.stop();
+});
 test('renderer reuses held clip, bounds crossfades, and stops every source',()=>{
  const ctx=context(),bank=Object.fromEntries(Object.entries(CLIPS).map(([k,v])=>[k,{buffer:{},loop:v.loop,end:v.end}]));
  const r=new Renderer(ctx,bank),m=new Model();

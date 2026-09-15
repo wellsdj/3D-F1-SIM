@@ -9,7 +9,8 @@
     moment you lift, not continuously, or it would swap notes mid-coast.
     Both loop whole: they are a sustained note, so there is no run-in to skip. */
  const CLIPS={accel:{end:23.4,loop:16.2},brake:{end:5.15,loop:2.8},idle:{end:4.7,loop:.2},
-              coastLow:{end:3.55,loop:.35},coastHigh:{end:4.02,loop:.4}};
+              coastLow:{end:3.55,loop:.35},coastHigh:{end:4.02,loop:.4},
+              kerb:{end:7.78,loop:.18}};
  const COAST_HIGH_KPH=250;
  /* Under this, braking sounds like coasting rather than like stopping. */
  const COAST_BRAKE_KPH=60;
@@ -34,7 +35,7 @@
  }
  class Model{
   constructor(){this.reset();}
-  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;this.dv=0;this.hit=0;this.coastClip='coastLow';}
+  reset(){this.mode='silent';this.key=0;this.cursor=0;this.rate=1;this.time=0;this.saved=null;this.speed=0;this.pending='';this.pendingTime=0;this.coast=0;this.dv=0;this.hit=0;this.stopT=0;this.coastClip='coastLow';}
   update(input,dt){
    dt=clamp(Number.isFinite(dt)?dt:0,0,.1);this.time+=dt;
    const speed=Math.abs(Number(input.speed)||0)*3.6,thr=clamp(Number(input.throttle)||0,0,1),brake=clamp(Number(input.brake)||0,0,1);
@@ -77,11 +78,16 @@
    const crawling=brake>.04 && speed<COAST_BRAKE_KPH && !dragged;
    if(crawling && !this.mode.startsWith('coast'))
      coastClip=this.coastClip='coastLow';
-   let next=input.gridded||speed<1.5?'idle':(brake>.04&&!crawling||dragged)?'brake'
+   /* At walking pace, touch the braking recording for a few frames before the
+      stationary sound arrives. That tiny bridge removes the hard timbre cut
+      without turning the stop into another audible braking event. */
+   if(!input.gridded&&speed<=1.2&&this.speed>1.2)this.stopT=.075;
+   let next=input.gridded?'idle':this.stopT>0?'brake':speed<=1.2?'idle':(brake>.04&&!crawling||dragged)?'brake'
            :(rolling||crawling)?coastClip
            :thr>(this.mode==='accel'?.03:.08)?'accel':'brake';
+   this.stopT=Math.max(0,(this.stopT||0)-dt);
    // Ignore one-frame pedal chatter, but apply idle/grid lock immediately.
-   if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'&&!(this.hit>0)){
+   if(next!==this.mode&&next!=='idle'&&this.mode!=='silent'&&!(this.hit>0)&&!(this.stopT>0)){
     if(this.pending!==next){this.pending=next;this.pendingTime=0;}
     this.pendingTime+=dt;
     if(this.pendingTime<.035)next=this.mode;
@@ -124,7 +130,9 @@
    }
    else{ this.coast=0; this.rate=1; }
    this.speed=speed;
+   const kerb=clamp(Number(input.kerb)||0,0,1),kerbSpeed=clamp(speed/35,0,1);
    return {key:this.key,mode:this.mode,offset:this.cursor,rate:this.rate,
+           kerbVolume:kerb*kerbSpeed*.56,kerbRate:.54+.51*clamp(speed/260,0,1),
            volume:this.mode==='idle'?.6:this.mode==='brake'?.72
                  :this.mode.startsWith('coast')?.66:.85};
   }
@@ -155,37 +163,56 @@
  }
  class Renderer{
   constructor(ctx,buffers){
-   this.ctx=ctx;this.buffers=buffers;this.voices=new Set();this.current=null;
+   this.ctx=ctx;this.buffers=buffers;this.voices=new Set();this.current=null;this.kerbVoice=null;
    this.master=ctx.createGain();this.master.gain.value=.65;
    this.filter=ctx.createBiquadFilter();this.filter.type='highpass';this.filter.frequency.value=55;
    this.limiter=ctx.createDynamicsCompressor();this.limiter.threshold.value=-3;this.limiter.knee.value=2;this.limiter.ratio.value=12;this.limiter.attack.value=.003;this.limiter.release.value=.12;
    this.master.connect(this.filter);this.filter.connect(this.limiter);this.limiter.connect(ctx.destination);
   }
   remove(v){v.source.disconnect();v.gain.disconnect();this.voices.delete(v);if(this.current===v)this.current=null;}
+  applyKerb(plan,now){
+   const clip=this.buffers.kerb,volume=plan.kerbVolume||0;
+   if(!clip)return;
+   if(!this.kerbVoice&&volume>.005){
+    const source=this.ctx.createBufferSource(),gain=this.ctx.createGain();
+    source.buffer=clip.buffer;source.loop=true;source.loopStart=clip.loop;source.loopEnd=clip.end;
+    source.playbackRate.setValueAtTime(plan.kerbRate||1,now);
+    gain.gain.setValueAtTime(0,now);source.connect(gain);gain.connect(this.master);
+    source.start(now,clip.loop);this.kerbVoice={source,gain,volume:0};
+   }
+   const v=this.kerbVoice;if(!v)return;
+   const target=volume*(clip.gain||1);
+   v.gain.gain.cancelScheduledValues(now);v.gain.gain.setValueAtTime(v.volume,now);
+   v.gain.gain.linearRampToValueAtTime(target,now+(target>v.volume?.055:.11));
+   v.source.playbackRate.setValueAtTime(plan.kerbRate||1,now);v.volume=target;
+  }
   apply(plan,now=this.ctx.currentTime){
    // Disconnect only after the audio clock reaches the stop time; callers
    // may schedule ahead (including OfflineAudioContext preview rendering).
    for(const v of this.voices)if(v.until<=this.ctx.currentTime)this.remove(v);
    if(!this.current||this.current.key!==plan.key){
     if(this.current){
-     const v=this.current,level=v.volume*clamp((now-v.start)/.06,0,1);
-     v.gain.gain.cancelScheduledValues(now);v.gain.gain.setValueAtTime(level,now);v.gain.gain.linearRampToValueAtTime(0,now+.06);
-     v.until=now+.065;v.source.stop(v.until);this.current=null;
+     const v=this.current,fade=v.mode==='idle'&&plan.mode==='accel'?.5:.06;
+     const level=v.volume*clamp((now-v.start)/.06,0,1);
+     v.gain.gain.cancelScheduledValues(now);v.gain.gain.setValueAtTime(level,now);v.gain.gain.linearRampToValueAtTime(0,now+fade);
+     v.until=now+fade+.005;v.source.stop(v.until);this.current=null;
     }
     const clip=this.buffers[plan.mode];if(!clip)return;
     const source=this.ctx.createBufferSource(),gain=this.ctx.createGain();
     source.buffer=clip.buffer;source.loop=true;source.loopStart=clip.loop;source.loopEnd=clip.end;
-    const volume=plan.volume*(clip.gain||1);
-    source.playbackRate.setValueAtTime(plan.rate,now);gain.gain.setValueAtTime(0,now);gain.gain.linearRampToValueAtTime(volume,now+.06);
+    const volume=plan.volume*(clip.gain||1),fadeIn=plan.mode==='idle'?.16:.06;
+    source.playbackRate.setValueAtTime(plan.rate,now);gain.gain.setValueAtTime(0,now);gain.gain.linearRampToValueAtTime(volume,now+fadeIn);
     source.connect(gain);gain.connect(this.master);
-    const v={source,gain,key:plan.key,start:now,volume,until:Infinity};
+    const v={source,gain,key:plan.key,mode:plan.mode,start:now,volume,until:Infinity};
     source.onended=()=>this.remove(v);this.voices.add(v);this.current=v;
     source.start(now,Math.min(plan.offset,clip.end-.001));
    }else this.current.source.playbackRate.setValueAtTime(plan.rate,now);
+   this.applyKerb(plan,now);
   }
   stop(now=this.ctx.currentTime){
    for(const v of this.voices){v.source.onended=null;v.gain.gain.cancelScheduledValues(now);v.gain.gain.setValueAtTime(0,now);try{v.source.stop(now);}catch(e){}v.source.disconnect();v.gain.disconnect();}
    this.voices.clear();this.current=null;
+   if(this.kerbVoice){const v=this.kerbVoice;try{v.source.stop(now);}catch(e){}v.source.disconnect();v.gain.disconnect();this.kerbVoice=null;}
   }
   dispose(){this.stop();this.master.disconnect();this.filter.disconnect();this.limiter.disconnect();}
  }

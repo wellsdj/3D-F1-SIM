@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='slipstream-bright-zoom-v45';
+const CACHE='engine-kerb-position-v46';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./slipstream.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/driver/driver.glb',
@@ -23,7 +23,7 @@ const SHELL=[
   './','./index.html',
   './assets/audio/direct-recordings/coast-high.mp3',
   './assets/audio/direct-recordings/coast-low.mp3',
-  './assets/audio/crash.mp3','./GLTFLoader.js','./meshopt_decoder.js',
+  './assets/audio/crash.mp3','./assets/audio/kerb.mp3','./GLTFLoader.js','./meshopt_decoder.js',
   './road.jpg','./rock.jpg','./bark.jpg','./barkn.jpg','./leaf.png',
   './trees.json','./trees.bin',
   './assets/audio/direct-recordings/idle.mp3','./assets/audio/direct-recordings/acceleration.mp3','./assets/audio/direct-recordings/braking.mp3',
