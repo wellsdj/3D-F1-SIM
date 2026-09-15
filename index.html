@@ -2176,6 +2176,7 @@ function goToStart(){
   carState.wx=SPAWN.x; carState.wz=SPAWN.z; carState.hdg=SPAWN.hdg;
   carState.speed=0; carState.psi=0; carState.n=0;
   PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.slipAng=0; PLAYER.carVY=0;
+  PLAYER.airborne=null; PLAYER.returnDrop=null;
   const g=groundAt(SPAWN.x,SPAWN.z,1e9);
   PLAYER.groundY=(g.hit?g.y:0)+RIDE;
   carGroup.position.set(SPAWN.x, PLAYER.groundY, SPAWN.z);
@@ -10210,6 +10211,7 @@ function returnToRacingLine(){
     PLAYER.groundY+=0.16;
   }
   PLAYER.steerIn=0; PLAYER.steerAng=0; PLAYER.bumpX=0; PLAYER.bumpZ=0;
+  PLAYER.airborne=null;
   PLAYER.yawSpin=0; PLAYER.slipAng=0; PLAYER.impactYaw=0;
   pitch=0; roll=0; headLean=0; spdPrev=0;
   _tlOff=0; _tlCounted=false; _tlLock=TL_QUIET;
@@ -10651,7 +10653,16 @@ function placeCar(C, dt, t){
      any speed, no overshoot, no float -- the smoothing that makes this look
      right is entirely spatial, since each wheel already reads the mean of a
      half-metre patch. */
-  if(tgt!==null && C.returnDrop){
+  if(tgt!==null && C.airborne){
+    /* Horizontal speed and rotation come from the collision solver. This only
+       lets a severe barrier hit unload the tyres briefly, capped at one metre. */
+    C.airborne.floor=tgt;
+    C.airborne.vy-=9.81*dt;
+    C.groundY=Math.min(C.airborne.ceiling,C.groundY+C.airborne.vy*dt);
+    if(C.groundY<=tgt && C.airborne.vy<=0){
+      C.groundY=tgt; C.carVY=0; C.airborne=null;
+    }
+  }else if(tgt!==null && C.returnDrop){
     /* A deliberately small visual drop: enough to read as the car being put
        down, never enough to bounce or damage it. The live ground wins over the
        stored floor so cambers and uneven road still settle correctly. */
@@ -12271,7 +12282,7 @@ function wingImpact(C,x,z,severity){
 function damageReset(){
  for(const [C,records] of wingDamage){for(const r of records){r.mesh.geometry.dispose();r.mesh.geometry=r.original;for(const s of r.sections){if(s.pivot&&s.pivot.parent)s.pivot.parent.remove(s.pivot);s.part.removeFromParent?s.part.removeFromParent():s.part.parent&&s.part.parent.remove(s.part);s.part.geometry.dispose();}}C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;}
  wingDamage.clear();DEBRIS.length=0;
- for(const C of [PLAYER,...AIS.map(d=>d.car).filter(Boolean)]){C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;}
+ for(const C of [PLAYER,...AIS.map(d=>d.car).filter(Boolean)]){C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;C.airborne=null;C.returnDrop=null;}
 }
 function wingDebrisStep(dt){
  for(let i=DEBRIS.length-1;i>=0;i--){const d=DEBRIS[i];d.t+=dt;d.vy-=9.81*dt;d.o.position.x+=d.vx*dt;d.o.position.y+=d.vy*dt;d.o.position.z+=d.vz*dt;d.o.rotateZ(d.spin*dt);
@@ -12292,6 +12303,11 @@ function collisionWall(C,dt){
  const point=CollisionPhysics.support(hit,-normal.x,-normal.z);
  st.wx=safe.wx+normal.x*.03;st.wz=safe.wz+normal.z*.03;st.hdg=safe.hdg;
  const severity=CollisionPhysics.impulse(C,null,{nx:-normal.x,nz:-normal.z,x:point.x,z:point.z});wingImpact(C,point.x,point.z,severity);
+ const lift=CollisionPhysics.barrierLift(severity);
+ if(lift>0&&!C.airborne){
+  C.returnDrop=null;
+  C.airborne={vy:lift,floor:C.groundY||0,ceiling:(C.groundY||0)+1};
+ }
  // Resolve an initially overlapping spawn locally; never teleport to a distant remembered pose.
  for(let i=0;i<20&&barrBlocked(st.wx,st.wz,st.hdg);i++){st.wx+=normal.x*.1;st.wz+=normal.z*.1;}
  if(C===PLAYER){

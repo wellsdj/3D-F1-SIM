@@ -40,5 +40,11 @@
   return closing;
  }
  function solve(a,b,respond=true){const hit=overlap(a.st,b.st);if(!hit)return null;hit.closing=respond?impulse(a,b,hit):0;const correction=Math.max(0,hit.depth-.002)*.5;a.st.wx-=hit.nx*correction;a.st.wz-=hit.nz*correction;b.st.wx+=hit.nx*correction;b.st.wz+=hit.nz*correction;return hit;}
- return {halfWidth,halfLength,velocity,setVelocity,support,overlap,impulse,solve};
+ /* Only a genuinely severe normal impact lifts the chassis. Height rises with
+    impact energy from zero at 40 m/s to a hard one-metre ceiling at 80 m/s. */
+ function barrierLift(closing){
+  const height=Math.max(0,Math.min(1,(closing-40)/40));
+  return Math.sqrt(2*9.81*height);
+ }
+ return {halfWidth,halfLength,velocity,setVelocity,support,overlap,impulse,solve,barrierLift};
 });

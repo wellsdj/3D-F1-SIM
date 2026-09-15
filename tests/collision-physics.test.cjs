@@ -6,6 +6,12 @@ test('centred rear impact transfers momentum without invented energy or yaw',()=
 test('offset impact produces rotation, remains finite and loses energy',()=>{const a=car(0,0,0,65),b=car(.9,4.4,.15,20),before=energy(a)+energy(b);P.solve(a,b);assert.ok(Math.abs(a.impactYaw)+Math.abs(b.impactYaw)>0);assert.ok(Number.isFinite(energy(a)+energy(b)));assert.ok(energy(a)+energy(b)<=before+1e-6);});
 test('separating cars receive no second impulse',()=>{const a=car(0,0,0,20),b=car(0,4.4,0,40);const h=P.solve(a,b);assert.equal(h.closing,0);assert.equal(a.st.speed,20);assert.equal(b.st.speed,40);});
 test('barrier scrape preserves tangential motion; head-on hit rebounds',()=>{const a=car(0,0,0,70);a.bumpX=3;P.impulse(a,null,{nx:1,nz:0,x:0,z:0});const va=P.velocity(a);assert.ok(va.x<=0);assert.ok(va.z>68);const b=car(0,0,0,70);P.impulse(b,null,{nx:0,nz:1,x:0,z:2.35});assert.ok(P.velocity(b).z<0);assert.ok(energy(b)<energy(car(0,0,0,70)));});
+test('only severe barrier force lifts the car and height is capped at one metre',()=>{
+ assert.equal(P.barrierLift(40),0);assert.equal(P.barrierLift(20),0);
+ const medium=P.barrierLift(60),maximum=P.barrierLift(1000);
+ assert.ok(medium>0&&medium<maximum);
+ assert.ok(Math.abs(maximum*maximum/(2*9.81)-1)<1e-12);
+});
 test('rotated distant rectangles do not collide',()=>{assert.equal(P.overlap(car(0,0,.5,0).st,car(12,12,-.4,0).st),null);});
 test('high-speed crossing is caught between frames',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
@@ -19,4 +25,5 @@ test('swept barrier contact catches a thin wall even when the end pose is clear'
  const ctx={CollisionPhysics:P,SEG:{n:1},PLAYER:{},wingImpact(){},barrBlocked:(x,z)=>z>=1&&z<=1.3,barrNormal:()=>({x:0,z:-1})};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function collisionWall(C,dt){'),source.indexOf('function carsTouch(A,B,dt){')),ctx);
  assert.equal(ctx.collisionWall(c,1/30),true);assert.ok(c.st.wz<1);assert.ok(P.velocity(c).z<=0);
+ assert.ok(c.airborne&&c.airborne.vy>0);assert.equal(c.airborne.ceiling,1);
 });
