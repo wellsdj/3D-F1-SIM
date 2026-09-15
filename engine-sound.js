@@ -132,7 +132,9 @@
    this.speed=speed;
    const kerb=clamp(Number(input.kerb)||0,0,1),kerbSpeed=clamp(speed/35,0,1);
    return {key:this.key,mode:this.mode,offset:this.cursor,rate:this.rate,
-           kerbVolume:kerb*kerbSpeed*.56,kerbRate:.54+.51*clamp(speed/260,0,1),
+           /* The raw kerb recording sits too high beside the engine. Preserve
+              its speed response, but transpose the whole layer down by a third. */
+           kerbVolume:kerb*kerbSpeed*.56,kerbRate:(.54+.51*clamp(speed/260,0,1))*(2/3),
            volume:this.mode==='idle'?.6:this.mode==='brake'?.72
                  :this.mode.startsWith('coast')?.66:.85};
   }

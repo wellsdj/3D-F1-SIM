@@ -68,6 +68,7 @@ test('kerb level and pitch rise with road speed',()=>{
  const fast=m.update({...input(250,1),kerb:1},.02);
  assert.ok(slow.kerbVolume>0&&slow.kerbVolume<fast.kerbVolume);
  assert.ok(slow.kerbRate<fast.kerbRate);assert.ok(fast.kerbVolume<fast.volume);
+ assert.ok(Math.abs(fast.kerbRate-(.54+.51*(250/260))*(2/3))<1e-9);
 });
 test('pedal chatter does not restart the transport',()=>{
  const m=new Model();const a=run(m,input(150,0),.1),b=run(m,input(150,0),.1);
