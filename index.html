@@ -535,13 +535,14 @@
   #slipstream-fx{--slip:0;position:fixed;inset:0;z-index:8;pointer-events:none;
       opacity:var(--slip);overflow:hidden}
   #slipstream-fx:before{content:"";position:absolute;inset:-7%;
-      background:radial-gradient(ellipse at 50% 52%,transparent 0 43%,rgba(77,196,255,.055) 60%,rgba(35,160,238,.22) 79%,rgba(107,214,255,.38) 100%);
-      filter:blur(7px)}
+      background:radial-gradient(ellipse at 50% 52%,transparent 0 40%,rgba(76,202,255,.10) 58%,rgba(29,168,255,.42) 78%,rgba(150,232,255,.78) 100%);
+      filter:blur(5px) drop-shadow(0 0 18px rgba(55,190,255,.72));mix-blend-mode:screen}
   #slipstream-fx:after{content:"";position:absolute;inset:-35%;
-      background:repeating-conic-gradient(from 0deg at 50% 50%,transparent 0deg 5.8deg,rgba(174,229,255,.34) 5.9deg 6deg,transparent 6.1deg 11.7deg);
+      background:repeating-conic-gradient(from 0deg at 50% 50%,transparent 0deg 5.8deg,rgba(205,242,255,.68) 5.9deg 6.04deg,transparent 6.15deg 11.7deg);
       -webkit-mask:radial-gradient(circle at 50% 50%,transparent 0 31%,#000 57% 100%);
       mask:radial-gradient(circle at 50% 50%,transparent 0 31%,#000 57% 100%);
-      filter:blur(.45px);animation:slip-rush .72s linear infinite}
+      filter:blur(.25px) drop-shadow(0 0 5px rgba(72,199,255,.8));mix-blend-mode:screen;
+      animation:slip-rush .72s linear infinite}
   #slipstream-fx .slip-label{position:absolute;top:66vh;left:50%;transform:translate(-50%,-50%) skewX(-9deg);
       color:rgba(214,244,255,.95);font-family:Arial,sans-serif;font-size:clamp(22px,3.3vw,47px);
       font-weight:300;font-style:italic;letter-spacing:.055em;text-transform:uppercase;white-space:nowrap;
@@ -10248,7 +10249,7 @@ function updateSlipstream(C,dt){
   return C.tow;
 }
 
-let slipstreamKick=0, slipstreamWasOn=false, slipstreamVisual=0;
+let slipstreamZoom=0, slipstreamVisual=0;
 function slipstreamStraight(){
   /* Compare the circuit direction ten survey points either side of the car.
      This identifies the road itself as straight, so moving across it to pass
@@ -10274,11 +10275,13 @@ function slipstreamPresentation(dt){
   slipstreamVisual+=(target-slipstreamVisual)*(1-Math.exp(-dt/tau));
   const el=document.getElementById('slipstream-fx');
   if(el) el.style.setProperty('--slip',slipstreamVisual.toFixed(3));
-  const cameraOn=PLAYER.tow>0.07 && carState.speed>Slipstream.MIN_SPEED;
-  if(cameraOn&&!slipstreamWasOn) slipstreamKick=1;
-  slipstreamWasOn=cameraOn;
-  slipstreamKick*=Math.exp(-2.8*dt);
-  return slipstreamKick;
+  const cameraTarget=(carState.speed>Slipstream.MIN_SPEED)
+    ?clamp((PLAYER.tow-0.025)/0.48,0,1):0;
+  /* Fast but progressive: about two tenths to pull most of the way in and a
+     softer release, so entering or leaving the wake never cuts the lens. */
+  const zoomTau=cameraTarget>slipstreamZoom?0.20:0.34;
+  slipstreamZoom+=(cameraTarget-slipstreamZoom)*(1-Math.exp(-dt/zoomTau));
+  return slipstreamZoom*slipstreamZoom*(3-2*slipstreamZoom);
 }
 /* The yaw the car actually gets for a given steering angle. The geometric
    rate alone would allow ~17 g at top speed, so it is capped at what the
@@ -14768,9 +14771,9 @@ function frame(now){
     camera.rotateZ(headLean   + (b2*0.55 + n1*1.20)*0.0110*amp);
     camera.fov = C.fov + sp*C.zoom;
   }
-  /* A short, two-degree lens pull marks entering the tow without changing TV,
+  /* A clearly visible five-degree lens pull marks the tow without changing TV,
      look-back, orbit or free-look cameras. Physics remains active everywhere. */
-  if(!C.tv&&!orbit&&!freeLook&&!LOOKBACK) camera.fov-=2.2*slipZoom;
+  if(!C.tv&&!orbit&&!freeLook&&!LOOKBACK) camera.fov-=5.2*slipZoom;
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   skyDome.position.copy(camera.position);   // the dome is finite; keep it centred
