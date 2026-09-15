@@ -12443,7 +12443,6 @@ function raceClock(dt){
       if(d.lapN>=RACE_LAPS) d.finish=RACE.raceT;
     }
     d._prevLap=d.i;
-    aiSlowRetirement(d,dt);
   }
   racePositions();
 }
@@ -13250,61 +13249,45 @@ function aiToggle(){
 function aiStepAll(dt, t){ for(const d of AIS) aiStep(d, dt, t); }
 /* ==========================================================================
    GETTING UNSTUCK
-   A car beached on a kerb or nose-in to a barrier used to sit there for the
-   rest of the race. It now backs off and rejoins, and if backing off does not
-   work it is out -- which is what would happen, and is better than a parked
-   car nobody can pass cleanly.
-
-   Stuck is under 5 kph for more than two seconds. Three attempts steering the
-   nose back toward the line; a fourth with the lock thrown the other way, for
-   the case where the first three were steering it further into whatever it is
-   caught on; then the flag.
+   Under 30 km/h for five continuous seconds starts a three-second reverse.
+   Normal AI control then gets five seconds to drive forward again. A second
+   failed recovery repeats the reverse; a third failed check disqualifies it.
    ========================================================================== */
-const AI_STUCK_KPH=5, AI_STUCK_T=2, AI_REV_T=1.6, AI_SETTLE_T=2.5, AI_TRIES=4;
+const AI_STUCK_KPH=30, AI_STUCK_T=5, AI_REV_T=3, AI_TRIES=2;
 const AI_STUCK_LOG=[];
-function aiSlowRetirement(d,dt){
- if(!RACE.on||RACE.phase!=='racing'||!d.on||d.finish||d.hold||d.react>0){d.slowRaceT=0;return;}
- const v=CollisionPhysics.velocity(d.car);
- d.slowRaceT=Math.hypot(v.x,v.z)*3.6<=30?(d.slowRaceT||0)+dt:0;
- if(d.slowRaceT>=10)aiRetire(d,'Below 30 km/h for 10 seconds');
-}
 function aiUnstick(d, C, dt){
-  if(d.hold || d.react>0 || d.finish) return null;
-  const kph=Math.abs(C.st.speed)*3.6;
+  if(d.hold || d.react>0 || d.finish){ d.stuckT=0; return null; }
 
-  if(!d.rescue){
-    d.stuckT = kph<AI_STUCK_KPH ? (d.stuckT||0)+dt : 0;
-    if(d.stuckT<=AI_STUCK_T) return null;
-    d.stuckT=0;
-    d.tries=(d.tries||0)+1;
+  if(d.rescue){
+    const r=d.rescue; r.t+=dt;
+    if(r.t>=AI_REV_T){ d.rescue=null; d.stuckT=0; return null; }
+    /* Back away while turning the nose toward the racing line. */
+    const side=(d.off>0 ? 1 : -1);
+    return {thr:0, brk:1, steer:side, rev:true};
+  }
+
+  /* A recovery counts as successful only once the car is travelling forwards
+     above 30 km/h. Reverse speed cannot accidentally clear its own attempt. */
+  const forwardKph=C.st.speed*3.6;
+  if(forwardKph>=AI_STUCK_KPH){ d.stuckT=0; d.tries=0; return null; }
+  d.stuckT=(d.stuckT||0)+dt;
+  if(d.stuckT<AI_STUCK_T) return null;
+  d.stuckT=0;
+
+  if((d.tries||0)>=AI_TRIES){
+    aiRetire(d,'Unable to rejoin after two recovery attempts');
+    return null;
+  }
+  d.tries=(d.tries||0)+1;
     /* Where it happened, kept so the places cars actually beach can be found
        and fenced rather than guessed at from a screenshot. */
     AI_STUCK_LOG.push({x:+C.st.wx.toFixed(1), z:+C.st.wz.toFixed(1),
                        who:d.name||'AI', try:d.tries,
                        surf:C.surf&&C.surf.loose?'gravel':C.surf&&C.surf.grass?'grass':'track'});
     if(AI_STUCK_LOG.length>400) AI_STUCK_LOG.shift();
-    if(d.tries>AI_TRIES){ aiRetire(d,'Stuck on track'); return null; }
-    /* The last attempt throws the lock the other way. */
-    d.rescue={phase:'back', t:0, flip:(d.tries>=AI_TRIES ? -1 : 1)};
-  }
-
-  const r=d.rescue; r.t+=dt;
-  if(r.phase==='back'){
-    /* Steer so the nose comes back toward the line as the car backs away from
-       whatever stopped it: off is +ve to the right of the line, and in reverse
-       the back of the car leads, so the lock goes the same side as the error. */
-    const side=(d.off>0 ? 1 : -1) * r.flip;
-    if(r.t>AI_REV_T){ r.phase='go'; r.t=0; }
-    return {thr:0, brk:1, steer:side, rev:true};
-  }
-  /* Let it drive itself out. If it is genuinely going again the attempt
-     counter resets, so a car that gets stuck once early does not arrive at the
-     last round of the ladder an hour later on its first real problem. */
-  if(r.t>AI_SETTLE_T){
-    d.rescue=null;
-    if(kph>12) d.tries=0;
-  }
-  return null;
+  d.rescue={phase:'back',t:0};
+  const side=(d.off>0 ? 1 : -1);
+  return {thr:0, brk:1, steer:side, rev:true};
 }
 /* Out of the race, and said out loud. */
 function aiRetire(d, why){
@@ -14014,7 +13997,7 @@ window.SIM={
   aiStuck(){ return AIS.map(d=>({name:d.name, on:!!d.on, tries:d.tries||0,
                                  stuck:+(d.stuckT||0).toFixed(1),
                                  phase:d.rescue?d.rescue.phase:null,
-                                 flip:d.rescue?d.rescue.flip:0,
+                                 flip:0,
                                  dsq:!!d.dsq, why:d.dsqWhy||null,
                                  hold:!!d.hold, react:+(d.react||0).toFixed(2),
                                  pin:!!d._pinTest,
