@@ -10155,9 +10155,11 @@ function resetToTrack(){
    separate gear to select, because there is no gearbox in this model and a
    key you have to find is a worse answer than the one you are already
    holding. Capped well below walking-out-of-trouble speed. */
-/* Deliberately extreme recovery reverse: ten times the previous ceiling. */
-const REV_MAX=1000/3.6;                // 10x the previous 100 kph reverse ceiling
-function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
+/* Reverse is a simple low-speed recovery gear. Holding the brake stops the car
+   first; once stationary, the same input reverses without a timer or mode. */
+const REV_MAX=35/3.6;
+const REV_ACCEL=10;
+function applyPedals(st, thr, brk, surf, dt, reverseEnabled, tow){
   tow=clamp(tow||0,0,1);
   if(thr>0){
     // drag rises with v^2, so: hard launch, progressive knee, flat top end.
@@ -10179,10 +10181,11 @@ function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
     st.speed += 26.0*(1.0 - v*v*(1-0.10*tow))*bog*dt*thr;
   }
   else if(brk>0){
-    /* The brake becomes the reverse pedal after the car stops. Reverse uses
-       ten times its previous acceleration so it reaches the new range. */
+    /* Never cross through zero in a braking frame. This clean separation is
+       what prevents a hard stop from producing a sudden backwards kick. */
     const wetB=(typeof WEATHER!=='undefined')?WEATHER.grip:1;
-    st.speed -= (st.speed>0 ? 46*wetB : 130)*dt*brk;
+    if(st.speed>0) st.speed=Math.max(0,st.speed-46*wetB*dt*brk);
+    else if(reverseEnabled) st.speed=Math.max(-REV_MAX,st.speed-REV_ACCEL*dt*brk);
   }
   /* Coasting decays toward zero from either side. Subtracting unconditionally
      was right while speed could not go below zero and would have quietly
@@ -10196,7 +10199,7 @@ function applyPedals(st, thr, brk, surf, dt, allowRev, tow){
      like rather than a heavier one. */
   const baseTop=MAXSPEED*(st===carState?CAR_TOP:1);
   const towTop=baseTop*(1+0.055*tow);
-  st.speed=Math.max(allowRev?-REV_MAX:0,st.speed);
+  st.speed=Math.max(reverseEnabled?-REV_MAX:0,st.speed);
   /* Do not snap an over-speeding car back to the ordinary limiter as it pulls
      out of the wake. Aero brings it down progressively, capped at 3.5 m/s/s. */
   if(st.speed>towTop) st.speed=Math.max(towTop,st.speed-3.5*dt);
@@ -10276,8 +10279,9 @@ function surfaceDrag(st, surf, dt){
    number so it does not want any of that, but every limit that belongs to the
    car -- lock, rack speed, grip -- applies to it identically. */
 function steerRack(C, want, kph, dt, aids){
-  /* Reverse uses the same speed-sensitive rack as forward motion. */
-  kph=Math.abs(kph);
+  /* Reverse always gets the predictable low-speed rack requested by the
+     driver. Direction still comes from signed velocity in yawFor(). */
+  kph=kph<0?20:Math.abs(kph);
   /* Two stages of easing on the input: it ramps toward the stick, then the
      wheel angle chases it.
 
@@ -10545,6 +10549,8 @@ function placeCar(C, dt, t){
   /* Rolling at v over r, for anybody who is not you. */
   if(C.wheels && C.wheels.length){
     C.spin=(C.spin||0)+(C.st.speed/wheelR)*dt;
+    if(C.spin>Math.PI*2) C.spin-=Math.PI*2;
+    else if(C.spin<-Math.PI*2) C.spin+=Math.PI*2;
     _qRoll.setFromAxisAngle(_AXIS_X, C.spin);
     for(let i=0;i<C.wheels.length;i++) C.wheels[i].quaternion.copy(_qRoll);
   }
@@ -10575,16 +10581,6 @@ function placeCar(C, dt, t){
   C.group.rotation.set(-C.carPitch, C.st.hdg + C.slipAng, C.carRoll);
 }
 
-/* Held, not tapped: a quarter of a second of brake at a standstill before the
-   car will back up, so stopping hard never turns into reversing by accident.
-   Any throttle, or getting properly rolling again, cancels it. */
-let playerRevHold=0;
-function playerRev(brk, thr, kph, dt){
-  if(thr>0 || kph>3){ playerRevHold=0; return false; }
-  if(brk>0 && kph<1.2) playerRevHold+=dt;
-  else if(!brk) playerRevHold=0;
-  return playerRevHold>0.25;
-}
 /* Off. SIM.editorKeys(true) puts them back for anyone building the circuit. */
 let EDITOR_KEYS=false;
 function drive(dt){
@@ -10661,11 +10657,8 @@ function drive(dt){
       steerRack(PLAYER, want, 0, dt, AIDS);   // the wheel still turns on the grid
     }else{
       // the same call the preview car makes, with keys instead of a program
-      /* Spa runs this branch, not the track-space one below -- reverse has to
-         be wired through stepCar or holding the brake at a standstill does
-         nothing at all on the circuit you actually race. */
       yawRate=stepCar(PLAYER, {thr:thrMag, brk:brkMag, steer:want,
-                               rev:playerRev(brkMag,thrMag,kph,dt)}, dt);
+                               rev:true}, dt);
       if(onLoose) looseSpray += carState.speed*looseFrac*dt;
     }
   }else{
@@ -10674,7 +10667,7 @@ function drive(dt){
        offset. The car itself is identical -- same pedals, same rack, same
        grip ceiling -- only the bookkeeping around it differs. */
     if(gridded) carState.speed=0;
-    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, playerRev(brkMag,thrMag,kph,dt), 0);
+    else applyPedals(carState, thrMag, brkMag, PLAYER.surf, dt, true, 0);
     steerRack(PLAYER, want, kph, dt, AIDS);
     if(!gridded){
       const v=carState.speed;
@@ -10766,6 +10759,7 @@ function presentCar(dt, thr, brk, gridded, yawRate){
   // stretch on the tyres, covers or discs at any angle.
   spin += (carState.speed/wheelR)*dt;
   if(spin>6.283185307) spin-=6.283185307;
+  else if(spin<-6.283185307) spin+=6.283185307;
   turnWheels(wheels, wingL, wingR, spin, PLAYER.steerAng);
 
   const wSpd=carState.speed;
@@ -13965,9 +13959,8 @@ window.SIM={
   place(x,z,hdg){ carState.wx=x; carState.wz=z; carState.hdg=hdg;
                   PLAYER.groundY=groundAt(x,z,1e9).y+RIDE; },
   speed(v){ carState.speed=v; },
-  /* Reverse, from the outside: whether the hold has armed it and what the
-     speed actually is, because the readout shows a magnitude. */
-  revState(){ return {hold:+(playerRevHold||0).toFixed(2), speed:+carState.speed.toFixed(2),
+  /* Reverse state for browser driving diagnostics. */
+  revState(){ return {enabled:true, speed:+carState.speed.toFixed(2),
                       surf:PLAYER.surf?{grass:!!PLAYER.surf.grass,loose:!!PLAYER.surf.loose,
                                         ok:!!PLAYER.surf.ok}:null,
                       n:+carState.n.toFixed(2), gridded:startPhase!=='go'}; },
