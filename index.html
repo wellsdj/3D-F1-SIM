@@ -17985,6 +17985,9 @@ menuEl.appendChild(document.getElementById('career-save-status'));
 new MutationObserver(()=>{home.inert=menuEl.classList.contains('on');}).observe(menuEl,{attributes:true,attributeFilter:['class']});
 // Avoid driving shortcuts while entering a name or navigating the new menus.
 window.addEventListener('keydown',e=>{
+ /* The account menu gets its own keys: this listener swallows everything in
+    the capture phase, so Escape never reached the thing that was open. */
+ if(document.querySelector('#accountmenu.on'))return;
  const panel=menuEl.classList.contains('on')?menuEl:!home.classList.contains('gone')?home:null;
  if(!panel)return;
  if(e.code==='Escape'&&panel===menuEl){e.preventDefault();document.getElementById('career-close').click();}
