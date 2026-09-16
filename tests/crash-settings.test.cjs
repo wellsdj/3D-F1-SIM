@@ -30,11 +30,13 @@ test('a wheel comes off only for a fast enough, tyre-first hit',()=>{
   assert.match(source,/DEBRIS\.push\(\{o:best,/);
 });
 
-test('the crash runs the moment, then the nose, then the card',()=>{
-  assert.match(source,/const CRASH_NOSE_T=5;/);
-  assert.match(source,/camMode=0; orbit=false; freeLook=false;/);
-  assert.match(source,/if\(typeof TT!=='undefined'\) TT\.drone=0;/);
-  assert.match(source,/if\(!CRASH\.card && CRASH\.t>=CRASH_NOSE_T\) crashCard\(\);/);
+test('the crash keeps the chosen camera until the stopped car has settled',()=>{
+  assert.match(source,/const CRASH_STOP_T=2;/);
+  assert.match(source,/CRASH\.stopT=kph<2\?CRASH\.stopT\+dt:0;/);
+  assert.match(source,/if\(CRASH\.stopT>=CRASH_STOP_T\)/);
+  assert.match(source,/camMode=0;orbit=false;freeLook=false;/);
+  assert.match(source,/if\(typeof TT!=='undefined'\)\s*TT\.drone=0;/);
+  assert.match(source,/if\(!CRASH\.card && CRASH\.noseT>=CRASH_NOSE_T\)crashCard\(\);/);
   /* The card is the helmet, and it asks the two questions it was asked to. */
   assert.match(css,/#crashcard \.cc-helm\{[^}]*assets\/home\/helmet-red\.webp/);
   assert.match(source,/class="cc-go">Restart race</);
@@ -43,6 +45,14 @@ test('the crash runs the moment, then the nose, then the card',()=>{
   assert.match(source,/\.cc-out'\)\.onclick=\(\)=>\{ crashEnd\(\); goHome\(\); \}/);
   /* And the car is not yours again until you answer it. */
   assert.match(source,/if\(CRASH\.on\)\{ thrMag=0; brkMag=1; want=0; thr=false; brk=true; \}/);
+});
+
+test('a detached tyre is restored cleanly for the next restart',()=>{
+  assert.match(source,/const wheelDamage=\[\];/);
+  assert.match(source,/wheelDamage\.push\(\{wheel:best,parent:best\.parent/);
+  assert.match(source,/r\.parent\.add\(r\.wheel\)/);
+  assert.match(source,/if\(!wheels\.includes\(r\.wheel\)\)wheels\.push\(r\.wheel\);/);
+  assert.match(source,/wheelDamage\.length=0;/);
 });
 
 /* ---------------------------------------------------------- track limits */
