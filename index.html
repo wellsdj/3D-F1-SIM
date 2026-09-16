@@ -12704,6 +12704,7 @@ function aiPedals(d, C){
 const HIT_DECAY=.55;
 const DEBRIS=[];
 const wingDamage=new Map();
+const wheelDamage=[];
 function wingPrepare(C){
  if(wingDamage.has(C))return wingDamage.get(C);
  const root=C.group;if(!root)return [];
@@ -12758,6 +12759,12 @@ function wingImpact(C,x,z,severity){
 function damageReset(){
  for(const [C,records] of wingDamage){for(const r of records){r.mesh.geometry.dispose();r.mesh.geometry=r.original;for(const s of r.sections){if(s.pivot&&s.pivot.parent)s.pivot.parent.remove(s.pivot);s.part.removeFromParent?s.part.removeFromParent():s.part.parent&&s.part.parent.remove(s.part);s.part.geometry.dispose();}}C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;}
  wingDamage.clear();DEBRIS.length=0;
+ for(const r of wheelDamage){
+  if(r.wheel.parent)r.wheel.parent.remove(r.wheel);
+  r.parent.add(r.wheel);r.wheel.position.copy(r.position);r.wheel.quaternion.copy(r.quaternion);r.wheel.scale.copy(r.scale);
+  if(!wheels.includes(r.wheel))wheels.push(r.wheel);
+ }
+ wheelDamage.length=0;
  for(const C of [PLAYER,...AIS.map(d=>d.car).filter(Boolean)]){C.impactYaw=0;C.bumpX=0;C.bumpZ=0;C._collisionPrev=null;C.airborne=null;C.returnDrop=null;}
 }
 function wingDebrisStep(dt){
@@ -13256,6 +13263,8 @@ function wheelOff(px, pz, normal){
     if(q<bd){ bd=q; best=w; }
   }
   if(!best) return null;
+  wheelDamage.push({wheel:best,parent:best.parent,position:best.position.clone(),
+                    quaternion:best.quaternion.clone(),scale:best.scale.clone()});
   best.getWorldPosition(_woC);
   best.getWorldQuaternion(_woQ);
   wheels.splice(wheels.indexOf(best),1);              // nothing rolls it any more
@@ -13268,17 +13277,15 @@ function wheelOff(px, pz, normal){
                spin:(Math.random()<0.5?-1:1)*(6+Math.random()*6), t:0});
   return best;
 }
-/* The crash itself: the moment, the nose view, and then the card. */
-const CRASH={ on:false, t:0, card:null };
-const CRASH_NOSE_T=5;          // seconds looking down the road before the card
+/* The crash itself: keep the camera the driver chose through the impact. Once
+   the wreck has actually been still for two uninterrupted seconds, move to the
+   nose and let that view breathe before offering the restart. */
+const CRASH={ on:false, t:0, stopT:0, noseT:0, nose:false, card:null };
+const CRASH_STOP_T=2;
+const CRASH_NOSE_T=3;
 function crashOut(){
   if(CRASH.on || RESULT.on || RETIRE.on) return;
-  CRASH.on=true; CRASH.t=0;
-  camMode=0; orbit=false; freeLook=false;                 // down the nose, as asked
-  /* And out of whatever cinematic was running: the drone shot at the start of
-     a race owns the camera, and a crash under it would show the sky. */
-  if(typeof TT!=='undefined') TT.drone=0;
-  if(typeof updateStatus==='function') updateStatus();
+  CRASH.on=true; CRASH.t=0; CRASH.stopT=0; CRASH.noseT=0; CRASH.nose=false;
   crashSay();
 }
 function crashSay(){
@@ -13291,7 +13298,19 @@ function crashSay(){
 function crashStep(dt){
   if(!CRASH.on) return;
   CRASH.t+=dt;
-  if(!CRASH.card && CRASH.t>=CRASH_NOSE_T) crashCard();
+  if(!CRASH.nose){
+    const kph=Math.abs(PLAYER.st.speed)*3.6;
+    CRASH.stopT=kph<2?CRASH.stopT+dt:0;
+    if(CRASH.stopT>=CRASH_STOP_T){
+      CRASH.nose=true;CRASH.noseT=0;
+      camMode=0;orbit=false;freeLook=false;
+      if(typeof TT!=='undefined')TT.drone=0;
+      if(typeof updateStatus==='function')updateStatus();
+    }
+  }else{
+    CRASH.noseT+=dt;
+    if(!CRASH.card && CRASH.noseT>=CRASH_NOSE_T)crashCard();
+  }
 }
 function crashCard(){
   let el=document.getElementById('crashcard');
@@ -13309,7 +13328,7 @@ function crashCard(){
   el.querySelector('.cc-out').onclick=()=>{ crashEnd(); goHome(); };
 }
 function crashEnd(){
-  CRASH.on=false; CRASH.t=0;
+  CRASH.on=false; CRASH.t=0; CRASH.stopT=0; CRASH.noseT=0; CRASH.nose=false;
   if(CRASH.card){ CRASH.card.classList.remove('show');
                   const c=CRASH.card; setTimeout(()=>c.remove(),400); CRASH.card=null; }
 }
