@@ -1921,3 +1921,46 @@ body.driving #accountchip{display:none}
   transition:color .18s;
 }
 #accountchip button:hover{color:var(--apex-red-hot)}
+
+/* The badge is a control now: clicking who you are opens the account menu. */
+.apex-driver.acc-open{cursor:pointer;transition:border-color .18s,background .18s}
+.apex-driver.acc-open:hover{border-color:var(--apex-red-hot);background:rgba(20,6,10,.72)}
+.apex-driver.acc-open:focus-visible{outline:2px solid var(--apex-red-hot);outline-offset:3px}
+.apex-driver.acc-open[aria-expanded="true"]{border-color:var(--apex-red-hot);background:rgba(28,7,12,.8)}
+#accountmenu{
+  position:fixed;z-index:1200;display:none;min-width:190px;padding:5px;
+  background:rgba(10,4,6,.96);border:1px solid rgba(255,31,45,.45);border-radius:3px;
+  box-shadow:0 24px 60px rgba(0,0,0,.7),0 0 40px rgba(255,31,45,.12);
+  backdrop-filter:blur(8px);font-family:var(--apex-mono);
+  animation:am-in .18s ease both;
+}
+#accountmenu.on{display:block}
+@keyframes am-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+#accountmenu .am-who{display:grid;gap:2px;padding:9px 11px 10px;border-bottom:1px solid rgba(236,234,228,.12)}
+#accountmenu .am-who span{font-size:7.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--apex-dim)}
+#accountmenu .am-who b{font-size:12px;color:#fff;font-weight:400;letter-spacing:.04em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#accountmenu button{
+  display:block;width:100%;margin-top:3px;padding:9px 11px;text-align:left;
+  background:none;border:0;border-radius:2px;font:inherit;font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--apex-dim);cursor:pointer;transition:background .16s,color .16s;
+}
+#accountmenu button:hover,#accountmenu button:focus-visible{background:rgba(255,31,45,.14);color:#fff;outline:none}
+#accountmenu .am-out{color:#ff5f6f}
+#accountmenu .am-out:hover{background:rgba(255,31,45,.22);color:#fff}
+/* The save note: nothing at all until there is something to say. */
+#accountchip{pointer-events:none;opacity:0;transition:opacity .3s ease}
+#accountchip.flash{opacity:1}
+#accountchip .acc-state{opacity:1}
+
+/* A panel that is taller than the window scrolls, rather than running off the
+   bottom of it. Settings grew two boxes and a paragraph and the last of it was
+   simply unreachable. */
+.apex-panel{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  padding-bottom:clamp(18px,4vh,44px);scrollbar-width:thin;
+  scrollbar-color:rgba(255,31,45,.45) transparent}
+.apex-panel::-webkit-scrollbar{width:9px}
+.apex-panel::-webkit-scrollbar-track{background:transparent}
+.apex-panel::-webkit-scrollbar-thumb{background:rgba(255,31,45,.4);border-radius:99px;
+  border:3px solid transparent;background-clip:content-box}
+.apex-panel::-webkit-scrollbar-thumb:hover{background:rgba(255,31,45,.7);background-clip:content-box}

@@ -127,9 +127,9 @@ function mark(text){
   const s=chip.querySelector('.acc-state');
   if(!s) return;
   s.textContent=text;
-  s.classList.add('lit');
+  chip.classList.add('flash');
   clearTimeout(mark._t);
-  mark._t=setTimeout(()=>s.classList.remove('lit'), 1600);
+  mark._t=setTimeout(()=>chip.classList.remove('flash'), 1600);
 }
 function showChip(){
   if(!chip){
@@ -137,16 +137,67 @@ function showChip(){
     chip.id='accountchip';
     document.body.appendChild(chip);
   }
-  chip.innerHTML='<b></b><span class="acc-state">Signed in</span>'
-                +'<button type="button" class="acc-code">New code</button>'
-                +'<button type="button" class="acc-out">Sign out</button>';
-  chip.querySelector('b').textContent=username||'';
-  chip.querySelector('.acc-out').onclick=signOut;
-  chip.querySelector('.acc-code').onclick=async()=>{
+  /* Who you are is on the badge now, so all this is is a note that the save
+     went up -- and a note nobody needs to see until there is one. */
+  chip.innerHTML='<span class="acc-state"></span>';
+  chip.classList.add('on');
+  wireBadge();
+}
+
+/* THE DRIVER BADGE IS THE ACCOUNT MENU.
+
+   Signing out belonged on the thing that says who you are, which is the badge
+   in the top right of the front end -- not on a separate chip in the opposite
+   corner. Clicking it drops a short menu under it: the name you signed in
+   with, a fresh recovery code, and the way out. */
+let menu=null;
+function menuOpen(on){
+  if(!menu) return;
+  const badge=document.querySelector('.apex-driver');
+  menu.classList.toggle('on', !!on);
+  if(badge) badge.setAttribute('aria-expanded', on?'true':'false');
+  if(on && badge){
+    const r=badge.getBoundingClientRect();
+    menu.style.top=(r.bottom+8)+'px';
+    menu.style.right=Math.max(8, innerWidth-r.right)+'px';
+    const first=menu.querySelector('button');
+    if(first) first.focus();
+  }
+}
+function wireBadge(){
+  const badge=document.querySelector('.apex-driver');
+  if(!badge || badge.dataset.acc) return;
+  badge.dataset.acc='1';
+  badge.classList.add('acc-open');
+  badge.setAttribute('role','button');
+  badge.setAttribute('tabindex','0');
+  badge.setAttribute('aria-haspopup','menu');
+  badge.setAttribute('aria-expanded','false');
+  badge.title='Your account';
+
+  menu=document.createElement('div');
+  menu.id='accountmenu';
+  menu.setAttribute('role','menu');
+  menu.innerHTML='<div class="am-who"><span>Signed in as</span><b></b></div>'
+                +'<button type="button" role="menuitem" class="am-code">New recovery code</button>'
+                +'<button type="button" role="menuitem" class="am-out">Sign out</button>';
+  document.body.appendChild(menu);
+  menu.querySelector('.am-who b').textContent=username||'';
+  menu.querySelector('.am-out').onclick=()=>{ menuOpen(false); signOut(); };
+  menu.querySelector('.am-code').onclick=async()=>{
+    menuOpen(false);
     try{ const r=await call('newcode',{}); codeScreen(r.recovery, 'A new recovery code'); }
     catch(e){ mark(e.message); }
   };
-  chip.classList.add('on');
+
+  const toggle=e=>{ e.preventDefault(); e.stopPropagation(); menuOpen(!menu.classList.contains('on')); };
+  badge.addEventListener('click', toggle);
+  badge.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') toggle(e); });
+  /* Anywhere else, and Escape, closes it. */
+  addEventListener('pointerdown', e=>{
+    if(menu.classList.contains('on') && !menu.contains(e.target) && !badge.contains(e.target)) menuOpen(false);
+  }, true);
+  addEventListener('keydown', e=>{ if(e.key==='Escape' && menu.classList.contains('on')) menuOpen(false); });
 }
 async function signOut(){
   await pushNow().catch(()=>{});
