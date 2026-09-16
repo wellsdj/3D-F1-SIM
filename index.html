@@ -4684,9 +4684,20 @@ function styleUI(){
    camera for free, which is what makes a puff read as a puff from any angle.
    The sprite is a radial falloff drawn once into a canvas, so there is no
    texture to fetch and no hard edge anywhere in it. */
+/* TWO PLUMES, NOT ONE.
+
+   Sand and water want opposite things. Water off a wet circuit is a mist you
+   see the car through; sand out of a gravel trap is not -- it is a solid
+   yellow cloud that hides whatever is inside it. One Points object could not
+   be both, because on three r128 the alpha lives on the material and not on
+   the particle, so making the spray read properly as spray is what left the
+   gravel looking like a dirty pane of glass.
+
+   So there are two pools with the same physics and different materials: dry
+   (gravel and grass) nearly opaque and a little larger, wet thin. Everything
+   below takes a pool rather than reaching for module-level arrays. */
 const DUST_N=900;
-let dustPts=null, dustPos=null, dustVel=null, dustLife=null, dustMax=null, dustWet=null, dustHead=0;
-(function initDust(){
+function dustSprite(){
   const c=document.createElement('canvas'); c.width=c.height=64;
   const g2=c.getContext('2d');
   const grd=g2.createRadialGradient(32,32,0,32,32,32);
@@ -4694,24 +4705,26 @@ let dustPts=null, dustPos=null, dustVel=null, dustLife=null, dustMax=null, dustW
   grd.addColorStop(0.45,'rgba(255,255,255,0.55)');
   grd.addColorStop(1,   'rgba(255,255,255,0)');
   g2.fillStyle=grd; g2.fillRect(0,0,64,64);
-  const tex=new THREE.CanvasTexture(c);
+  return new THREE.CanvasTexture(c);
+}
+const DUST_TEX=dustSprite();
+function dustPool(n, size, opacity){
   const geo=new THREE.BufferGeometry();
-  dustPos=new Float32Array(DUST_N*3);
-  dustVel=new Float32Array(DUST_N*3);
-  dustLife=new Float32Array(DUST_N);
-  dustMax=new Float32Array(DUST_N);
-  dustWet=new Uint8Array(DUST_N);
-  const col=new Float32Array(DUST_N*3);
-  for(let i=0;i<DUST_N;i++) dustPos[i*3+1]=-9999;      // park the unused ones
-  geo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
+  const pos=new Float32Array(n*3), col=new Float32Array(n*3);
+  for(let i=0;i<n;i++) pos[i*3+1]=-9999;               // park the unused ones
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
   geo.setAttribute('color',new THREE.BufferAttribute(col,3));
-  const mat=new THREE.PointsMaterial({
-    size:1.5, sizeAttenuation:true, map:tex, vertexColors:true,
-    transparent:true, depthWrite:false, opacity:0.5 });
-  dustPts=new THREE.Points(geo,mat);
-  dustPts.frustumCulled=false;
-  scene.add(dustPts);
-})();
+  const pts=new THREE.Points(geo,new THREE.PointsMaterial({
+    size, sizeAttenuation:true, map:DUST_TEX, vertexColors:true,
+    transparent:true, depthWrite:false, opacity }));
+  pts.frustumCulled=false;
+  scene.add(pts);
+  return {n, pts, col, pos, vel:new Float32Array(n*3),
+          life:new Float32Array(n), max:new Float32Array(n), head:0};
+}
+/* Gravel is meant to be seen and not seen through. */
+const DUST_DRY=dustPool(DUST_N, 2.1, 0.94);
+const DUST_WET=dustPool(DUST_N, 1.5, 0.5);
 
 const _dustC=new THREE.Color();
 /* Sand out of the back of a car -- any car.
@@ -4808,7 +4821,9 @@ function rainStep(dt){
   rainGeo.attributes.position.needsUpdate=true;
 }
 function spawnDust(speed, from, grass, wet){
-  const i=dustHead; dustHead=(dustHead+1)%DUST_N;
+  const P=wet?DUST_WET:DUST_DRY;
+  const i=P.head; P.head=(P.head+1)%P.n;
+  const pos=P.pos, vel=P.vel;
   const g=from||carGroup;
   const h=g.rotation.y, fx=Math.sin(h), fz=Math.cos(h);
   // Wet spray is a thin mist across the full rear, with a little wheel bias.
@@ -4817,22 +4832,21 @@ function spawnDust(speed, from, grass, wet){
                     : (Math.random()-0.5)*3.25)
                  : (Math.random()<0.5?-1:1)*(0.5+Math.random()*0.7);
   const rear=wet?1.43:1.8;
-  dustPos[i*3]  =g.position.x - fx*rear - fz*side;
-  dustPos[i*3+1]=g.position.y + (wet?0.13+Math.random()*0.10:0.05+Math.random()*0.20);
-  dustPos[i*3+2]=g.position.z - fz*rear + fx*side;
+  pos[i*3]  =g.position.x - fx*rear - fz*side;
+  pos[i*3+1]=g.position.y + (wet?0.13+Math.random()*0.10:0.05+Math.random()*0.20);
+  pos[i*3+2]=g.position.z - fz*rear + fx*side;
   /* Thrown backwards relative to the car and given a lot of sideways spread,
      so the plume drifts outward and hangs rather than trailing in a line. */
   const back=speed*(wet?(0.32+Math.random()*0.12):(0.18+Math.random()*0.30));
   const spread=wet?(0.45+Math.random()*1.35):(1.4+Math.random()*2.2);
-  dustVel[i*3]  =-fx*back - fz*Math.sign(side)*spread + (Math.random()-0.5)*(wet?0.35:1.2);
-  dustVel[i*3+1]= wet   ? 3.3+Math.random()*1.7 + speed*0.035
-                : grass ? 0.5+Math.random()*1.0 + speed*0.012
-                        : 1.1+Math.random()*2.4 + speed*0.035;
-  dustVel[i*3+2]=-fz*back + fx*Math.sign(side)*spread + (Math.random()-0.5)*(wet?0.35:1.2);
-  dustMax[i]=dustLife[i]=wet ? 0.43+Math.random()*0.16
-                             : grass ? 0.35+Math.random()*0.35    // settles quickly
-                                     : 0.7+Math.random()*0.9;
-  dustWet[i]=wet?1:0;
+  vel[i*3]  =-fx*back - fz*Math.sign(side)*spread + (Math.random()-0.5)*(wet?0.35:1.2);
+  vel[i*3+1]= wet   ? 3.3+Math.random()*1.7 + speed*0.035
+            : grass ? 0.5+Math.random()*1.0 + speed*0.012
+                    : 1.1+Math.random()*2.4 + speed*0.035;
+  vel[i*3+2]=-fz*back + fx*Math.sign(side)*spread + (Math.random()-0.5)*(wet?0.35:1.2);
+  P.max[i]=P.life[i]=wet ? 0.43+Math.random()*0.16
+                         : grass ? 0.35+Math.random()*0.35    // settles quickly
+                                 : 0.7+Math.random()*0.9;
   if(wet)
     /* Water off a wet circuit: white, barely any colour in it, and bright
        enough to read against the dark tarmac a wet track turns into. */
@@ -4843,44 +4857,55 @@ function spawnDust(speed, from, grass, wet){
     _dustC.setHSL(0.24+Math.random()*0.06, 0.20+Math.random()*0.14,
                   0.26+Math.random()*0.12);
   else
-    // sand: warm, desaturated, and varied so the plume is not one flat colour
-    _dustC.setHSL(0.108+Math.random()*0.035, 0.34+Math.random()*0.16,
-                  0.56+Math.random()*0.16);
-  const col=dustPts.geometry.attributes.color.array;
-  col[i*3]=_dustC.r; col[i*3+1]=_dustC.g; col[i*3+2]=_dustC.b;
+    /* Sand, and yellow about it.
+
+       These numbers are darker and far more saturated than they look, and
+       deliberately: the renderer is ACES filmic at about unity exposure, and
+       vertex colours go in as linear light. A "sand" picked by eye -- 0.62
+       lightness, half saturation -- arrives on screen as very nearly white,
+       which is what the plume had become. Pulling the lightness down to a
+       third and the saturation up to three quarters is what survives the tone
+       curve as an actual yellow. Still varied, so it is not one flat colour. */
+    _dustC.setHSL(0.105+Math.random()*0.030, 0.70+Math.random()*0.16,
+                  0.34+Math.random()*0.10);
+  P.col[i*3]=_dustC.r; P.col[i*3+1]=_dustC.g; P.col[i*3+2]=_dustC.b;
 }
 
-function updateDust(dt){
-  if(!dustPts) return;
+/* One pool, one step. Sand slows fast in heavy air and then hangs; water
+   launches hard, loses half its speed in the first 0.18 s and then falls on a
+   visible arc, which is what keeps the spray behind the car rather than
+   stretched down the straight. */
+function updatePool(P, wet, dt){
+  const pos=P.pos, vel=P.vel;
   let live=false;
-  for(let i=0;i<DUST_N;i++){
-    if(dustLife[i]<=0) continue;
+  for(let i=0;i<P.n;i++){
+    if(P.life[i]<=0) continue;
     live=true;
-    dustLife[i]-=dt;
-    if(dustLife[i]<=0){ dustPos[i*3+1]=-9999; continue; }
-    /* Tyre spray launches hard, loses half its speed in the first 0.18 s, then
-       follows a visible ballistic arc. Its short life keeps the plume behind
-       the car instead of stretching down the straight. */
-    if(dustWet[i]){
-      const age=dustMax[i]-dustLife[i];
+    P.life[i]-=dt;
+    if(P.life[i]<=0){ pos[i*3+1]=-9999; continue; }
+    if(wet){
+      const age=P.max[i]-P.life[i];
       const d=age<0.18?Math.pow(0.5,dt/0.18):1;
-      dustVel[i*3]*=d; dustVel[i*3+2]*=d;
-      dustVel[i*3+1]=dustVel[i*3+1]*d-9.2*dt;
+      vel[i*3]*=d; vel[i*3+2]*=d;
+      vel[i*3+1]=vel[i*3+1]*d-9.2*dt;
     }else{
-      /* Heavy air drag and light gravity: sand slows fast and then hangs. */
       const d=Math.pow(0.12,dt);
-      dustVel[i*3]*=d; dustVel[i*3+2]*=d;
-      dustVel[i*3+1]=dustVel[i*3+1]*d - 2.4*dt;
+      vel[i*3]*=d; vel[i*3+2]*=d;
+      vel[i*3+1]=vel[i*3+1]*d - 2.4*dt;
     }
-    dustPos[i*3]  +=dustVel[i*3]  *dt;
-    dustPos[i*3+1]+=dustVel[i*3+1]*dt;
-    dustPos[i*3+2]+=dustVel[i*3+2]*dt;
+    pos[i*3]  +=vel[i*3]  *dt;
+    pos[i*3+1]+=vel[i*3+1]*dt;
+    pos[i*3+2]+=vel[i*3+2]*dt;
   }
-  if(live||dustPts.visible){
-    dustPts.geometry.attributes.position.needsUpdate=true;
-    dustPts.geometry.attributes.color.needsUpdate=true;
+  if(live||P.pts.visible){
+    P.pts.geometry.attributes.position.needsUpdate=true;
+    P.pts.geometry.attributes.color.needsUpdate=true;
   }
-  dustPts.visible=live;
+  P.pts.visible=live;
+}
+function updateDust(dt){
+  updatePool(DUST_DRY,false,dt);
+  updatePool(DUST_WET,true,dt);
 }
 
 function clearDebris(){damageReset();}
@@ -9842,29 +9867,31 @@ function crashSound(severity){
   src.connect(lp); lp.connect(g); g.connect(ctx.destination);
   src.start();
 }
+/* Sparks ride the dry pool: they are bright and they are meant to be solid,
+   which is the pool that is now solid. */
 function spawnSparks(x,y,z,power){
-  if(!dustPts) return 0;
+  const P=DUST_DRY;
+  if(!P||!P.pts) return 0;
   const n=Math.round(clamp(18+power*90, 12, 150));
-  const col=dustPts.geometry.attributes.color.array;
+  const pos=P.pos, vel=P.vel, col=P.col;
   for(let k=0;k<n;k++){
-    const i=dustHead; dustHead=(dustHead+1)%DUST_N;
-    dustPos[i*3]  =x+(Math.random()-0.5)*0.5;
-    dustPos[i*3+1]=y+0.15+Math.random()*0.4;
-    dustPos[i*3+2]=z+(Math.random()-0.5)*0.5;
+    const i=P.head; P.head=(P.head+1)%P.n;
+    pos[i*3]  =x+(Math.random()-0.5)*0.5;
+    pos[i*3+1]=y+0.15+Math.random()*0.4;
+    pos[i*3+2]=z+(Math.random()-0.5)*0.5;
     /* Thrown in a fan rather than a sphere: mostly up and away, which is what
        metal on metal actually does. */
     const a=Math.random()*Math.PI*2, sp=3+Math.random()*(9+power*26);
-    dustVel[i*3]  =Math.cos(a)*sp*0.7;
-    dustVel[i*3+1]=2.5+Math.random()*(5+power*11);
-    dustVel[i*3+2]=Math.sin(a)*sp*0.7;
-    dustMax[i]=dustLife[i]=0.18+Math.random()*(0.3+power*0.35);
-    dustWet[i]=0;
+    vel[i*3]  =Math.cos(a)*sp*0.7;
+    vel[i*3+1]=2.5+Math.random()*(5+power*11);
+    vel[i*3+2]=Math.sin(a)*sp*0.7;
+    P.max[i]=P.life[i]=0.18+Math.random()*(0.3+power*0.35);
     // white at the source, falling through orange as it cools
     const hot=Math.random();
     _dustC.setHSL(0.055+hot*0.035, 1.0, 0.62+hot*0.33);
     col[i*3]=_dustC.r; col[i*3+1]=_dustC.g; col[i*3+2]=_dustC.b;
   }
-  dustPts.geometry.attributes.color.needsUpdate=true;
+  P.pts.geometry.attributes.color.needsUpdate=true;
   return n;
 }
 
@@ -14491,8 +14518,22 @@ window.SIM={
     return {ok:s2.ok, loose:s2.loose, looseFrac:+(s2.looseFrac||0).toFixed(2),
             grass:s2.grass, grassFrac:+(s2.grassFrac||0).toFixed(2),
             kph:Math.round(d.car.st.speed*3.6), spray:+(d.car._spray||0).toFixed(2)}; },
-  dustLive(){ let n=0; for(let i=0;i<dustLife.length;i++) if(dustLife[i]>0) n++;
-              return {particles:n, visible:!!(dustPts&&dustPts.visible)}; },
+  /* Throw a plume on demand -- 'gravel', 'grass' or 'wet' -- so the look of
+     one can be judged without finding a trap to drive into. */
+  dustBurst(kind,n){
+    const N=Math.max(1,Math.min(400,n|0||120));
+    for(let k=0;k<N;k++) spawnDust(Math.max(20,carState.speed), carGroup, kind==='grass', kind==='wet');
+    return this.dustLive();
+  },
+  dustLive(){
+    const count=P=>{ let n=0; for(let i=0;i<P.life.length;i++) if(P.life[i]>0) n++; return n; };
+    const dry=count(DUST_DRY), wet=count(DUST_WET);
+    const last=P=>{ const i=((P.head-1)%P.n+P.n)%P.n;
+                    return [+P.col[i*3].toFixed(3),+P.col[i*3+1].toFixed(3),+P.col[i*3+2].toFixed(3)]; };
+    return {particles:dry+wet, dry, wet, dryColour:last(DUST_DRY), wetColour:last(DUST_WET),
+            visible:!!(DUST_DRY.pts.visible||DUST_WET.pts.visible),
+            dryOpacity:DUST_DRY.pts.material.opacity,
+            wetOpacity:DUST_WET.pts.material.opacity}; },
   putOnGravel(){
     /* Park an AI car off the road and let it drive, to see if it throws sand. */
     const d=AIS.find(x=>x.car); if(!d) return false;

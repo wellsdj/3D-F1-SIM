@@ -13,7 +13,7 @@
    always did and every load after it costs nothing. */
 /* Bumped so the revert of the stripped home screen actually reaches people:
    the page is network-first, but the shell list and its cache name are not. */
-const CACHE='pad-controls-v54';
+const CACHE='gravel-plume-v55';
 const SHELL=[
   './engine-sound.js','./collision-physics.js','./slipstream.js','./career-menu.css','./home-apex.css','./assets/home/hero-red.webp',
   './assets/driver/driver.glb',
