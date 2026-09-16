@@ -12806,7 +12806,10 @@ function aiTraffic(d,dt){
   /* A run on them: alongside, or close behind and carrying more speed. */
   const yielding = you && you.gap>-6 && you.gap<26
                    && (you.gap<4 || carState.speed*3.6 > (d.car?d.car.st.speed*3.6:0)+4);
-  const candidates=[base,d.lat||base,base-2.5,base+2.5].map(x=>clamp(x,-left,right));
+  /* Keep the opening hairpin compact. A full passing offset here put a row of
+     cars beyond the outside kerb while the field was still bunched together. */
+  const spread=(first>-90&&first<120)?1.1:2.5;
+  const candidates=[base,d.lat||base,base-spread,base+spread].map(x=>clamp(x,-left,right));
   const current=d.lat||0;
   let want=clamp(current,-left,right),best=Infinity;
   for(const lat of candidates){
@@ -13703,13 +13706,12 @@ function crashEnd(){
   if(CRASH.card){ CRASH.card.classList.remove('show');
                   const c=CRASH.card; setTimeout(()=>c.remove(),400); CRASH.card=null; }
 }
-const COOL={ on:false, t:0, v0:0, driver:null, card:null, scene:false, done:false };
+const COOL={ on:false, t:0, driver:null, card:null, scene:false, done:false };
 const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
 const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
 function coolStart(){
   if(COOL.on || !AI.x || !AI.x.length) return;
   COOL.on=true; COOL.t=0; COOL.done=false; COOL.scene=false;
-  COOL.v0=Math.max(40, carState.speed);     // the speed you took the flag at
   /* A driver of its own, reading the shared line like any rival, but pointed
      at your car instead of one of theirs. */
   const d=Object.create(AI);
@@ -13736,12 +13738,9 @@ function coolInputs(dt){
   const tx=d.x[j]-d.x[i], tz=d.z[j]-d.z[i], tl=Math.hypot(tx,tz)||1;
   d.off=((st.wx-d.x[i])*(tz/tl) - (st.wz-d.z[i])*(tx/tl));
   d.room=99; d.outside=Math.abs(d.off)-d.room;
-  /* Slowing down, not racing. Handing the whole car to aiPedals made it
-     accelerate away from the line at racing pace, which is the opposite of a
-     slowing-down lap -- so the wheel is the AI's and the pedals answer to a
-     target that eases off the speed you crossed at, floored so it still gets
-     round rather than stopping on the circuit. The AI's own corner speed still
-     caps it, so it brakes for the corners on the way home. */
+  /* After the flag the player becomes one more normal racing AI. Keep the
+     exact racing line, pedals and steering; no cooldown cap, parking phase or
+     reverse input is allowed to replace them. */
   d.speedK=1; d.mode='clear'; d.line='race';
   /* EXACTLY WHAT A RIVAL WOULD DO HERE, AND NOTHING ELSE.
 
@@ -13777,197 +13776,28 @@ function coolCard(){
     +'<div class="cool-word">'+pos+ord+' place</div>'
     +'<div class="cool-line">'+fmtTime(RESULT.you)+' &middot; '+RACE_LAPS+' laps'
     +(mine&&mine.pen?' &middot; +'+mine.pen.toFixed(1)+'s penalty':'')+'</div>'
-    +'<button type="button" class="cool-go" disabled>Slowing down&hellip;</button>';
+    +'<button type="button" class="cool-go" disabled>Race continuing&hellip;</button>';
   el.classList.add('show');
   COOL.card=el;
   el.querySelector('.cool-go').onclick=()=>{ if(COOL.done) coolEnd(); };
 }
-/* Hand the car back and show the table. */
-/* Hand the car back, then the celebration, then home.
-
-   Continue used to open the classification and make you wait for the last car
-   to come home before it would let you out. Nobody wants to read a table with
-   a result they already know; they want the next thing. So Continue goes
-   straight to the celebration and the celebration goes straight home -- the
-   standings are still there under Career for anyone who wants them. */
+/* Leave the running field and return home. There is deliberately no driver or
+   podium presentation between the race and the career screens. */
 function coolEnd(){
   COOL.on=false; COOL.driver=null; COOL.scene=false;
-  carState.speed=0;
   if(COOL.card){ COOL.card.classList.remove('show');
                  setTimeout(()=>{ if(COOL.card){COOL.card.remove(); COOL.card=null;} },500); }
-  /* Straight home. The celebration screen -- the driver on a black stage with
-     the position beside him -- is gone at Wells's request: after a race you
-     want the next thing, not a curtain call. celebrate() is still here for
-     anything that wants to call it, and nothing does. */
-  goHome();
+  /* Straight home. The screen that used to be here -- a driver on a black
+     stage with the position beside him -- is gone at Wells's request, code
+     and all: after a race you want the next thing, not a curtain call. The
+     race is torn down on the way out rather than left standing behind the
+     front end. */
+  raceEnd(); RESULT.on=false; goHome();
 }
-/* Ten seconds of black with a line on it. A deliberate placeholder: the real
-   celebration is a scene with the driver in it, and when that arrives it
-   replaces what is inside #celebrate and nothing around it changes. */
-const CELEBRATE_MS=10000;
-/* THE DRIVER ON THE CELEBRATION SCREEN.
+/* The celebration screen is gone -- the black stage, the driver model and
+   the ten seconds of it. Crossing the line takes you home. What replaced
+   it is nothing, deliberately: see coolEnd. */
 
-   The model is static -- no skeleton, no skin weights, twenty-one rigid
-   meshes -- so the Victory clip that came with it cannot drive it: a Mixamo
-   clip moves a mixamorig skeleton and there is nothing here for it to move.
-   The motion below is applied to the whole model instead: it rises into frame,
-   turns, and rocks the way somebody does when they are celebrating and
-   standing still. See assets/driver/README.md for what turns this into the
-   real clip.
-
-   Its own renderer, like the garage view, so nothing about the race loop has
-   to know it exists. Loaded once and kept. */
-let celRend=null, celScene=null, celCam=null, celModel=null, celReq=0, celT=0, celLoad=null;
-/* He stands right of centre so the copy gets its own half of the frame rather
-   than being laid across his chest. */
-const CEL_OFFSET_X=0.62;
-let celMode='podium';
-/* ON THE BOX. Up into frame, then a slow turn and a rock. */
-function celPodium(t){
-  const rise=Math.min(1,t/1.1), e=1-Math.pow(1-rise,3);
-  celModel.position.y = -0.55*(1-e);
-  celModel.rotation.y = 0.55 + Math.sin(t*0.55)*0.42;
-  celModel.rotation.z = Math.sin(t*2.3)*0.035;
-  celModel.position.x = CEL_OFFSET_X + Math.sin(t*1.15)*0.045;
-}
-/* THE WALK BACK.
-
-   Across the frame at a walking pace, with the body rising and falling twice
-   a stride and rolling a little onto each foot -- which is what the cadence
-   below is: CEL_STEP_HZ is steps a second, so the bob runs at that and the
-   roll at half it, one cycle per stride.
-
-   The legs do not move, because this model has none that can: it is twenty-one
-   rigid meshes with no skeleton, so there is nothing to bend. The travel speed
-   is tied to the same cadence so the bob at least lands where a footfall
-   would, rather than the figure sliding at a speed unrelated to its bounce.
-   Rigging the driver is what makes this a real walk -- see
-   assets/driver/README.md. */
-const CEL_STEP_HZ=1.85, CEL_STRIDE=0.82;    // steps a second, metres per step
-function celWalk(t){
-  const speed=CEL_STEP_HZ*CEL_STRIDE;        // ~1.5 m/s, an unhurried walk
-  /* He crosses the right-hand half of the frame, which keeps him in shot and
-     off the board -- walking the full width put him through the position and
-     then out of the picture entirely. */
-  const from=1.0, span=2.5;
-  const x=from + ((t*speed) % span);
-  celModel.position.x = x;
-  celModel.position.y = Math.abs(Math.sin(Math.PI*CEL_STEP_HZ*t))*0.045 - 0.02;
-  celModel.rotation.y = Math.PI*0.5 + Math.sin(t*0.4)*0.06;   // side on, facing the way he walks
-  celModel.rotation.z = Math.sin(Math.PI*CEL_STEP_HZ*t)*0.028;
-  celModel.rotation.x = 0.035;                                 // a touch of forward lean
-}
-function celebrateScene(host, colour, mode){
-  if(!host || typeof THREE==='undefined') return;
-  celMode=mode||'podium';
-  const W=host.clientWidth||880, H=host.clientHeight||460;
-  if(!celRend){
-    const cv=document.createElement('canvas');
-    celRend=new THREE.WebGLRenderer({canvas:cv, antialias:true, alpha:true});
-    celRend.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
-    celScene=new THREE.Scene();
-    celCam=new THREE.PerspectiveCamera(34, W/H, 0.1, 100);
-    /* A key from the front, a hard rim in the team colour from behind, and a
-       cold fill so the shadow side is not black. */
-    celScene.add(new THREE.HemisphereLight(0x8fa6c8, 0x0a0c10, 0.85));
-    const key=new THREE.DirectionalLight(0xfff4ec, 2.6); key.position.set(2.2,3.4,3.2);
-    celScene.add(key);
-    /* position is read-only on Object3D -- it has to be set, not assigned. */
-    const fill=new THREE.DirectionalLight(0xffffff,0.5);
-    fill.position.set(-3,1.6,2);
-    celScene.add(fill);
-    celRend.domElement.className='cb-canvas';
-  }
-  celRend.setSize(W,H,false);
-  celCam.aspect=W/H; celCam.updateProjectionMatrix();
-  /* The rim light takes the team colour, so the shot belongs to your team. */
-  if(!celScene.userData.rim){
-    const rim=new THREE.DirectionalLight(0xff2230, 3.4);
-    rim.position.set(-2.6,1.8,-3.2); celScene.add(rim); celScene.userData.rim=rim;
-  }
-  try{ celScene.userData.rim.color.set(colour||'#ff2230'); }catch(e){}
-  host.appendChild(celRend.domElement);
-
-  const start=()=>{
-    celT=0;
-    cancelAnimationFrame(celReq);
-    const tick=()=>{
-      celReq=requestAnimationFrame(tick);
-      celT+=1/60;
-      if(celModel){
-        if(celMode==='walk') celWalk(celT);
-        else                 celPodium(celT);
-      }
-      celRend.render(celScene, celCam);
-    };
-    tick();
-  };
-
-  celFrame();
-  if(celModel){ start(); return; }
-  if(celLoad){ celLoad.then(start); return; }
-  celLoad=new Promise(res=>{
-    new THREE.GLTFLoader().load('assets/driver/driver.glb', g=>{
-      const m=g.scene;
-      /* Frame it by what it measures rather than a guessed scale. */
-      const box=new THREE.Box3().setFromObject(m);
-      const size=box.getSize(new THREE.Vector3()), mid=box.getCenter(new THREE.Vector3());
-      const k=1.7/Math.max(0.001,size.y);
-      m.scale.setScalar(k);
-      m.position.set(-mid.x*k, -box.min.y*k, -mid.z*k);
-      const wrap=new THREE.Group(); wrap.add(m);
-      wrap.userData.baseY=0; wrap.userData.baseRot=0;
-      wrap.position.y=0;
-      celScene.add(wrap); celModel=wrap;
-      celFrame();
-      res();
-    }, undefined, ()=>res());
-  });
-  celLoad.then(start);
-}
-function celFrame(){
-  if(!celCam) return;
-  if(celMode==='walk'){ celCam.position.set(1.25, 1.5, 4.2); celCam.lookAt(1.25, 0.95, 0); }
-  else                { celCam.position.set(0.9, 1.42, 3.05); celCam.lookAt(CEL_OFFSET_X*0.55, 1.0, 0); }
-}
-function celebrateSceneStop(){
-  cancelAnimationFrame(celReq); celReq=0;
-  if(celRend && celRend.domElement && celRend.domElement.parentNode)
-    celRend.domElement.parentNode.removeChild(celRend.domElement);
-}
-function celebrate(pos){
-  let el=document.getElementById('celebrate');
-  if(!el){ el=document.createElement('div'); el.id='celebrate'; document.body.appendChild(el); }
-  const c=(typeof CAREER!=='undefined'&&CAREER.active&&typeof careerSlot==='function')?careerSlot():null;
-  const colour=(c&&c.colour)||(typeof carStyle!=='undefined'&&carStyle.body)||'#ff2230';
-  const ord=(typeof APEX_ORD==='function')?APEX_ORD(pos):'';
-  const line=pos===1?'Race winner':pos===2?'Second place':pos===3?'Third place'
-            :pos<=6?'In the points':'Chequered flag';
-  el.innerHTML='<div class="cb-stage" id="cb-stage"></div>'
-    +'<div class="cb-glow" style="--tc:'+colour+'"></div>'
-    /* The position on a board, in the same glitched face the front end uses:
-       two offset copies clipped to bands, jumping on a stepped timeline. */
-    +'<div class="cb-board'+(pos<=3?' box':'')+'">'
-    +'<span class="cb-kick">'+(pos<=3?'On the podium':'Race finished')+'</span>'
-    +'<b class="cb-pos" data-glitch="P'+pos+'">P'+pos+'</b>'
-    +'<span class="cb-ord">'+pos+ord+'</span>'
-    +'<span class="cb-line">'+line+'</span>'
-    +'</div>'
-    +'<div class="cb-in"><button type="button" class="cb-skip">Skip &rsaquo;</button></div>';
-  el.classList.add('on');
-  celebrateScene(el.querySelector('#cb-stage'), colour, pos<=3?'podium':'walk');
-  const out=()=>{
-    clearTimeout(el._t);
-    el.classList.remove('on');
-    celebrateSceneStop();
-    setTimeout(()=>{ if(el) el.innerHTML=''; },600);
-    raceEnd(); RESULT.on=false;
-    goHome();
-    if(typeof CAREER!=='undefined' && CAREER.active) setTimeout(careerShowRewards,150);
-  };
-  el.querySelector('.cb-skip').onclick=out;
-  el._t=setTimeout(out, CELEBRATE_MS);
-}
 /* WHAT A RESULT IS WORTH.
 
    Points on the usual scale for the top ten, and prize money that falls away
@@ -14510,15 +14340,6 @@ function aiStep(d, dt, t){
   const esc=aiUnstick(d, C, dt);
   if(!d.on) return;
   let ped=esc || aiPedals(d, C);
-  /* Once the flag is out the race is over for everybody. Subtracting speed was
-     not enough -- the throttle put it straight back on, so they slowed for a
-     moment and then wound up again. Take the pedals instead: nothing above a
-     hundred, and a light throttle below it. */
-  if(typeof COOL!=='undefined' && COOL.on && !esc){
-    const cap=100/3.6, v=C.st.speed;
-    ped = v>cap ? {thr:0, brk:clamp((v-cap)*0.22,0.12,1)}
-                : {thr:Math.min(ped.thr,0.3), brk:0};
-  }
   d._thr=ped.thr; d._brk=ped.brk;
   stepCar(C, {thr:ped.thr, brk:ped.brk, rev:!!(esc&&esc.rev),
               steer: esc ? esc.steer : aiSteer(d, C, dt)}, dt);
@@ -15266,7 +15087,6 @@ window.SIM={
             at:+(r.at||0).toFixed(2), fin:+(r.fin||0).toFixed(2),
             dsq:!!r.dsq, out:!!r.out})); },
   /* Show a finish for a given position, to look at it. */
-  celebrateAt(p){ celebrate(p||1); return true; },
   coolState(){ return {on:COOL.on, t:+COOL.t.toFixed(1), card:!!COOL.card, done:COOL.done,
                        kph:+(Math.abs(carState.speed)*3.6).toFixed(0),
                        thr:+(COOL.driver?COOL.driver._thr||0:0).toFixed(2),
