@@ -10040,6 +10040,19 @@ function tlCheck(dt){
     if(returnBtn) returnBtn.classList.remove('urgent');
     return;
   }
+  /* PRACTICE IS STRICTER THAN EVERYTHING ELSE.
+
+     Anywhere else the rule is the one everybody races to: four wheels over
+     the line, and only where going off is worth time. Practice is a session
+     for learning the circuit, so a lap with a wheel on the grass or in the
+     gravel is not a lap -- at any corner, on any part of it, the moment the
+     surface changes. */
+  if(CAREER.active && careerTimedSession() && careerSlot().weekend.stage==='practice'
+     && PLAYER.surf && (PLAYER.surf.grass||PLAYER.surf.loose) && !sessionLapInvalid){
+    sessionLapInvalid=true;
+    ttVoid(PLAYER.surf.loose?'Gravel':'Grass');
+    limitsSay('LAP DELETED', (PLAYER.surf.loose?'gravel':'grass')+' — practice laps must stay on the circuit');
+  }
   let on=0;
   for(let i=0;i<4;i++) if(tlWheelOn(CARPTS[i].x,CARPTS[i].z)) on++;
   if(on>0){ _tlOff=0; _tlCounted=false; if(returnBtn)returnBtn.classList.remove('urgent'); return; }
@@ -10109,6 +10122,7 @@ const LIMITS_AFTER=[5, 10];
 function limitsReset(){
   LIMITS.count=0; LIMITS.flag=false; LIMITS.pen=0; LIMITS.msg=''; LIMITS.msgT=0;
   LIMITS.after=0; LIMITS.dsq=false;
+  GIVE.on=false; GIVE.t=0; GIVE.pos=0; GIVE.said=0;
   /* A new session is a clean sheet, including the one where you took the car
      back off the retirement route. */
   if(typeof RETIRE!=='undefined') RETIRE.declined=false;
@@ -10138,8 +10152,53 @@ function limitsGained(){
   if(_tlPosWas && RACE.pos > _tlPosWas) return false;
   return true;
 }
+/* A PLACE TAKEN OFF THE ROAD IS A PLACE YOU GIVE BACK.
+
+   Going off and coming out ahead of somebody is the one offence a warning
+   does not answer, because the warning does not undo the overtake. So it is
+   handled the way a real one is: you are told to give the place back, you get
+   twenty seconds to do it, and if the place is still yours at the end of them
+   it costs five seconds at the flag. Give it back and nothing happened. */
+const GIVE={ on:false, t:0, pos:0, said:0 };
+const GIVE_WINDOW=20, GIVE_PENALTY=5;
+function giveStart(pos){
+  if(GIVE.on) return;
+  GIVE.on=true; GIVE.t=GIVE_WINDOW; GIVE.pos=pos; GIVE.said=0;
+  limitsSay('GIVE THE PLACE BACK','20 seconds, or it is five at the flag');
+}
+function giveStep(dt){
+  if(!GIVE.on) return;
+  if(!RACE.on || RESULT.on){ GIVE.on=false; return; }
+  /* Back where you were, or further back: nothing happened. */
+  if((RACE.pos||0) >= GIVE.pos){
+    GIVE.on=false;
+    limitsSay('PLACE GIVEN BACK','no penalty');
+    return;
+  }
+  GIVE.t-=dt;
+  /* Counted down out loud, because a silent twenty seconds is a penalty you
+     did not know you were serving. */
+  const left=Math.ceil(GIVE.t);
+  if(left!==GIVE.said && left>0){
+    GIVE.said=left;
+    limitsSay('GIVE THE PLACE BACK', left+(left===1?' second':' seconds')+' to hand back P'+(GIVE.pos-1));
+  }
+  if(GIVE.t<=0){
+    GIVE.on=false;
+    LIMITS.after+=GIVE_PENALTY;
+    limitsSay(GIVE_PENALTY+' SECOND PENALTY','the place was not given back');
+    limitsPaint();
+  }
+}
 function limitsHit(){
   if(LIMITS.dsq) return;
+  /* In a race, a place gained off the road goes to the twenty-second clock
+     rather than onto the warning ladder: it is a different offence and it has
+     a different answer. */
+  if(RACE.on && _tlPosWas && (RACE.pos||0) < _tlPosWas && limitsGained()){
+    giveStart(_tlPosWas);
+    return;
+  }
   if(!RACE.on && !limitsGained()){
     limitsSay('OFF THE TRACK','no lasting advantage — not counted');
     return;
@@ -10175,6 +10234,7 @@ function limitsSay(head,sub){
 }
 function limitsStep(dt){
   if(_tlLock>0) _tlLock=Math.max(0,_tlLock-dt);
+  giveStep(dt);
   if(LIMITS.msgT>0){
     LIMITS.msgT-=dt;
     if(LIMITS.msgT<=0){ const el=document.getElementById('limwarn'); if(el) el.classList.remove('show'); }
@@ -14431,6 +14491,9 @@ window.SIM={
              kph:live.map(d=>Math.round(d.car.st.speed*3.6)),
              closest:+closest.toFixed(2) };
   },
+  /* The give-back clock, from outside. */
+  giveState(){ return {on:GIVE.on, left:+GIVE.t.toFixed(1), pos:GIVE.pos, after:LIMITS.after}; },
+  giveTest(pos){ giveStart(pos||((RACE.pos||1)+1)); return this.giveState(); },
   limits(){ return {count:LIMITS.count, flag:LIMITS.flag, pen:LIMITS.pen,
                     off:+_tlOff.toFixed(2), counted:_tlCounted,
                     warn:document.getElementById('limwarn').classList.contains('show'),
