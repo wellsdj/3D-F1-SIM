@@ -16931,8 +16931,8 @@ const menuEl=document.getElementById('career');
 menuEl.insertAdjacentHTML('afterbegin','<div class="career-brand">APEX <i>/</i> 26 <span>DRIVER CAREER</span></div>');
 menuEl.insertAdjacentHTML('beforeend','<p id="career-save-status" role="status">Progress saved on this device</p>');
 const namePage=document.getElementById('career-name');
-namePage.innerHTML=`<div class="overlay-kicker">New career / 01 — Driver profile</div><h2>Your name.<br><em>Your legacy.</em></h2><p class="career-intro">Create your driver, choose a contract and build your car. Your story starts at Spa.</p>
-<div class="setup-fields"><label class="career-field"><span>Driver name</span><input id="career-driver" maxlength="24" placeholder="Alex Morgan" autocomplete="off"></label><label class="career-field"><span>Race number</span><input id="career-number" type="number" min="1" max="99" value="27"></label><label class="career-field"><span>Team name</span><input id="career-team" maxlength="22" placeholder="Northgate Racing" autocomplete="off"></label><label class="career-field"><span>Season length</span><select id="career-length"><option value="8">Full season · 8 weekends</option><option value="4">Short season · 4 weekends</option></select></label><label class="career-field"><span>AI difficulty · fixed for this career</span><select id="career-difficulty"><option value="1">1 · Brisk</option><option value="2" selected>2 · Quick</option><option value="3">3 · Sharp</option><option value="4">4 · Ruthless</option><option value="5">5 · On the limit</option></select></label></div>
+namePage.innerHTML=`<div class="overlay-kicker">New career / 01 — Team setup</div><h2>Build your<br><em>team.</em></h2><p class="career-intro">Choose the team and season, then build the car. Your story starts at Spa.</p>
+<div class="setup-fields"><label class="career-field"><span>Team name</span><input id="career-team" maxlength="22" placeholder="Northgate Racing" autocomplete="off"></label><label class="career-field"><span>Season length</span><select id="career-length"><option value="8">Full season · 8 weekends</option><option value="4">Short season · 4 weekends</option></select></label><label class="career-field"><span>AI difficulty · fixed for this career</span><select id="career-difficulty"><option value="1">1 · Brisk</option><option value="2" selected>2 · Quick</option><option value="3">3 · Sharp</option><option value="4">4 · Ruthless</option><option value="5">5 · On the limit</option></select></label></div>
 <div class="career-actions"><button id="career-contract-next">Choose contract →</button><button class="ghost" id="career-backSlots">Back</button></div><p id="setup-error" role="alert"></p>`;
 const contractPage=document.createElement('div');contractPage.id='career-contract';contractPage.className='career-page';menuEl.appendChild(contractPage);
 const legacyPage=careerPage;
@@ -16940,9 +16940,9 @@ careerPage=function(id){contractPage.classList.toggle('on',id==='contract');lega
 let careerDraft=null;
 document.getElementById('career-backSlots').onclick=()=>{careerPaintSlots();careerPage('slots');};
 document.getElementById('career-contract-next').onclick=()=>{
- const driver=document.getElementById('career-driver').value.trim(),team=document.getElementById('career-team').value.trim(),number=+document.getElementById('career-number').value;
- if(!driver||!team||!Number.isInteger(number)||number<1||number>99){document.getElementById('setup-error').textContent='Enter your driver name, team name and a race number from 1 to 99.';return;}
- careerDraft={version:3,driver,team,number,rounds:+document.getElementById('career-length').value,difficulty:+document.getElementById('career-difficulty').value};careerPaintContracts(false);
+ const team=document.getElementById('career-team').value.trim();
+ if(!team){document.getElementById('setup-error').textContent='Enter a team name.';return;}
+ careerDraft={version:3,driver:'Player',team,number:1,rounds:+document.getElementById('career-length').value,difficulty:+document.getElementById('career-difficulty').value};careerPaintContracts(false);
 };
 function careerPaintContracts(renew){
  const c=careerSlot(),rep=renew?c.reputation:0;
@@ -16969,7 +16969,7 @@ function careerPaintHub(){
  const c=CareerSeason.migrate(careerSlot()),w=c.weekend,ev=CareerSeason.event(c),complete=c.round>c.rounds;
  document.getElementById('career-kicker').textContent=(c.team||'Your team')+' / Season '+c.season;
  document.getElementById('career-title').innerHTML=complete?'Season <em>complete.</em>':'Make every <em>lap count.</em>';
- document.getElementById('driver-badge').innerHTML='<strong>'+c.number+'</strong><span>'+esc(c.driver)+'<small>'+c.reputation+' / 100 recognition</small></span>';
+ document.getElementById('driver-badge').innerHTML='<span>'+esc(c.team||'Your team')+'<small>'+c.reputation+' / 100 recognition</small></span>';
  hub.querySelectorAll('[data-career-tab]').forEach(b=>{b.classList.toggle('selected',b.dataset.careerTab===careerTab);b.setAttribute('aria-current',b.dataset.careerTab===careerTab?'page':'false');});
  const stats='<div class="season-stats"><div><b>'+c.points+'</b><span>Championship points</span></div><div><b>P'+careerStanding(c)+'</b><span>Championship position</span></div><div><b>'+c.coins.toLocaleString()+'</b><span>Development credits</span></div><div><b>'+Math.min(c.round,c.rounds)+' <small>/ '+c.rounds+'</small></b><span>Race weekend</span></div></div>';
  let body='';
@@ -17204,8 +17204,6 @@ const TEAM_LOGOS=[
 ];
 const TEAM_COLOURS=['#c8102e','#123c78','#0f6f5c','#c8481e','#6b4f9e','#b8860b',
                     '#2b2f36','#3b6ea5','#8c1327','#cfd6dc'];
-const SKIN_TONES=['#f2d3b8','#e4b48c','#c98c5f','#9c6236','#6f4223','#432616'];
-const HAIR_TONES=['#1b1512','#3f2a1c','#7a4a22','#b8802f','#d8d2c8','#8a1f1f'];
 
 /* THE TRADE, SOLVED RATHER THAN GUESSED.
 
@@ -17222,11 +17220,10 @@ function engineValue(e){ return engineSpeedWorth(e)+e.dev; }
 /* The whole thing is one object built up a step at a time and written once at
    the end, so backing out half way leaves nothing behind. */
 let NEW=null;
-const SETUP_STEPS=['team','colours','engine','badge','driver','season'];
+const SETUP_STEPS=['team','colours','engine','badge','season'];
 function apexNewCareer(){
-  NEW={ step:0, name:'', team:TEAM_NAMES[0], body:TEAM_COLOURS[0], trim:'#15171b',
+  NEW={ step:0, team:TEAM_NAMES[0], body:TEAM_COLOURS[0], trim:'#15171b',
         engine:ENGINES[1].id, logo:TEAM_LOGOS[0].id,
-        skin:SKIN_TONES[1], hair:HAIR_TONES[0],
         rounds:8, laps:3 };
   setupOpen();
 }
@@ -17260,8 +17257,7 @@ function setupDraw(){
   if(!el||!NEW) return;
   const step=SETUP_STEPS[NEW.step];
   const titles={ team:['Choose your','team'], colours:['Paint the','car'],
-                 engine:['Choose an','engine'], badge:['Your','badge'],
-                 driver:['Your','driver'], season:['The','season'] };
+                 engine:['Choose an','engine'], badge:['Your','badge'], season:['The','season'] };
   const T=titles[step];
   let body='';
 
@@ -17311,24 +17307,6 @@ function setupDraw(){
           +'" data-logo="'+l.id+'">'+teamLogoSVG(l.id,NEW.body,40)+'</button>').join('')
         +'</div>';
   }
-  else if(step==='driver'){
-    body='<p class="newnote">Your name goes on the timing screens and the grid sheet. '
-        +'Your suit takes the team colour; the rest is you.</p>'
-        +'<input id="setup-name" type="text" maxlength="22" placeholder="Your name" '
-        +'autocomplete="off" spellcheck="false" aria-label="Driver name" value="'
-        +setupEsc(NEW.name)+'">'
-        +'<div class="setup-driver">'+driverSVG(NEW)+'</div>'
-        +'<div class="slabel2">Skin</div>'
-        +'<div class="setup-grid swatches">'
-        +SKIN_TONES.map(c=>'<button type="button" class="sw'+(c===NEW.skin?' on':'')
-          +'" style="background:'+c+'" data-skin="'+c+'" aria-label="skin"></button>').join('')
-        +'</div>'
-        +'<div class="slabel2">Hair</div>'
-        +'<div class="setup-grid swatches">'
-        +HAIR_TONES.map(c=>'<button type="button" class="sw'+(c===NEW.hair?' on':'')
-          +'" style="background:'+c+'" data-hair="'+c+'" aria-label="hair"></button>').join('')
-        +'</div>';
-  }
   else if(step==='season'){
     const e=ENGINES.find(x=>x.id===NEW.engine)||ENGINES[0];
     body='<p class="newnote">How long a championship, and how long a race.</p>'
@@ -17344,7 +17322,6 @@ function setupDraw(){
         +'</div>'
         +'<div class="setup-summary">'
         +'<span>'+teamLogoSVG(NEW.logo,NEW.body,22)+setupEsc(NEW.team)+'</span>'
-        +'<span>'+setupEsc(NEW.name||'Driver')+'</span>'
         +'<span>'+setupEsc(e.name)+'</span>'
         +'<span>'+NEW.rounds+' rounds &middot; '+NEW.laps+' lap'+(NEW.laps>1?'s':'')+'</span>'
         +'</div>';
@@ -17378,11 +17355,6 @@ function setupDraw(){
   const back=el.querySelector('.sback');
   if(back) back.onclick=()=>{ NEW.step--; setupDraw(); };
   el.querySelector('.newgo').onclick=()=>{
-    if(step==='driver' && !(NEW.name||'').trim()){
-      const n=el.querySelector('#setup-name');
-      if(n){ n.classList.add('needed'); n.focus(); }
-      return;
-    }
     if(last) setupFinish();
     else { NEW.step++; setupDraw(); }
   };
@@ -17390,17 +17362,8 @@ function setupDraw(){
   const pick=(sel,field,cast)=>Array.prototype.forEach.call(el.querySelectorAll(sel),b=>{
     b.onclick=()=>{ NEW[field]=cast?cast(b.dataset[field]):b.dataset[field]; setupDraw(); };
   });
-  const nameEl=el.querySelector('#setup-name');
-  if(nameEl){
-    /* Held on NEW as it is typed, because every swatch click redraws the step
-       and an input that forgets what you wrote is worse than no input. */
-    nameEl.oninput=()=>{ NEW.name=nameEl.value; };
-    nameEl.onkeydown=e=>{ if(e.key==='Enter'){ NEW.name=nameEl.value; NEW.step++; setupDraw(); } };
-    if(!NEW._named){ NEW._named=true; setTimeout(()=>nameEl.focus(),60); }
-  }
   pick('[data-team]','team'); pick('[data-body]','body'); pick('[data-trim]','trim');
   pick('[data-eng]','engine'); pick('[data-logo]','logo');
-  pick('[data-skin]','skin'); pick('[data-hair]','hair');
   pick('[data-rounds]','rounds',Number); pick('[data-laps]','laps',Number);
   /* the dataset keys differ from the field names on two of them */
   Array.prototype.forEach.call(el.querySelectorAll('[data-eng]'),b=>{
@@ -17441,19 +17404,6 @@ function seasonOpening(c){
   document.addEventListener('keydown',done,{once:true});
   clearTimeout(el._t); el._t=setTimeout(done, 7600);
 }
-/* A driver, drawn. Helmet, visor and shoulders, with the suit in the team
-   colour -- a stand-in for the 3D model that will replace it. */
-function driverSVG(n){
-  return '<svg viewBox="0 0 120 130" aria-hidden="true">'
-    +'<path d="M26 130c0-24 15-36 34-36s34 12 34 36z" fill="'+n.body+'"/>'
-    +'<path d="M44 100c0 8 7 12 16 12s16-4 16-12" fill="'+n.skin+'"/>'
-    +'<ellipse cx="60" cy="62" rx="32" ry="36" fill="'+n.skin+'"/>'
-    +'<path d="M28 56c2-22 15-34 32-34s30 12 32 34z" fill="'+n.hair+'"/>'
-    +'<path d="M32 64h56v14a28 28 0 0 1-56 0z" fill="rgba(0,0,0,.22)"/>'
-    +'<rect x="34" y="62" width="52" height="15" rx="7" fill="#0d0f13" opacity=".85"/>'
-    +'<path d="M26 118h68" stroke="'+n.trim+'" stroke-width="7"/>'
-    +'</svg>';
-}
 /* Written once, at the end. */
 function setupFinish(){
   const e=ENGINES.find(x=>x.id===NEW.engine)||ENGINES[0];
@@ -17462,11 +17412,9 @@ function setupFinish(){
   c.rounds=NEW.rounds; c.raceLaps=NEW.laps;
   c.engine=NEW.engine; c.engineTop=e.top; c.engineDev=e.dev;
   c.logo=NEW.logo; c.colour=NEW.body;
-  /* The name is c.driver -- CareerSeason.migrate coerces that field with
-     String(), so putting the appearance there turned the driver on the grid
-     sheet and the badge into "[object Object]". The look lives beside it. */
-  c.driver=NEW.name || 'Driver';
-  c.look={ skin:NEW.skin, hair:NEW.hair };
+  /* Kept only for compatibility with the standings data model. There is no
+     driver profile or driver customisation in the career flow. */
+  c.driver='Player';
   c.livery={ body:NEW.body, ring:NEW.trim, wing:NEW.trim, rims:'#b6babd' };
   CAREER_SLOTS[0]=c; CAREER_AT=0; careerSave();
   /* The car you drive is the car you just painted. */
