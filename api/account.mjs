@@ -112,8 +112,13 @@ function badUsername(u) {
   if (!/^[A-Za-z0-9._-]+$/.test(s)) return 'Letters, numbers, dots, dashes and underscores only';
   return null;
 }
+/* One character is a password. Wells's call, and for a racing game it is the
+   right one: the thing being protected is a career, the recovery code is
+   what actually guards the account, and a rule that makes somebody invent a
+   password they will not remember protects nothing. The only bound left is
+   an upper one, because the hash has to run on something finite. */
 function badPassword(p) {
-  if (typeof p !== 'string' || p.length < 8) return 'Passwords are at least 8 characters';
+  if (typeof p !== 'string' || p.length < 1) return 'Enter a password';
   if (p.length > 200) return 'That password is too long';
   return null;
 }

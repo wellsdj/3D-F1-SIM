@@ -215,7 +215,7 @@ function createScreen(){
   shell(
      '<div class="si-kick">Slipstream</div>'
     +'<h2 class="si-word">New <em>driver.</em></h2>'
-    +'<p class="si-note">Pick a name and a password. There is no email and no reset link &mdash; you get a recovery code instead, and it is the only way back in.</p>'
+    +'<p class="si-note">Pick a name and a password &mdash; any password, as short as you like. There is no email and no reset link: you get a recovery code instead, and it is the only way back in.</p>'
     +field('si-user','Username','text','username')
     +field('si-pass','Password','password','new-password')
     +field('si-pass2','Password again','password','new-password')
