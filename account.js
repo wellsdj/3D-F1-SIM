@@ -45,6 +45,14 @@ const NOT_MINE=[/wall/i, /surf/i, /paint\.bake/i, /^f1sim\.line/i, /tle/i, /\.ba
 const isMine=k => MINE.some(re=>re.test(k)) && !NOT_MINE.some(re=>re.test(k));
 
 const PUSH_AFTER=2500;         // ms of quiet before a change is sent up
+/* One reload, ever, per visit. Applying somebody's save means the page has to
+   read it again from the beginning -- but the game writes a few of its own
+   keys as it boots (the detail level it settled on, the track-limits default),
+   so "what came down differs from what is here" can be true again immediately
+   afterwards. Without this marker that is a reload loop, and a reload loop is
+   a site nobody can use. Anything still differing is simply left: it is the
+   game's own runtime state, and it goes back up on the next change. */
+const RELOADED='slipstream.reloaded';
 let token=null, username=null, pushTimer=0, pushing=false, dirty=false;
 
 /* ------------------------------------------------------------- the wire */
@@ -145,6 +153,7 @@ async function signOut(){
   try{ await call('logout',{}); }catch(_){}
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(NAME_KEY);
+  try{ sessionStorage.removeItem(RELOADED); }catch(_){}
   location.reload();
 }
 
@@ -305,7 +314,13 @@ async function accept(r){
   watchStorage();
   /* Their progress was not what this browser had, so the game has to read it
      again from the beginning. Once, and only when it really differs. */
-  if(changed){ setTimeout(()=>location.reload(), 220); return; }
+  let already=false;
+  try{ already=!!sessionStorage.getItem(RELOADED); }catch(_){}
+  if(changed && !already){
+    try{ sessionStorage.setItem(RELOADED,'1'); }catch(_){}
+    setTimeout(()=>location.reload(), 220);
+    return;
+  }
   /* Nothing came down -- a new account, or a machine that was already up to
      date -- so what is here is what belongs up there. */
   schedulePush();
