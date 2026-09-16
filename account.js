@@ -309,18 +309,21 @@ async function accept(r){
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(NAME_KEY, username);
   const changed=applySave(r.save);
-  gate.classList.remove('on');
-  showChip();
-  watchStorage();
   /* Their progress was not what this browser had, so the game has to read it
-     again from the beginning. Once, and only when it really differs. */
+     again from the beginning. Once, and only when it really differs -- and
+     the decision comes before anything is put on screen, because a badge
+     that appears and is immediately swept away by a reload reads as a fault. */
   let already=false;
   try{ already=!!sessionStorage.getItem(RELOADED); }catch(_){}
   if(changed && !already){
     try{ sessionStorage.setItem(RELOADED,'1'); }catch(_){}
+    say('Loading your career\u2026', true);
     setTimeout(()=>location.reload(), 220);
     return;
   }
+  gate.classList.remove('on');
+  showChip();
+  watchStorage();
   /* Nothing came down -- a new account, or a machine that was already up to
      date -- so what is here is what belongs up there. */
   schedulePush();
