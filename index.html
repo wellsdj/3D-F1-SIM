@@ -1308,7 +1308,7 @@ if('serviceWorker' in navigator){
         <div class="sbox">
           <div class="slabel">Controller</div>
           <div id="controller-status">Press any button on a PS5 or Xbox controller.</div>
-          <div id="controller-map"><span><b>RB / R1</b> accelerate</span><span><b>LB / L1</b> brake</span><span><b>Left stick &larr;</b> steer left</span><span><b>Left stick &rarr;</b> steer right</span></div>
+          <div id="controller-map"><span><b>R2</b> throttle</span><span><b>L2</b> brake &amp; reverse</span><span><b>Left stick</b> steering</span><span><b>Right stick back</b> look behind</span><span><b>L1 / R1</b> change tab</span><span><b>D-pad</b> move</span><span><b>Cross / A</b> select</span><span><b>Nothing</b> coasting</span></div>
           <button id="controller-close" type="button">Close</button>
         </div>
         <div class="sbox">
@@ -8349,33 +8349,208 @@ const NET={ peer:null, code:null, conns:[], tries:0, next:0,
 function netLog(m){ NET.log.push(m); if(NET.log.length>12) NET.log.shift(); }
 
 /* ----------------------------------------------------------- game controller
-   Standard-mapped PS5 and Xbox pads expose the same button order: LB/L1 is 4,
-   RB/R1 is 5, and the left stick's horizontal axis is 0. The stick is kept
-   analog for steering; only its vertical axis is intentionally ignored. */
+   THE WHOLE PAD, NOT TWO BUTTONS OF IT.
+
+   Standard-mapped PS5 and Xbox pads agree on the order, which is the only
+   reason any of this can be written down once: cross 0, L1 4, R1 5, L2 6,
+   R2 7, d-pad 12-15, left stick on axes 0/1 and right stick on 2/3.
+
+   Driving is the triggers, because they are the pedals: R2 is the throttle,
+   L2 is the brake and -- held at a standstill, exactly as S does -- reverse.
+   Nothing is bound to coasting, because coasting is what a car does when you
+   are not asking it for anything. Steering is the left stick's horizontal
+   axis and nothing else; pushing it forward or back is deliberately ignored.
+   Pulling the RIGHT stick back looks behind you, which is the one thing a
+   mirror-less car needs a spare axis for.
+
+   The front end is the d-pad or the left stick to move, cross to choose, and
+   L1/R1 to change tab -- so the whole game can be driven from the pad without
+   reaching for the keyboard to get out of a menu.
+
+   The triggers are read as values rather than as pressed/not, so a pad that
+   reports analog travel gets analog pedals. */
+const PAD={ cross:0, circle:1, square:2, triangle:3, l1:4, r1:5, l2:6, r2:7,
+            up:12, down:13, left:14, right:15 };
+const PAD_TRIG=0.08;          // below this a trigger is at rest
+const PAD_STICK=0.45;         // how far a stick has to go to count as a direction
+const PAD_REPEAT=0.34;        // seconds a held direction waits before repeating
 let controllerPad=null, controllerAccel=false, controllerBrake=false, controllerSteer=0;
+let controllerThr=0, controllerBrk=0, controllerBack=false;
+let padPrev={}, padHeld='', padHeldT=0;
 const controllerPanelEl=document.getElementById('controller-panel');
 const controllerStatusEl=document.getElementById('controller-status');
 function controllerStatus(text){ if(controllerStatusEl) controllerStatusEl.textContent=text; }
+function padValue(i){
+  const b=controllerPad&&controllerPad.buttons&&controllerPad.buttons[i];
+  if(!b) return 0;
+  const v=typeof b.value==='number'?b.value:(b.pressed?1:0);
+  return b.pressed&&v<PAD_TRIG?1:v;      // a digital trigger reports pressed with no value
+}
+function padDown(i){ return padValue(i)>PAD_TRIG; }
+function padAxis(i){ const a=controllerPad&&controllerPad.axes&&controllerPad.axes[i]; return typeof a==='number'?a:0; }
 function controllerPoll(){
   if(!navigator.getGamepads){ controllerStatus('Gamepad controls are not available in this browser.'); return; }
   let pads=[];
   try{ pads=Array.from(navigator.getGamepads()||[]).filter(Boolean); }catch(_){ pads=[]; }
   if(!controllerPad||!pads.some(p=>p.index===controllerPad.index)) controllerPad=pads[0]||null;
-  if(!controllerPad){ controllerAccel=false; controllerBrake=false; controllerSteer=0; return; }
-  const pressed=i=>!!(controllerPad.buttons&&controllerPad.buttons[i]&&controllerPad.buttons[i].pressed);
-  controllerAccel=pressed(5); // RB / R1
-  controllerBrake=pressed(4); // LB / L1
-  const axis=Number(controllerPad.axes&&controllerPad.axes[0])||0;
+  else controllerPad=pads.find(p=>p.index===controllerPad.index)||controllerPad;
+  if(!controllerPad){
+    controllerAccel=false; controllerBrake=false; controllerSteer=0;
+    controllerThr=0; controllerBrk=0; controllerBack=false;
+    return;
+  }
+  controllerThr=clamp(padValue(PAD.r2),0,1);
+  controllerBrk=clamp(padValue(PAD.l2),0,1);
+  controllerAccel=controllerThr>PAD_TRIG;
+  controllerBrake=controllerBrk>PAD_TRIG;
+  const axis=padAxis(0);
   controllerSteer=Math.abs(axis)>.12?clamp(axis,-1,1):0;
-  controllerStatus((controllerPad.id||'Controller')+' connected · ready to drive');
+  /* Right stick back: look behind. Positive Y is towards you on every pad
+     that follows the standard mapping. */
+  const wasBack=controllerBack;
+  controllerBack=padAxis(3)>0.55;
+  /* Space still works and still wins: the pad only puts the view back when
+     the pad is what turned it round. */
+  if(controllerBack) LOOKBACK=true; else if(wasBack) LOOKBACK=false;
+  controllerStatus((controllerPad.id||'Controller')+' connected · R2 throttle · L2 brake');
 }
+/* One edge per press: the menu must not walk four items because a frame was
+   slow, and a held direction repeats on its own clock instead. */
+function padEdge(i){
+  const now=padDown(i), was=!!padPrev[i];
+  padPrev[i]=now;
+  return now&&!was;
+}
+/* Which way the d-pad or the left stick is pointing, as one of four words. */
+function padDir(){
+  if(padDown(PAD.up)) return 'up';
+  if(padDown(PAD.down)) return 'down';
+  if(padDown(PAD.left)) return 'left';
+  if(padDown(PAD.right)) return 'right';
+  const x=padAxis(0), y=padAxis(1);
+  if(Math.abs(x)>Math.abs(y)){
+    if(x<-PAD_STICK) return 'left';
+    if(x> PAD_STICK) return 'right';
+  } else {
+    if(y<-PAD_STICK) return 'up';
+    if(y> PAD_STICK) return 'down';
+  }
+  return '';
+}
+/* What there is to choose from on the panel that is up -- or on the card over
+   it, because a crash card with two buttons is the one moment a menu matters
+   most and the panel behind it is not what you are looking at. */
+function padItems(){
+  const card=document.querySelector('#crashcard.show');
+  const root=card||document.querySelector('.apex-panel.on');
+  if(!root) return [];
+  const sel='button,select,input,a[href],[tabindex="0"],.hcard,.ccard,.gtile,.lap-slot';
+  const out=[];
+  Array.prototype.forEach.call(root.querySelectorAll(sel),el=>{
+    if(el.disabled || el.offsetParent===null) return;
+    const r=el.getBoundingClientRect();
+    if(r.width<4||r.height<4) return;
+    if(out.indexOf(el)<0) out.push(el);
+  });
+  return out;
+}
+let padFocus=null;
+function padMark(el){
+  if(padFocus&&padFocus!==el) padFocus.classList.remove('padfocus');
+  padFocus=el||null;
+  if(!el) return;
+  el.classList.add('padfocus');
+  try{ el.focus({preventScroll:true}); }catch(_){ try{ el.focus(); }catch(__){} }
+  if(el.scrollIntoView) el.scrollIntoView({block:'nearest', inline:'nearest'});
+}
+/* Nearest thing that way. Spatial rather than document order, because the
+   front end is cards in rows: "up, then flick right" has to mean what it
+   looks like it means. */
+function padMove(dir){
+  const items=padItems();
+  if(!items.length) return;
+  if(!padFocus || items.indexOf(padFocus)<0){ padMark(items[0]); return; }
+  const a=padFocus.getBoundingClientRect();
+  const ax=a.left+a.width/2, ay=a.top+a.height/2;
+  let best=null, bestScore=Infinity;
+  for(const el of items){
+    if(el===padFocus) continue;
+    const r=el.getBoundingClientRect();
+    const dx=(r.left+r.width/2)-ax, dy=(r.top+r.height/2)-ay;
+    const along = dir==='left'?-dx : dir==='right'?dx : dir==='up'?-dy : dy;
+    if(along<=6) continue;                         // not that way
+    const across = (dir==='left'||dir==='right') ? Math.abs(dy) : Math.abs(dx);
+    const score = along + across*2.2;              // straight ahead beats diagonal
+    if(score<bestScore){ bestScore=score; best=el; }
+  }
+  if(best) padMark(best);
+}
+function padChoose(){
+  const items=padItems();
+  const el=(padFocus&&items.indexOf(padFocus)>=0)?padFocus:items[0];
+  if(!el) return;
+  padMark(el);
+  el.click();
+}
+/* L1 and R1 walk the tabs, wherever you are in the panel. */
+function padTab(step){
+  if(!apexNav) return;
+  const tabs=Array.prototype.slice.call(apexNav.children);
+  if(!tabs.length) return;
+  let i=tabs.findIndex(b=>b.classList.contains('on'));
+  if(i<0) i=0;
+  const n=tabs.length;
+  const b=tabs[((i+step)%n+n)%n];
+  apexShow(b.dataset.sec);
+  padMark(null);
+  setTimeout(()=>{ const it=padItems(); if(it.length) padMark(it[0]); },0);
+}
+/* Once a frame, whatever is on screen. */
+let PAD_POLLS=0;
+function padFrame(dt){
+  PAD_POLLS++;
+  controllerPoll();
+  if(!controllerPad){ if(padFocus) padMark(null); return; }
+  const menu=bootEl && !bootEl.classList.contains('gone');
+  const card=!!document.querySelector('#crashcard.show');
+  if(!menu && !card){ padPrev={}; padHeld=''; if(padFocus) padMark(null); return; }
+  if(menu){
+    if(padEdge(PAD.l1)) padTab(-1);
+    if(padEdge(PAD.r1)) padTab(1);
+  } else { padEdge(PAD.l1); padEdge(PAD.r1); }
+  const dir=padDir();
+  if(dir!==padHeld){ padHeld=dir; padHeldT=0; if(dir) padMove(dir); }
+  else if(dir){
+    padHeldT+=dt;
+    if(padHeldT>=PAD_REPEAT){ padHeldT=PAD_REPEAT-0.12; padMove(dir); }
+  }
+  if(padEdge(PAD.cross)) padChoose();
+}
+/* Its own clock, from the moment the page is up. Two reasons it is not the
+   world's loop: that loop does not start until a circuit has been built, and
+   the front end is exactly where a pad has to work before that -- there is no
+   keyboard on a sofa. And it is an interval rather than a frame callback so
+   that a page which is not drawing anything still reads the pad: a button
+   press is a tenth of a second, and missing it because nothing moved on
+   screen would be its own bug. */
+let _padLast=performance.now();
+function padLoop(){
+  const now=performance.now();
+  const dt=Math.min(0.1,(now-_padLast)/1000); _padLast=now;
+  padFrame(dt);
+}
+setInterval(padLoop,16);
+/* A hand on the mouse takes the cursor back: leaving a red ring on a card
+   nobody is pointing at reads as a stuck selection. */
+addEventListener('pointerdown',()=>{ if(padFocus) padMark(null); },true);
 addEventListener('gamepadconnected',e=>{
   controllerPad=e.gamepad;
-  controllerStatus((e.gamepad.id||'Controller')+' connected · ready to drive');
+  controllerStatus((e.gamepad.id||'Controller')+' connected · R2 throttle · L2 brake');
 });
 addEventListener('gamepaddisconnected',e=>{
   if(controllerPad&&e.gamepad.index===controllerPad.index) controllerPad=null;
   controllerAccel=false; controllerBrake=false; controllerSteer=0;
+  controllerThr=0; controllerBrk=0; controllerBack=false;
   controllerStatus('Controller disconnected · press any button to reconnect.');
 });
 function controllerPanelToggle(force){
@@ -10898,6 +11073,11 @@ function drive(dt){
      separate pushbuttons, so they are plain on/off -- a button is not a
      potentiometer, there is nothing to be gentle with. */
   let thrMag = thr?1:0, brkMag = brk?1:0;
+  /* The pad's pedals are analog, so they are magnitudes rather than a pair of
+     booleans: R2 for the throttle, L2 for the brake and for reverse, and
+     nothing at all for coasting. */
+  if(controllerThr>0){ thrMag=Math.max(thrMag,controllerThr); thr=true; }
+  if(controllerBrk>0){ brkMag=Math.max(brkMag,controllerBrk); brk=true; }
   /* Your hands are off it. Taken before the joystick block so a pad left on the
      desk cannot fight the car home. */
   /* Crashed. It is not your car any more until you answer the card. */
@@ -14062,6 +14242,11 @@ window.SIM={
              at: pts?at(pts[0][0], pts[0][1]):null };
   },
   aiRoomAt(i,side){ return aiRoom(i,side); },
+  /* The pad, from outside: what it is asking for and where its cursor is. */
+  padState(){ return {pad:!!controllerPad, polls:PAD_POLLS, thr:+controllerThr.toFixed(2), brk:+controllerBrk.toFixed(2),
+                      steer:+controllerSteer.toFixed(2), back:controllerBack, lookBack:LOOKBACK,
+                      focus:padFocus?(padFocus.id||padFocus.className||padFocus.textContent.trim().slice(0,24)):null,
+                      tab:(function(){const b=apexNav&&apexNav.querySelector('.on');return b?b.dataset.sec:null;})()}; },
   /* The bias on the run down from La Source, to measure it either way. */
   exitBias(m){ if(m!==undefined) T1_EXIT.metres=+m; return {...T1_EXIT}; },
   /* The crash, from outside: the thresholds, a wheel taken off where a tyre
@@ -14885,7 +15070,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); coolStep(dt); crashStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
+  else { wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); coolStep(dt); crashStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.

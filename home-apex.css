@@ -1817,3 +1817,17 @@ body.customizer-open #netbtn{display:none}
 #crashcard .cc-go{background:rgba(255,31,45,.2)!important;border-color:rgba(255,31,45,.55)!important}
 #crashcard .cc-go:hover{background:rgba(255,31,45,.32)!important}
 #crashcard .cc-row button:focus-visible{outline:2px solid #ff3b4e;outline-offset:3px}
+
+/* The pad's own cursor. A focus ring the keyboard would not draw, because a
+   pad has no caret and you have to be able to see what cross would press. */
+.padfocus{
+  /* Inset, not an outline: several of the cards sit inside something that
+     clips, and a ring drawn outside the border box would be cut in half. */
+  box-shadow:inset 0 0 0 2px var(--apex-red-hot), 0 0 30px rgba(255,31,45,.4)!important;
+  border-color:var(--apex-red-hot)!important;
+  position:relative;z-index:2;
+}
+.padfocus:after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  border:1px solid rgba(255,90,82,.55);
+}
