@@ -63,8 +63,12 @@ test('names and passwords are checked before anything is written',()=>{
   assert.ok(badUsername('wells smith'), 'no spaces');
   assert.ok(badUsername('<script>'), 'nothing that could be markup');
   assert.ok(badUsername(null), 'nothing at all');
+  /* Any password at all, down to one character: the recovery code is what
+     guards the account, and a length rule only invents forgotten passwords. */
+  assert.equal(badPassword('x'), null, 'one character is a password');
   assert.equal(badPassword('eight888'), null);
-  assert.ok(badPassword('short'), 'under eight');
+  assert.ok(badPassword(''), 'but not nothing');
+  assert.ok(badPassword(null), 'nor a missing field');
   assert.ok(badPassword('x'.repeat(201)), 'absurdly long');
 });
 
