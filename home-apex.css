@@ -1966,3 +1966,63 @@ body.driving #accountchip{display:none}
 .apex-panel::-webkit-scrollbar-thumb{background:rgba(255,31,45,.4);border-radius:99px;
   border:3px solid transparent;background-clip:content-box}
 .apex-panel::-webkit-scrollbar-thumb:hover{background:rgba(255,31,45,.7);background-clip:content-box}
+
+/* ==========================================================================
+   THE RECORDER
+   A tool, not a control: it sits over the game, says what it is for, and gets
+   out of the way. Same red as everything else so it reads as part of it.
+   ========================================================================== */
+#takes{
+  position:fixed;inset:0;z-index:1400;display:none;place-items:center;padding:20px;
+  background:rgba(4,3,5,.82);backdrop-filter:blur(6px);font-family:var(--apex-mono);color:#fff;
+}
+#takes.on{display:grid}
+#takes .tk-card{
+  width:min(94vw,560px);max-height:86vh;overflow:auto;display:grid;gap:11px;padding:24px;
+  background:linear-gradient(170deg,#1a0508,#0a0304 46%,#07070a);
+  border:1px solid rgba(255,31,45,.45);border-radius:4px;
+  box-shadow:0 40px 90px rgba(0,0,0,.75),0 0 70px rgba(255,31,45,.14);
+}
+#takes .tk-kick{font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:#ff5f6f}
+#takes .tk-word{margin:0;font-family:var(--apex-display);font-style:italic;font-size:30px;
+  line-height:1;text-transform:uppercase;font-weight:400}
+#takes .tk-word em{font-style:normal;color:#ff3b4e}
+#takes .tk-sub,#takes .tk-note{margin:0;font-size:10.5px;line-height:1.6;color:var(--apex-dim)}
+#takes .tk-note{min-height:1.3em;opacity:0;transition:opacity .25s}
+#takes .tk-note.lit{opacity:1;color:#ff8f8f}
+#takes .tk-msg{margin:0;min-height:1.2em;font-size:10px;color:#ff6a6a}
+#takes input{
+  width:100%;padding:11px 12px;font:inherit;font-size:13px;letter-spacing:.3em;color:#fff;
+  background:rgba(255,255,255,.04);border:1px solid rgba(236,234,228,.2);border-radius:2px;
+}
+#takes input:focus{outline:none;border-color:#ff3b4e;background:rgba(255,31,45,.08)}
+#takes .tk-row{display:flex;flex-wrap:wrap;gap:8px}
+#takes button{
+  padding:11px 15px;font:inherit;font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+  color:#fff;cursor:pointer;border-radius:2px;border:1px solid rgba(255,31,45,.5);
+  background:linear-gradient(100deg,rgba(140,14,24,.9),rgba(255,31,45,.62));
+  transition:transform .16s,box-shadow .16s,background .16s;
+}
+#takes button:hover{transform:translateY(-1px);box-shadow:0 0 22px rgba(255,31,45,.3)}
+#takes .tk-ghost{background:rgba(255,255,255,.04);border-color:rgba(236,234,228,.2);color:var(--apex-dim)}
+#takes .tk-ghost:hover{color:#fff}
+#takes .tk-go.rec{animation:tk-rec 1.1s ease-in-out infinite}
+@keyframes tk-rec{50%{box-shadow:0 0 30px rgba(255,31,45,.7)}}
+#takes .tk-list{display:grid;gap:6px;margin-top:4px}
+#takes .tk-take{
+  display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:10px;
+  padding:10px 12px;border:1px solid rgba(236,234,228,.14);border-radius:2px;
+  background:rgba(255,255,255,.02);font-size:9px;letter-spacing:.1em;color:var(--apex-dim);
+}
+#takes .tk-take.on{border-color:var(--apex-red);background:rgba(255,31,45,.1)}
+#takes .tk-take b{grid-column:2;font-size:14px;color:#fff;font-weight:400;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums}
+#takes .tk-take .tk-when{grid-column:1;text-transform:uppercase}
+#takes .tk-take .tk-n{display:none}
+#takes .tk-take button{padding:8px 11px;font-size:8px}
+#takes .tk-take .tk-del{background:none;border-color:rgba(236,234,228,.18);color:var(--apex-dim)}
+#takes .tk-take .tk-del:hover{border-color:#ff3b4e;color:#fff}
+#takes .tk-empty{padding:14px;font-size:10.5px;color:var(--apex-dim);
+  border:1px dashed rgba(236,234,228,.16);border-radius:2px}
+@media(min-width:620px){#takes .tk-take .tk-n{display:block;grid-column:3}
+  #takes .tk-take .tk-use{grid-column:4}}

@@ -5445,10 +5445,14 @@ addEventListener('keydown',e=>{
      drops the circuit into an editor mid-race is a way to ruin a race by
      leaning on the wrong finger, so they have come off the keyboard. Both are
      still reachable through SIM for the tooling that needs them. */
-  if(k==='l' && EDITOR_KEYS && FREEROAM && !TTREC.playing && !NET.watching){
-    if(!m2On || m2Tool!=='line'){ m2SetTool('line'); if(!m2On) m2Show(true); }
-    else m2Show(false);
-    m2Draw(); m2Info();
+  /* L IS THE RECORDER NOW.
+
+     The line editor it used to open is still there behind SIM. What L does is
+     open the take recorder: drive a lap, keep it, and hand it to the field.
+     It asks for a password first, because the game is live and this is a tool
+     that rewrites how every rival drives. */
+  if(k==='l' && FREEROAM && !TTREC.playing && !NET.watching){
+    takesKey();
     return;
   }
   if(m2On && m2Tool==='line'){
@@ -10232,9 +10236,293 @@ function limitsSay(head,sub){
     el.classList.add('show');
   }
 }
+/* ==========================================================================
+   TAKES: RECORD A LAP, THEN HAND IT TO THE FIELD
+
+   The rivals drive a line that was generated from the circuit's own centre
+   curve and a speed profile derived from its curvature. That is a good guess
+   and it is not a driver. This is the way to replace the guess with one:
+   drive the lap yourself, keep the take, and apply it.
+
+   WHAT A TAKE HOLDS. Twenty times a second, where the car was, how fast it
+   was going, and what the pedals were doing. That is enough to answer the two
+   questions the AI actually needs answered -- where do you put the car, and
+   where do you get off the throttle -- and small enough that a dozen laps sit
+   comfortably in a browser.
+
+   WHAT APPLYING ONE DOES. Two things, both station by station along the AI's
+   own grid: the line moves sideways to where you drove, bounded by the room
+   the survey says is there, and the speed profile gains a ceiling taken from
+   your speed. So the field takes your line and brakes at your braking points,
+   while every other rule -- traffic, track limits, the grip ceiling -- still
+   applies on top. Nothing about a take can send a car somewhere the survey
+   says is off the circuit.
+
+   It is behind a password because the game is live and this rewrites how
+   every rival drives.
+   ========================================================================== */
+const TAKES_KEY='f1sim.takes.spa22';
+const TAKES_PASS='wells';
+const TAKE_HZ=20;                 // samples a second
+const TAKE_MAX=8;                 // takes kept; the oldest goes first
+const TAKE_FRAMES=6000;           // five minutes at 20 Hz, as a stop
+let TAKES=[], takesOpen=false, takesUnlocked=false, takesEl=null;
+let takeRec=null, takeAcc=0, takesApplied=null;
+
+function takesLoad(){
+  try{ const raw=localStorage.getItem(TAKES_KEY); TAKES=raw?JSON.parse(raw):[]; }
+  catch(e){ TAKES=[]; }
+  if(!Array.isArray(TAKES)) TAKES=[];
+}
+function takesSave(){
+  try{ localStorage.setItem(TAKES_KEY, JSON.stringify(TAKES)); }catch(e){}
+}
+/* A take is a flat run of numbers -- x, z, speed, throttle, brake -- because
+   it is written twenty times a second and read as a whole. */
+function takeStart(){
+  if(takeRec) return;
+  takeRec={ t:Date.now(), f:[], lap:0, n:0 };
+  takeAcc=0;
+  takesPaint();
+}
+function takeStop(keep){
+  if(!takeRec) return;
+  const rec=takeRec; takeRec=null;
+  if(keep && rec.n>40){
+    rec.lap=+(TT.t||0).toFixed(2);
+    TAKES.unshift(rec);
+    while(TAKES.length>TAKE_MAX) TAKES.pop();
+    takesSave();
+  }
+  takesPaint();
+}
+function takeStep(dt){
+  if(!takeRec) return;
+  takeAcc+=dt;
+  const step=1/TAKE_HZ;
+  while(takeAcc>=step){
+    takeAcc-=step;
+    if(takeRec.n>=TAKE_FRAMES){ takeStop(true); return; }
+    takeRec.f.push(+carState.wx.toFixed(2), +carState.wz.toFixed(2),
+                   +(carState.speed).toFixed(2),
+                   +(PLAYER.thrIn||0).toFixed(2), +(PLAYER.brkIn||0).toFixed(2));
+    takeRec.n++;
+  }
+  /* Only the number changes while recording. Repainting the panel here
+     rebuilt it under the pointer twice a second, which detached the very
+     button you were reaching for. */
+  if((takeRec.n%10)===0 && takesEl){
+    const b=takesEl.querySelector('.tk-go.rec');
+    if(b) b.textContent='Stop & keep · '+(takeRec.n/TAKE_HZ).toFixed(0)+'s';
+  }
+}
+/* WHAT THE TAKE SAYS AT EVERY STATION.
+
+   Each sample is filed against the nearest station on the AI's grid, which is
+   how a lap driven at any speed, with any number of samples, becomes one
+   number per station. Stations the lap never reached keep what they had. */
+function takeMap(rec){
+  if(!AI.n || !AI.x) return null;
+  const n=AI.n, lat=new Float64Array(n), cap=new Float64Array(n), seen=new Uint8Array(n);
+  const f=rec.f;
+  let at=0;
+  for(let i=0;i<f.length;i+=5){
+    const x=f[i], z=f[i+1], v=f[i+2];
+    /* Walk forward from the last match rather than searching the whole lap:
+       consecutive samples are metres apart. */
+    let bi=at, bd=Infinity;
+    for(let o=-40;o<=400;o++){
+      const q=((at+o)%n+n)%n;
+      const d=(AI.bx[q]-x)**2+(AI.bz[q]-z)**2;
+      if(d<bd){ bd=d; bi=q; }
+    }
+    if(bd>60*60) continue;                    // nowhere near the circuit
+    at=bi;
+    const dx=x-AI.bx[bi], dz=z-AI.bz[bi];
+    lat[bi]=dx*AI.nx[bi]+dz*AI.nz[bi];        // +ve is to the right
+    cap[bi]=v;
+    seen[bi]=1;
+  }
+  return {lat, cap, seen};
+}
+/* Fill the gaps and take the edges off: a hand-driven lap is not smooth at
+   station resolution, and a line that is not smooth is a line that saws.
+
+   Gaps are only bridged where they are short. A take that covers half a lap
+   must teach the field about half a lap -- the first version carried the last
+   sample all the way round, so five seconds of driving rewrote the entire
+   circuit, which is the opposite of what a recording is for. */
+const TAKE_BRIDGE=30;                 // stations, and they are a metre apart
+function takeSmooth(m){
+  const n=AI.n;
+  const fill=(a)=>{
+    for(let i=0;i<n;i++){
+      if(m.seen[i]) continue;
+      /* How far to the nearest covered station each way? */
+      let back=-1, fwd=-1;
+      for(let o=1;o<=TAKE_BRIDGE;o++){
+        if(back<0 && m.seen[((i-o)%n+n)%n]) back=o;
+        if(fwd<0  && m.seen[(i+o)%n])       fwd=o;
+        if(back>=0 && fwd>=0) break;
+      }
+      if(back<0 || fwd<0) continue;            // a real gap: leave it alone
+      const a0=a[((i-back)%n+n)%n], a1=a[(i+fwd)%n];
+      const t=back/(back+fwd);
+      a[i]=a0+(a1-a0)*t;
+      m.seen[i]=2;                             // bridged, not driven
+    }
+  };
+  fill(m.lat); fill(m.cap);
+  const soft=(a,w)=>{
+    const out=new Float64Array(n);
+    for(let i=0;i<n;i++){
+      let s=0,c=0;
+      for(let o=-w;o<=w;o++){ s+=a[((i+o)%n+n)%n]; c++; }
+      out[i]=s/c;
+    }
+    return out;
+  };
+  m.lat=soft(m.lat, 6);
+  m.cap=soft(m.cap, 4);
+  return m;
+}
+function takeApply(rec){
+  const m=rec && takeMap(rec);
+  if(!m || !m.seen.some(v=>v)){ takesNote('That take does not cover the circuit'); return false; }
+  takeSmooth(m);
+  const n=AI.n;
+  /* The line: your offset where you drove, the generated one everywhere else,
+     and never further out than the survey says there is room for. */
+  let taught=0;
+  for(let i=0;i<n;i++){
+    if(!m.seen[i]){ AI.adj[i]=0; continue; }
+    const st=tlStation(AI.bx[i], AI.bz[i]);
+    const room=st ? (m.lat[i]>=0 ? st.dR : st.dL)-1.6 : 3;
+    AI.adj[i]=clamp(m.lat[i], -Math.max(0,room), Math.max(0,room));
+    taught++;
+  }
+  aiApplyAdj();
+  /* The speeds: a ceiling, never a floor, and never below a crawl -- a take
+     with a spin in it should not teach the field to stop. Uncovered stations
+     keep the profile they had. */
+  const cap=new Float64Array(n);
+  for(let i=0;i<n;i++) cap[i]=m.seen[i] ? Math.max(12, m.cap[i]||0) : Infinity;
+  AI.cap=cap;
+  rec.taught=taught;
+  takesApplied=rec.t;
+  aiRepace();
+  takesNote('Applied — '+Math.round(rec.taught*AI.ds)+' m of circuit taught to the field');
+  takesPaint();
+  return true;
+}
+function takeClear(){
+  AI.cap=null;
+  if(AI.adj) AI.adj.fill(0);
+  aiApplyAdj();
+  aiRepace();
+  takesApplied=null;
+  takesNote('Back to the generated line');
+  takesPaint();
+}
+function takeDelete(t){
+  TAKES=TAKES.filter(r=>r.t!==t);
+  if(takesApplied===t) takeClear();
+  takesSave();
+  takesPaint();
+}
+
+/* --------------------------------------------------------------- the panel */
+function takesKey(){
+  if(takesOpen){ takesShow(false); return; }
+  if(takesUnlocked){ takesShow(true); return; }
+  takesShow(true, true);
+}
+function takesShow(on, askFirst){
+  takesOpen=!!on;
+  if(!takesEl){
+    takesEl=document.createElement('div');
+    takesEl.id='takes';
+    document.body.appendChild(takesEl);
+  }
+  takesEl.classList.toggle('on', takesOpen);
+  document.body.classList.toggle('takesopen', takesOpen);
+  if(takesOpen){ takesLoad(); takesPaint(false, askFirst && !takesUnlocked); }
+}
+function takesNote(text){
+  const el=takesEl && takesEl.querySelector('.tk-note');
+  if(el){ el.textContent=text; el.classList.add('lit');
+          clearTimeout(takesNote._t);
+          takesNote._t=setTimeout(()=>el.classList.remove('lit'), 2600); }
+}
+function takesTime(s){
+  if(!s) return '--:--.--';
+  const m=Math.floor(s/60), r=s-m*60;
+  return m+':'+(r<10?'0':'')+r.toFixed(2);
+}
+function takesPaint(quiet, ask){
+  if(!takesEl || !takesOpen) return;
+  if(ask || !takesUnlocked){
+    takesEl.innerHTML=
+       '<div class="tk-card tk-lock"><div class="tk-kick">Recorder</div>'
+      +'<h2 class="tk-word">Password.</h2>'
+      +'<p class="tk-note">This rewrites how every rival drives, and the game is live.</p>'
+      +'<input id="tk-pass" type="password" autocomplete="off" spellcheck="false">'
+      +'<p class="tk-msg"></p>'
+      +'<div class="tk-row"><button class="tk-go">Unlock</button>'
+      +'<button class="tk-ghost tk-close">Close</button></div></div>';
+    const input=takesEl.querySelector('#tk-pass');
+    const tryIt=()=>{
+      if(input.value===TAKES_PASS){ takesUnlocked=true; takesPaint(); }
+      else { takesEl.querySelector('.tk-msg').textContent='Not that.'; input.value=''; input.focus(); }
+    };
+    takesEl.querySelector('.tk-go').onclick=tryIt;
+    input.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); tryIt(); } };
+    takesEl.querySelector('.tk-close').onclick=()=>takesShow(false);
+    input.focus();
+    return;
+  }
+  const rows=TAKES.map(r=>{
+    const on=takesApplied===r.t;
+    return '<div class="tk-take'+(on?' on':'')+'">'
+      +'<span class="tk-when">'+new Date(r.t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</span>'
+      +'<b>'+takesTime(r.lap)+'</b>'
+      +'<span class="tk-n">'+r.n+' samples · '+(r.n/TAKE_HZ).toFixed(0)+'s</span>'
+      +'<button class="tk-use" data-t="'+r.t+'">'+(on?'Applied':'Give to the AI')+'</button>'
+      +'<button class="tk-del" data-t="'+r.t+'" title="Delete this take">Delete</button>'
+      +'</div>';
+  }).join('') || '<div class="tk-empty">No takes yet. Drive a lap with the recorder running.</div>';
+  takesEl.innerHTML=
+     '<div class="tk-card"><div class="tk-kick">Recorder · L</div>'
+    +'<h2 class="tk-word">Your <em>lap.</em></h2>'
+    +'<p class="tk-sub">Record a lap, then give it to the field: they take your line and your braking points.</p>'
+    +'<div class="tk-row">'
+    +(takeRec
+       ? '<button class="tk-go rec">Stop &amp; keep · '+(takeRec.n/TAKE_HZ).toFixed(0)+'s</button>'
+         +'<button class="tk-ghost tk-drop">Throw away</button>'
+       : '<button class="tk-go">Record</button>')
+    +(takesApplied?'<button class="tk-ghost tk-reset">Back to the generated line</button>':'')
+    +'<button class="tk-ghost tk-close">Close</button></div>'
+    +'<div class="tk-list">'+rows+'</div>'
+    +'<p class="tk-note"></p></div>';
+  const go=takesEl.querySelector('.tk-go');
+  if(go) go.onclick=()=>{ takeRec?takeStop(true):takeStart(); };
+  const drop=takesEl.querySelector('.tk-drop');
+  if(drop) drop.onclick=()=>takeStop(false);
+  const reset=takesEl.querySelector('.tk-reset');
+  if(reset) reset.onclick=takeClear;
+  takesEl.querySelector('.tk-close').onclick=()=>takesShow(false);
+  takesEl.querySelectorAll('.tk-use').forEach(b=>{
+    b.onclick=()=>{ const r=TAKES.find(r=>r.t===+b.dataset.t); if(r) takeApply(r); };
+  });
+  takesEl.querySelectorAll('.tk-del').forEach(b=>{
+    b.onclick=()=>takeDelete(+b.dataset.t);
+  });
+}
+
 function limitsStep(dt){
   if(_tlLock>0) _tlLock=Math.max(0,_tlLock-dt);
   giveStep(dt);
+  takeStep(dt);
   if(LIMITS.msgT>0){
     LIMITS.msgT-=dt;
     if(LIMITS.msgT<=0){ const el=document.getElementById('limwarn'); if(el) el.classList.remove('show'); }
@@ -11197,6 +11485,9 @@ function drive(dt){
   if(controllerBrk>0){ brkMag=Math.max(brkMag,controllerBrk); brk=true; }
   /* Your hands are off it. Taken before the joystick block so a pad left on the
      desk cannot fight the car home. */
+  /* What the pedals are actually doing, kept where the recorder can read it.
+     Nothing else uses these; they cost two assignments a frame. */
+  PLAYER.thrIn=thrMag; PLAYER.brkIn=brkMag;
   /* Crashed. It is not your car any more until you answer the card. */
   if(CRASH.on){ thrMag=0; brkMag=1; want=0; thr=false; brk=true; }
   else if(COOL.on){
@@ -12667,6 +12958,20 @@ const AI_FINAL={ late:2.0, exit:140, hold:0.93, brake:44.8,
                     starts relative to the apex (negative is before it), and a
                     dead zone after that before any of it is allowed */
                  t1entry:36, t1exitA:28, t1exitD:0, t1exitFrom:-9 };
+/* LA SOURCE, CARRIED HARDER.
+
+   The field was slower than Wells through the first corner and the braking
+   point was not the reason -- sweeping the entry cap from 36 to 48 moved it
+   three metres and stopped. What binds at the apex is the grip profile
+   itself, which is built for the whole lap with a margin chosen so that
+   nothing anywhere puts a wheel out. This lifts that ceiling inside the first
+   corner's window only: a few per cent, which is the difference between a
+   car that is being driven round and one that is being driven. */
+let T1_BOOST=1.07;
+function aiFirstBoost(d,q){
+  const p=aiFirstProgress(d,q);
+  return (p>-70 && p<90) ? T1_BOOST : 1;
+}
 function aiPedals(d, C){
   /* Read through a guard: tests/contact-tuning lifts this function out and
      runs it in a sandbox, so it cannot depend on an outer binding existing.
@@ -12679,7 +12984,13 @@ function aiPedals(d, C){
      dropped, or they simply drive off the circuit. */
   const wetK=(typeof WEATHER!=='undefined')?(0.62+0.38*WEATHER.grip):1;
   const v=C.st.speed,K=(d.paceMul||1)*wetK,V=d.v;
-  const target=q=>Math.min(V[q],aiFirstLimit(d,q))*K;
+  /* A take applied from the recorder caps the profile station by station, so
+     the field brakes where the recorded lap braked rather than where the
+     generated profile would. Nothing is capped until one is applied. */
+  const cap=(typeof AI!=='undefined')?AI.cap:null;
+  const boost=(typeof aiFirstBoost==='function')?aiFirstBoost:()=>1;
+  const target=q=>Math.min(V[q]*boost(d,q), aiFirstLimit(d,q),
+                           cap?cap[q]:Infinity)*K;
   let finalProgress=AI.lastApex==null?Infinity:(d.i-AI.lastApex)*d.ds;
   if(finalProgress>d.len/2)finalProgress-=d.len;
   if(finalProgress<-d.len/2)finalProgress+=d.len;
@@ -13395,10 +13706,6 @@ function crashEnd(){
 const COOL={ on:false, t:0, v0:0, driver:null, card:null, scene:false, done:false };
 const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
 const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
-const COOL_RACE_T=4.5;     // seconds of driving it exactly as a rival would
-const COOL_PARK_OFF=4.0;   // metres right of the line it aims to stop at
-const COOL_PULL_RATE=0.9;  // how fast it walks across, m/s
-const COOL_STOP_V=13;      // m/s: below this it brakes itself to a stop
 function coolStart(){
   if(COOL.on || !AI.x || !AI.x.length) return;
   COOL.on=true; COOL.t=0; COOL.done=false; COOL.scene=false;
@@ -13436,30 +13743,16 @@ function coolInputs(dt){
      round rather than stopping on the circuit. The AI's own corner speed still
      caps it, so it brakes for the corners on the way home. */
   d.speedK=1; d.mode='clear'; d.line='race';
-  const v=st.speed;
+  /* EXACTLY WHAT A RIVAL WOULD DO HERE, AND NOTHING ELSE.
+
+     It used to race for a few seconds and then lift off and park itself at
+     the side of the road. Wells wants the car driven, so it is: the rival
+     brain's own pedals, its own line, its own pace, for as long as it has the
+     car. No lifting, no pulling over, no crawl. */
   const p=aiPedals(d, C);
-  /* FIRST, EXACTLY WHAT A RIVAL WOULD DO HERE.
-     The takeover used to drop straight to a crawl, which looks nothing like a
-     driver finishing a race: the flag falls and the car carries on at racing
-     pace for a few seconds, on the line, braking for whatever is in front of
-     it, because that is what actually happens. */
-  if(COOL.t < COOL_RACE_T){
-    d.lat += clamp(0-d.lat, -1.8*dt, 1.8*dt);
-    d._thr=p.thr; d._brk=p.brk;
-    return { thr:p.thr, brk:p.brk, steer:aiSteer(d, C, dt) };
-  }
-  /* THEN OFF THE THROTTLE, AND OVER TO THE SIDE.
-     No throttle from here at all -- it coasts down, keeps whatever braking the
-     corners genuinely need so it does not sail off at Eau Rouge, and walks
-     across to the right-hand edge as it slows. Below walking pace it brakes
-     itself to a stop and holds there. */
-  const edge=Math.max(0, aiRoom(d.i, 1, 1.6));
-  const park=Math.min(edge, COOL_PARK_OFF);
-  d.lat += clamp(park-d.lat, -COOL_PULL_RATE*dt, COOL_PULL_RATE*dt);
-  let brk=p.brk;
-  if(v < COOL_STOP_V) brk=Math.max(brk, v>0.5 ? 0.24 : 1);
-  d._thr=0; d._brk=brk;
-  return { thr:0, brk, steer:aiSteer(d, C, dt) };
+  d.lat += clamp(0-d.lat, -1.8*dt, 1.8*dt);
+  d._thr=p.thr; d._brk=p.brk;
+  return { thr:p.thr, brk:p.brk, steer:aiSteer(d, C, dt) };
 }
 function coolStep(dt){
   if(!COOL.on) return;
@@ -13502,7 +13795,11 @@ function coolEnd(){
   carState.speed=0;
   if(COOL.card){ COOL.card.classList.remove('show');
                  setTimeout(()=>{ if(COOL.card){COOL.card.remove(); COOL.card=null;} },500); }
-  celebrate(Math.max(1,RESULT.rows.findIndex(r=>r.you)+1));
+  /* Straight home. The celebration screen -- the driver on a black stage with
+     the position beside him -- is gone at Wells's request: after a race you
+     want the next thing, not a curtain call. celebrate() is still here for
+     anything that wants to call it, and nothing does. */
+  goHome();
 }
 /* Ten seconds of black with a line on it. A deliberate placeholder: the real
    celebration is a scene with the driver in it, and when that arrives it
@@ -14378,6 +14675,7 @@ window.SIM={
              at: pts?at(pts[0][0], pts[0][1]):null };
   },
   aiRoomAt(i,side){ return aiRoom(i,side); },
+  t1Boost(v){ if(v!==undefined) T1_BOOST=+v; return T1_BOOST; },
   /* The crash, as it is heard: play one at a given speed and read what it did
      to the engine underneath it. */
   crashHeard(kph){ crashSound(45, kph); return {master:engineAudio.renderer?+engineAudio.renderer.master.gain.value.toFixed(3):null}; },

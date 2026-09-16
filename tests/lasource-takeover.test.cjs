@@ -90,23 +90,21 @@ test('a wall drawn by hand survives the mis-trace rule, and survives a save',()=
   assert.equal(ctx.WALLS[0][1].x, 3);
 });
 
-test('G draws barriers again, whenever the circuit is up',()=>{
+test('G draws barriers, L opens the recorder',()=>{
   assert.match(source,/if\(k==='g' && FREEROAM && !TTREC\.playing && !NET\.watching\)\{/);
   assert.doesNotMatch(source,/if\(k==='g' && EDITOR_KEYS/);
-  /* The line editor stays off the keyboard: only the barrier tool came back. */
-  assert.match(source,/if\(k==='l' && EDITOR_KEYS/);
+  /* L used to be the line editor; it is the take recorder now, and it asks
+     for a password before it opens. */
+  assert.match(source,/if\(k==='l' && FREEROAM && !TTREC\.playing && !NET\.watching\)\{\s*\n\s*takesKey\(\);/);
 });
 
 /* ------------------------------------------------------------- the takeover */
-test('the takeover races first, then lifts and pulls over',()=>{
-  assert.match(source,/const COOL_RACE_T=([\d.]+);/);
-  const [,race]=source.match(/const COOL_RACE_T=([\d.]+);/);
-  assert.ok(+race>=3 && +race<=8, 'a few seconds of racing, not a whole lap');
-  /* Phase one is the rival brain's own pedals, unaltered. */
-  assert.match(source,/if\(COOL\.t < COOL_RACE_T\)\{[\s\S]*?return \{ thr:p\.thr, brk:p\.brk/);
-  /* Phase two never touches the throttle again, keeps the braking the corners
-     need, walks across to the edge and stops. */
-  assert.match(source,/d\.lat \+= clamp\(park-d\.lat, -COOL_PULL_RATE\*dt, COOL_PULL_RATE\*dt\);/);
-  assert.match(source,/let brk=p\.brk;[\s\S]*?if\(v < COOL_STOP_V\) brk=Math\.max\(brk, v>0\.5 \? 0\.24 : 1\);/);
-  assert.match(source,/return \{ thr:0, brk, steer:aiSteer\(d, C, dt\) \};/);
+test('the takeover drives the car, it does not park it',()=>{
+  /* The rival brain's own pedals, all the way home: no lifting, no pulling
+     over, no crawl. */
+  assert.match(source,/const p=aiPedals\(d, C\);\s*\n\s*d\.lat \+= clamp\(0-d\.lat/);
+  assert.match(source,/return \{ thr:p\.thr, brk:p\.brk, steer:aiSteer\(d, C, dt\) \};/);
+  assert.doesNotMatch(source,/COOL_PARK_OFF|COOL_PULL_RATE|COOL_STOP_V/);
+  /* And the celebration screen is gone: Continue goes home. */
+  assert.doesNotMatch(source,/celebrate\(Math\.max\(1,RESULT\.rows/);
 });
