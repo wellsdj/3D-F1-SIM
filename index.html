@@ -1321,7 +1321,20 @@ if('serviceWorker' in navigator){
             <div class="ctrl-row"><kbd>T</kbd><span>Steering aids</span></div>
             <div class="ctrl-row"><kbd>O</kbd><kbd>V</kbd><span>Orbit &middot; free look</span></div>
             <div class="ctrl-row"><kbd>J</kbd><span>Start a race</span></div>
+            <div class="ctrl-row"><kbd>G</kbd><span>Barriers &mdash; draw where one is missing</span></div>
           </div>
+        </div>
+        <div class="sbox">
+          <div class="slabel">Rival pace</div>
+          <div class="sctl" id="set-pace"></div>
+          <p class="snote" id="set-pace-note"></p>
+        </div>
+        <div class="sbox">
+          <div class="slabel">Track limits</div>
+          <div class="sctl" id="set-limits"></div>
+          <p class="snote">Off means nothing is policed in a race &mdash; no warnings, no flag,
+             no seconds at the flag. A qualifying time is always policed: a lap with four
+             wheels off is not a lap, whatever this says.</p>
         </div>
       </div>
       <div id="controller-panel" aria-hidden="true"></div>
@@ -9776,6 +9789,21 @@ function barrNormal(x,z){
 /* Where a lap is policed: the last third of it. Measured off the same stations
    everything else uses, so it moves with the circuit rather than a hard-coded
    distance. */
+/* TRACK LIMITS, ON OR OFF.
+
+   Off is a real choice -- some people want to race and not be policed -- but
+   it is a choice about races only. A qualifying time with four wheels off is
+   not a time, so qualifying polices limits whatever this says, and when it
+   bites while the setting is off the screen explains itself rather than
+   looking like a bug. */
+let TRACK_LIMITS_ON=true;
+const TL_ON_KEY='apex.trackLimits';
+try{ if(localStorage.getItem(TL_ON_KEY)==='0') TRACK_LIMITS_ON=false; }catch(e){}
+function trackLimitsSet(on){
+  TRACK_LIMITS_ON=!!on;
+  try{ localStorage.setItem(TL_ON_KEY, TRACK_LIMITS_ON?'1':'0'); }catch(e){}
+  return TRACK_LIMITS_ON;
+}
 const TL_FROM=2/3;
 function tlPoliced(){
   const n=tlSt.length;
@@ -9812,10 +9840,20 @@ function tlCheck(dt){
      the road is useful everywhere, even where leaving it earns no advantage;
      only the offence itself remains limited to the policed part of the lap. */
   if(!RACE.on && !tlPoliced()) return;
+  /* Switched off, and this is a race: the offence is swallowed whole. The
+     clock above still runs, because getting back on the road matters
+     everywhere -- what is gone is the warning, the flag and the seconds. */
+  if(!TRACK_LIMITS_ON && RACE.on){ _tlCounted=true; _tlLock=TL_QUIET; return; }
   _tlCounted=true;
   _tlLock=TL_QUIET;
   sessionLapInvalid=true;
-  if(CAREER.active&&careerTimedSession()){ttVoid('Track limits');if(careerSlot().weekend.stage==='qualifying'){qualifyingDeleted();return;}}
+  /* Qualifying is never exempt, and somebody who turned limits off is owed the
+     reason their lap just went rather than being left to think it is a bug. */
+  if(!TRACK_LIMITS_ON) limitsSay('LAP DELETED','track limits cannot be turned off for a qualifying time');
+  if(CAREER.active&&careerTimedSession()){
+    ttVoid('Track limits');
+    if(careerSlot().weekend.stage==='qualifying'){qualifyingDeleted();return;}
+  }
   else limitsHit();
   /* TT.started means "a checkpoint gate has been reached", not "the timed
      run is under way". The first gate is beyond Eau Rouge, so using it here
@@ -10862,7 +10900,9 @@ function drive(dt){
   let thrMag = thr?1:0, brkMag = brk?1:0;
   /* Your hands are off it. Taken before the joystick block so a pad left on the
      desk cannot fight the car home. */
-  if(COOL.on){
+  /* Crashed. It is not your car any more until you answer the card. */
+  if(CRASH.on){ thrMag=0; brkMag=1; want=0; thr=false; brk=true; }
+  else if(COOL.on){
     const c=coolInputs(dt);
     if(c){ thrMag=c.thr; brkMag=c.brk; want=c.steer;
            thr=c.thr>0; brk=c.brk>0; }
@@ -12126,8 +12166,24 @@ function aiRoomAhead(d, side, metres){
    Each line carries its own speeds, so defending into a corner is genuinely
    slower than not defending -- which is the cost of defending, and it should be
    there. */
+/* OUT OF LA SOURCE, A LITTLE FURTHER LEFT.
+
+   The generated line runs all the way out to the right on the exit and stays
+   there down the hill to Eau Rouge, which is neither where a car wants to be
+   nor where the road wants it: the compression is taken from the left. This
+   is a bias on the line through that stretch only, eased in and out so
+   nothing steps sideways, and it is bounded by the same room every other
+   offset answers to -- so where the road is narrow it simply does less. */
+const T1_EXIT={from:10, peak:90, to:300, metres:-1.8};
+function aiExitBias(d){
+  const p=aiFirstProgress(d);
+  if(p<=T1_EXIT.from || p>=T1_EXIT.to) return 0;
+  const t=p<T1_EXIT.peak ? (p-T1_EXIT.from)/(T1_EXIT.peak-T1_EXIT.from)
+                         : 1-(p-T1_EXIT.peak)/(T1_EXIT.to-T1_EXIT.peak);
+  return T1_EXIT.metres*(0.5-0.5*Math.cos(Math.PI*clamp(t,0,1)));   // smooth both ends
+}
 function aiTraffic(d,dt){
-  const base=d.field?d.field.race[d.i]:0;
+  const base=(d.field?d.field.race[d.i]:0)+aiExitBias(d);
   const first=aiFirstProgress(d),span=first>-180&&first<90?55:30;
   let left=Math.max(0,aiRoomNear(d,d.i,-1,span)-.9);
   let right=Math.max(0,aiRoomNear(d,d.i,1,span)-.9);
@@ -12485,6 +12541,8 @@ function collisionWall(C,dt){
  const normal=barrNormal(safe.wx,safe.wz);if(!normal)return false;
  const point=CollisionPhysics.support(hit,-normal.x,-normal.z);
  st.wx=safe.wx+normal.x*.03;st.wz=safe.wz+normal.z*.03;st.hdg=safe.hdg;
+ /* Read before the impulse, which is about to take the speed away. */
+ const arriving=Math.abs(st.speed)*3.6;
  const severity=CollisionPhysics.impulse(C,null,{nx:-normal.x,nz:-normal.z,x:point.x,z:point.z});wingImpact(C,point.x,point.z,severity);
  const lift=CollisionPhysics.barrierLift(severity);
  if(lift>0&&!C.airborne){
@@ -12502,6 +12560,11 @@ function collisionWall(C,dt){
   BARR_SHAKE=Math.max(BARR_SHAKE,Math.min(6,severity*.16));
   crashSound(severity);
   if(severity>2&&BARR_SPARK<=0){spawnSparks(point.x,(C.groundY||0)+.2,point.z,Math.min(.6,severity/60));BARR_SPARK=.1;}
+  /* And if it arrived fast enough, and a tyre got there first, that corner of
+     the car leaves. */
+  if(arriving>WHEEL_OFF_WALL && severity>WHEEL_OFF_MIN && !CRASH.on){
+    if(wheelOff(point.x, point.z, normal)) crashOut();
+  }
  }
  return true;
 }
@@ -12518,7 +12581,16 @@ function carsTouch(A,B,dt){
   }
  }
  if(!hit)return false;
- wingImpact(A,hit.x,hit.z,hit.closing);wingImpact(B,hit.x,hit.z,hit.closing);A.touchT=B.touchT=.2;return true;
+ wingImpact(A,hit.x,hit.z,hit.closing);wingImpact(B,hit.x,hit.z,hit.closing);A.touchT=B.touchT=.2;
+ /* Between two cars the number that matters is the difference: being nudged
+    at four kph while both of you do three hundred is not a crash. */
+ /* Read through a guard: tests lift carsTouch out and run it in a sandbox
+    where none of the crash machinery exists. */
+ if(typeof CRASH!=='undefined' && !CRASH.on && (A===PLAYER||B===PLAYER)){
+  const diff=Math.abs(Math.abs(A.st.speed)-Math.abs(B.st.speed))*3.6;
+  if(diff>WHEEL_OFF_CAR && hit.closing>WHEEL_OFF_MIN && wheelOff(hit.x,hit.z,{x:hit.nx||0,z:hit.nz||0})) crashOut();
+ }
+ return true;
 }
 function carContact(dt){
  if(NET.watching||TTREC.playing)return;
@@ -12914,6 +12986,96 @@ function raceFinish(){
    camera follows it, and the only thing on screen is where you finished.
    The table waits until you ask for it.
    ========================================================================== */
+/* ==========================================================================
+   A WHEEL OFF, AND WHAT HAPPENS NEXT
+
+   A big enough shunt that lands on a tyre takes the wheel with it. The test
+   is deliberately two-part: how fast, and what hit first. A wall is measured
+   against your own speed, because that is what "I hit the wall at 330" means
+   to the person driving; another car is measured against the difference
+   between the two, because being rear-ended at four kph while both of you do
+   300 is not a crash. A floor under the impulse keeps a feather-touch at
+   speed from tearing a corner off.
+
+   The wheel leaves on the same debris physics the wings use -- gravity, a
+   bounce, drag -- and the session stops: YOU CRASHED, five seconds from the
+   nose, and then the card asks what you want to do about it.
+   ========================================================================== */
+let WHEEL_OFF_WALL=330;        // kph, your own speed into a barrier
+let WHEEL_OFF_CAR=250;         // kph, the difference between the two cars
+const WHEEL_OFF_MIN=8;         // m/s of closing: below this it is a scrape
+const WHEEL_NEAR=0.85;         // metres from a tyre centre to count as tyre-first
+const _woP=new THREE.Vector3(), _woC=new THREE.Vector3(), _woQ=new THREE.Quaternion();
+function wheelOff(px, pz, normal){
+  if(!wheels.length || !carGroup || !trackRoot) return null;
+  carGroup.updateMatrixWorld(true);
+  _woP.set(px, carGroup.position.y, pz);
+  carGroup.worldToLocal(_woP);
+  let best=null, bd=WHEEL_NEAR*WHEEL_NEAR;
+  for(const w of wheels){
+    w.getWorldPosition(_woC);
+    carGroup.worldToLocal(_woC);
+    const q=(_woC.x-_woP.x)**2+(_woC.z-_woP.z)**2;
+    if(q<bd){ bd=q; best=w; }
+  }
+  if(!best) return null;
+  best.getWorldPosition(_woC);
+  best.getWorldQuaternion(_woQ);
+  wheels.splice(wheels.indexOf(best),1);              // nothing rolls it any more
+  scene.add(best);
+  best.position.copy(_woC);
+  best.quaternion.copy(_woQ);
+  const v=CollisionPhysics.velocity(PLAYER);
+  const nx=normal?normal.x:0, nz=normal?normal.z:0;
+  DEBRIS.push({o:best, vx:v.x*0.55+nx*7, vy:4.5+Math.random()*2.5, vz:v.z*0.55+nz*7,
+               spin:(Math.random()<0.5?-1:1)*(6+Math.random()*6), t:0});
+  return best;
+}
+/* The crash itself: the moment, the nose view, and then the card. */
+const CRASH={ on:false, t:0, card:null };
+const CRASH_NOSE_T=5;          // seconds looking down the road before the card
+function crashOut(){
+  if(CRASH.on || RESULT.on || RETIRE.on) return;
+  CRASH.on=true; CRASH.t=0;
+  camMode=0; orbit=false; freeLook=false;                 // down the nose, as asked
+  /* And out of whatever cinematic was running: the drone shot at the start of
+     a race owns the camera, and a crash under it would show the sky. */
+  if(typeof TT!=='undefined') TT.drone=0;
+  if(typeof updateStatus==='function') updateStatus();
+  crashSay();
+}
+function crashSay(){
+  let el=document.getElementById('crashsay');
+  if(!el){ el=document.createElement('div'); el.id='crashsay'; document.body.appendChild(el); }
+  el.innerHTML='<b data-glitch="You crashed">You crashed</b>';
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 2600);
+}
+function crashStep(dt){
+  if(!CRASH.on) return;
+  CRASH.t+=dt;
+  if(!CRASH.card && CRASH.t>=CRASH_NOSE_T) crashCard();
+}
+function crashCard(){
+  let el=document.getElementById('crashcard');
+  if(!el){ el=document.createElement('div'); el.id='crashcard'; document.body.appendChild(el); }
+  el.innerHTML=
+     '<div class="cc-helm" aria-hidden="true"></div>'
+    +'<div class="cc-body"><div class="cc-kick">Session over</div>'
+    +'<div class="cc-word">That is <em>that.</em></div>'
+    +'<p class="cc-note">The car is done. Take the restart, or call it a day.</p>'
+    +'<div class="cc-row"><button type="button" class="cc-go">Restart race</button>'
+    +'<button type="button" class="cc-out">Retire</button></div></div>';
+  el.classList.add('show');
+  CRASH.card=el;
+  el.querySelector('.cc-go').onclick=()=>{ crashEnd(); restartCurrentRace(); };
+  el.querySelector('.cc-out').onclick=()=>{ crashEnd(); goHome(); };
+}
+function crashEnd(){
+  CRASH.on=false; CRASH.t=0;
+  if(CRASH.card){ CRASH.card.classList.remove('show');
+                  const c=CRASH.card; setTimeout(()=>c.remove(),400); CRASH.card=null; }
+}
 const COOL={ on:false, t:0, v0:0, driver:null, card:null, scene:false, done:false };
 const COOL_CARD_T=2.2;     // let the camera breathe before the number lands
 const COOL_CONT_T=10;      // and the way out arrives at ten seconds, as asked
@@ -13859,6 +14021,9 @@ window.SIM={
              cameraMoved:+Math.hypot(m2X-panBefore[0], m2Y-panBefore[1]).toFixed(1) };
   },
   mapPoint(i){ const p=tleLines[m2Edge][i]; return p?{x:p.x,z:p.z}:null; },
+  /* The surveyed station under a world point: how much road is left either
+     side of the car right there. */
+  stationAtXZ(x,z){ const st=tlStation(x,z); return st?{dR:st.dR,dL:st.dL}:null; },
   stationAt(s){ const st=tlSt[Math.round(s/TL_STEP)%tlSt.length];
       return st?{x:st.x,z:st.z,rx:st.rx,rz:st.rz,dR:st.dR,dL:st.dL}:null; },
   /* Grab the nearest handle to a world point and pull it out by so many metres,
@@ -13897,6 +14062,26 @@ window.SIM={
              at: pts?at(pts[0][0], pts[0][1]):null };
   },
   aiRoomAt(i,side){ return aiRoom(i,side); },
+  /* The bias on the run down from La Source, to measure it either way. */
+  exitBias(m){ if(m!==undefined) T1_EXIT.metres=+m; return {...T1_EXIT}; },
+  /* The crash, from outside: the thresholds, a wheel taken off where a tyre
+     would have been, and what the screen is showing. */
+  wheelOffLimits(o){ if(o){ if(o.wall!==undefined) WHEEL_OFF_WALL=+o.wall;
+                            if(o.car!==undefined) WHEEL_OFF_CAR=+o.car; }
+                     return {wall:WHEEL_OFF_WALL, car:WHEEL_OFF_CAR, min:WHEEL_OFF_MIN}; },
+  crashState(){ return {on:CRASH.on, t:+CRASH.t.toFixed(1), card:!!CRASH.card,
+                        wheels:wheels.length, debris:DEBRIS.length, cam:camMode,
+                        saying:!!document.querySelector('#crashsay.show')}; },
+  /* Take a wheel off at one of the car's own corners, the way a barrier
+     would, and run the whole sequence from it. */
+  crashTest(corner){
+    if(!wheels.length) return null;
+    const w=wheels[Math.min(wheels.length-1, Math.max(0, corner|0))];
+    const p=new THREE.Vector3(); w.getWorldPosition(p);
+    const off=wheelOff(p.x, p.z, {x:0, z:0});
+    if(off) crashOut();
+    return {off:!!off, wheels:wheels.length, on:CRASH.on};
+  },
   /* Take the barriers out of what the rivals know, to measure against it. */
   aiWalls(on){ if(on===false) AI_WALLROOM=null; else if(on===true) aiWallRoomBuild();
                return !!AI_WALLROOM; },
@@ -14700,7 +14885,7 @@ function stepWorld(dt){
   updateStart(dt);
   if(NET.watching){ netStep(dt); }
   else if(TTREC.playing){ replayStep(dt); }
-  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); coolStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
+  else { controllerPoll(); wingDebrisStep(dt); raceStep(dt); raceClock(dt); limitsStep(dt); if(!AIR.on) ttStep(dt); coolStep(dt); crashStep(dt); drive(dt); aiStepAll(dt,t); carContact(dt); netSend(t); }
 }
 
 /* The clock the world runs on is not the clock the pictures arrive on.
@@ -16533,6 +16718,7 @@ function apexShow(sec){
   if(sec==='home'){ apexPaintHome(); apexDriverBadge(); }
   if(sec==='garage') apexPaintGarage();
   if(sec==='race') apexPaintRace();
+  if(sec==='settings') apexPaintSettings();
   /* Each section brings its own picture. One element, one attribute, so there
      is no stack of backgrounds fading over each other. */
   const boot=document.getElementById('boot');
@@ -17140,6 +17326,47 @@ function apexPaintRace(){
   Array.prototype.forEach.call(lp.querySelectorAll('button'),b=>{
     b.onclick=()=>{ apexLaps=Math.max(1,Math.min(10,apexLaps+ +b.dataset.d)); apexPaintRace(); };
   });
+}
+/* SETTINGS THAT CHANGE A SESSION.
+
+   Rival pace was fixed at the moment a career was created and could not be
+   touched again, which is no good to anybody who picked a number before
+   driving a lap and found the field too quick. It is a setting now, it moves
+   the career's own difficulty when a career is running, and it takes effect
+   on the next session rather than mid-race.
+
+   Track limits can be switched off outright -- for races. A qualifying time
+   is a time, and a lap with four wheels off is not one, so qualifying is
+   never exempt and the screen says so if it ever bites. */
+function apexPaintSettings(){
+  const pace=document.getElementById('set-pace');
+  const lim=document.getElementById('set-limits');
+  if(!pace||!lim) return;
+  const car=CAREER.active?careerSlot():null;
+  const L=car?car.difficulty:AI.level;
+  pace.innerHTML='<span class="sval"><b>'+L+' &middot; '+AI_LEVEL_NAME[L]+'</b>'
+    +'<span>'+(car?'Career field':'Quick race field')+'</span></span>'
+    +'<div class="rstepper"><button type="button" data-p="-1">&lsaquo;</button>'
+    +'<b>'+L+'</b><button type="button" data-p="1">&rsaquo;</button></div>';
+  Array.prototype.forEach.call(pace.querySelectorAll('button'),b=>{
+    b.onclick=()=>{
+      const n=Math.max(1,Math.min(5,L + +b.dataset.p));
+      if(car){ car.difficulty=n; careerSave(); }
+      aiSetLevel(n);
+      const sl=raceEl('paceslider'); if(sl) sl.value=n;
+      apexPaintSettings();
+    };
+  });
+  const note=document.getElementById('set-pace-note');
+  if(note) note.textContent=car
+    ? 'Changes the field for the rest of this career, from the next session on.'
+    : 'One is a club runner, five is a field that will not make a mistake.';
+  lim.innerHTML='<span class="sval"><b>'+(TRACK_LIMITS_ON?'Policed':'Off')+'</b>'
+    +'<span>'+(TRACK_LIMITS_ON?'Warnings, flag, seconds':'Races only')+'</span></span>'
+    +'<button type="button" class="sswitch'+(TRACK_LIMITS_ON?' on':'')
+    +'" role="switch" aria-checked="'+TRACK_LIMITS_ON+'"><i></i></button>';
+  const sw=lim.querySelector('.sswitch');
+  if(sw) sw.onclick=()=>{ trackLimitsSet(!TRACK_LIMITS_ON); apexPaintSettings(); };
 }
 /* THE TOP TEN, ON THE PAGE.
 

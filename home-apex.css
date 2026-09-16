@@ -1731,3 +1731,89 @@ body.customizer-open #netbtn{display:none}
   display:block;font-style:normal;margin-top:3px;
   font-size:8.5px;letter-spacing:.16em;color:var(--apex-faint);
 }
+
+/* ---------------------------------------------------- settings controls
+   Two things you can change without leaving the front end: how hard the
+   rivals drive, and whether a race polices track limits at all. Same
+   stepper language as the Race page, so a control reads the same wherever
+   it appears. */
+.sctl{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:11px 13px;border:1px solid var(--apex-line);background:rgba(255,255,255,.02)}
+.sctl .sval{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sctl .sval b{font-family:var(--apex-display);font-style:italic;font-size:17px;
+  letter-spacing:.02em;text-transform:uppercase;color:#fff;font-weight:400}
+.sctl .sval span{font-family:var(--apex-mono,monospace);font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--apex-dim)}
+.sctl.locked{opacity:.55}
+.snote{margin:0;font-size:10.5px;line-height:1.65;color:var(--apex-dim)}
+.snote.warn{color:var(--apex-red-hot)}
+/* The switch: a bar that slides, rather than a checkbox nobody can see. */
+.sswitch{flex:0 0 auto;width:52px;height:24px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--apex-line);background:rgba(255,255,255,.05);position:relative;
+  transition:background .2s,border-color .2s}
+.sswitch i{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;
+  background:var(--apex-dim);transition:transform .2s,background .2s}
+.sswitch.on{background:rgba(255,31,45,.22);border-color:var(--apex-red)}
+.sswitch.on i{transform:translateX(28px);background:var(--apex-red-hot);
+  box-shadow:0 0 12px rgba(255,31,45,.8)}
+
+/* ==========================================================================
+   THE CRASH
+   The moment first -- two words over the picture while the nose camera runs
+   -- and then the card, which is the only thing on screen that takes a
+   click. Same helmet as the loading screen, because this is the same game
+   talking to you.
+   ========================================================================== */
+#crashsay{
+  position:fixed;left:0;right:0;top:34vh;z-index:36;text-align:center;
+  pointer-events:none;opacity:0;transition:opacity .35s ease;
+  font-family:var(--apex-display);font-style:italic;
+}
+#crashsay.show{opacity:1}
+#crashsay b{
+  font-size:clamp(38px,8vw,92px);letter-spacing:.02em;text-transform:uppercase;
+  color:#fff;font-weight:400;position:relative;display:inline-block;
+  text-shadow:0 0 60px rgba(0,0,0,.9),0 0 22px rgba(255,31,45,.55);
+}
+#crashsay b:before,#crashsay b:after{
+  content:attr(data-glitch);position:absolute;left:0;top:0;width:100%;
+}
+#crashsay b:before{color:#ff1f2d;transform:translate(-3px,2px);opacity:.7;
+  clip-path:polygon(0 8%,100% 8%,100% 46%,0 46%);animation:crash-glitch .5s steps(2) infinite}
+#crashsay b:after{color:#33e0ff;transform:translate(3px,-2px);opacity:.32;
+  clip-path:polygon(0 54%,100% 54%,100% 96%,0 96%);animation:crash-glitch .7s steps(2) infinite reverse}
+@keyframes crash-glitch{50%{transform:translate(2px,-1px)}}
+
+#crashcard{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-46%) scale(.98);z-index:37;
+  width:min(92vw,430px);overflow:hidden;border-radius:4px;opacity:0;pointer-events:none;
+  background:linear-gradient(170deg,#1a0508,#0a0304 46%,#07070a);
+  border:1px solid rgba(255,31,45,.45);
+  box-shadow:0 40px 90px rgba(0,0,0,.75),0 0 70px rgba(255,31,45,.16);
+  font-family:var(--apex-mono);color:#fff;
+  transition:opacity .4s ease,transform .5s cubic-bezier(.16,1,.3,1);
+}
+#crashcard.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+#crashcard .cc-helm{
+  aspect-ratio:900/506;background:#000 url('assets/home/helmet-red.webp') 50% 50%/contain no-repeat;
+  position:relative;filter:saturate(1.08) contrast(1.06);
+}
+#crashcard .cc-helm:after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(10,3,4,.2),rgba(10,3,4,0) 34%,rgba(10,3,4,.72) 82%,#0a0304);
+}
+#crashcard .cc-body{position:relative;display:grid;gap:12px;padding:0 22px 22px;margin-top:-26px}
+#crashcard .cc-kick{font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:#ff5f6f}
+#crashcard .cc-word{font-family:var(--apex-display);font-style:italic;font-size:30px;
+  line-height:1;text-transform:uppercase}
+#crashcard .cc-word em{font-style:normal;color:#ff3b4e}
+#crashcard .cc-note{margin:0;font-size:10.5px;line-height:1.65;color:var(--apex-dim)}
+#crashcard .cc-row{display:flex;gap:9px;margin-top:2px}
+#crashcard .cc-row button{
+  flex:1;padding:13px 10px;font:inherit;font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:#fff;cursor:pointer;border-radius:2px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(236,234,228,.2);transition:background .2s,border-color .2s,transform .2s}
+#crashcard .cc-row button:hover{transform:translateY(-1px)}
+#crashcard .cc-go{background:rgba(255,31,45,.2)!important;border-color:rgba(255,31,45,.55)!important}
+#crashcard .cc-go:hover{background:rgba(255,31,45,.32)!important}
+#crashcard .cc-row button:focus-visible{outline:2px solid #ff3b4e;outline-offset:3px}
