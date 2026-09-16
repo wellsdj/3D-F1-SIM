@@ -4,7 +4,20 @@
  const cross=(x,z,nx,nz)=>z*nx-x*nz;
  function axes(s){return [{x:Math.sin(s.hdg),z:Math.cos(s.hdg)},{x:Math.cos(s.hdg),z:-Math.sin(s.hdg)}];}
  function velocity(c){return {x:Math.sin(c.st.hdg)*c.st.speed+(c.bumpX||0),z:Math.cos(c.st.hdg)*c.st.speed+(c.bumpZ||0)};}
- function setVelocity(c,x,z){const f=axes(c.st)[0],v=x*f.x+z*f.z;c.st.speed=Math.max(0,v);c.bumpX=x-f.x*c.st.speed;c.bumpZ=z-f.z*c.st.speed;}
+ /* REVERSE SURVIVES A ROUND TRIP.
+
+    This used to clamp the forward component at zero, which quietly made
+    reverse impossible anywhere the collision layer touched the car: a knock
+    leaves a decaying impactYaw behind it, the car step feeds its velocity
+    through here every frame while that decays, and the clamp threw away the
+    backwards part each time. One frame of reverse acceleration, zeroed, for
+    ever -- which is the "reverse only does one kilometre an hour on some
+    parts of the track" that had no other explanation.
+
+    The floor is the car's reverse limit with a little room, so a shunt can
+    still push a car backwards without launching it. */
+ const REV_FLOOR=-11;
+ function setVelocity(c,x,z){const f=axes(c.st)[0],v=x*f.x+z*f.z;c.st.speed=Math.max(REV_FLOOR,v);c.bumpX=x-f.x*c.st.speed;c.bumpZ=z-f.z*c.st.speed;}
  function support(s,nx,nz){const a=axes(s);let x=s.wx,z=s.wz;for(let i=0;i<2;i++){const dot=a[i].x*nx+a[i].z*nz,k=Math.abs(dot)<1e-7?0:Math.sign(dot)*(i?halfWidth:halfLength);x+=a[i].x*k;z+=a[i].z*k;}return {x,z};}
  function overlap(a,b){
   const aa=axes(a),bb=axes(b),dx=b.wx-a.wx,dz=b.wz-a.wz;let depth=Infinity,normal;

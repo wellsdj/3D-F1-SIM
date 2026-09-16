@@ -4866,8 +4866,8 @@ function spawnDust(speed, from, grass, wet){
        which is what the plume had become. Pulling the lightness down to a
        third and the saturation up to three quarters is what survives the tone
        curve as an actual yellow. Still varied, so it is not one flat colour. */
-    _dustC.setHSL(0.105+Math.random()*0.030, 0.70+Math.random()*0.16,
-                  0.34+Math.random()*0.10);
+    _dustC.setHSL(0.100+Math.random()*0.030, 0.30+Math.random()*0.12,
+                  0.44+Math.random()*0.10);
   P.col[i*3]=_dustC.r; P.col[i*3+1]=_dustC.g; P.col[i*3+2]=_dustC.b;
 }
 
@@ -9843,7 +9843,10 @@ function barrBlocked(x,z,h){
    grinding along a barrier generates a contact every frame and forty of them a
    second is a buzz rather than a crash. */
 let crashBuf=null, crashAt=0, crashTried=false;
-function crashSound(severity){
+/* Above this the hit stops being a noise the engine is playing over and
+   becomes the loudest thing on the circuit. */
+const CRASH_LOUD_KPH=300;
+function crashSound(severity, kph){
   const ctx=(typeof engineAudio!=='undefined'&&engineAudio.context)?engineAudio.context:null;
   if(!ctx||ctx.state!=='running') return;
   const now=ctx.currentTime;
@@ -9857,15 +9860,26 @@ function crashSound(severity){
   }
   crashAt=now;
   const hard=Math.min(1,severity/40);
+  /* How fast you were going when it happened, not just how square the hit
+     was: a glancing blow at three hundred is still an enormous noise. */
+  const fast=clamp(((+kph||0)-CRASH_LOUD_KPH)/120,0,1);
   const src=ctx.createBufferSource(); src.buffer=crashBuf;
   src.playbackRate.value=0.88+hard*0.3;
   const g=ctx.createGain();
-  g.gain.value=0.12+hard*0.85;
+  g.gain.value=0.12+hard*0.85+fast*0.95;
   /* A light knock is duller as well as quieter. */
   const lp=ctx.createBiquadFilter(); lp.type='lowpass';
   lp.frequency.value=900+hard*11000;
-  src.connect(lp); lp.connect(g); g.connect(ctx.destination);
+  /* Its own limiter, because the gain above deliberately goes past one: this
+     keeps a big hit loud instead of letting it square off into distortion. */
+  const lim=ctx.createDynamicsCompressor();
+  lim.threshold.value=-1.5; lim.knee.value=3; lim.ratio.value=14;
+  lim.attack.value=0.002; lim.release.value=0.14;
+  src.connect(lp); lp.connect(g); g.connect(lim); lim.connect(ctx.destination);
   src.start();
+  /* And the engine steps out from under it. */
+  if(fast>0 && engineAudio && typeof engineAudio.duck==='function')
+    engineAudio.duck(0.3-0.14*fast, 0.8+0.5*fast);
 }
 /* Sparks ride the dry pool: they are bright and they are meant to be solid,
    which is the pool that is now solid. */
@@ -10091,6 +10105,9 @@ const LIMITS_AFTER=[5, 10];
 function limitsReset(){
   LIMITS.count=0; LIMITS.flag=false; LIMITS.pen=0; LIMITS.msg=''; LIMITS.msgT=0;
   LIMITS.after=0; LIMITS.dsq=false;
+  /* A new session is a clean sheet, including the one where you took the car
+     back off the retirement route. */
+  if(typeof RETIRE!=='undefined') RETIRE.declined=false;
   _tlOff=0; _tlCounted=false; _tlLock=0;
   limitsPaint();
 }
@@ -10718,6 +10735,15 @@ function yawFor(speed, steerAng, surf, gripMul){
    Grass is half of what it was: 0.25 -> 0.125, so it costs a quarter of
    gravel's speed. */
 function surfaceDrag(st, surf, dt){
+  /* REVERSE IS EXEMPT.
+
+     Gravel drags at (2.5 + 1.6v) per unit of looseness, which at full gravel
+     balances the reverse motor at about 17 kph and, on the worst of it, left
+     the car crawling backwards at walking pace -- which is where a car that is
+     already in trouble gets stuck for good. Backwards, the surface no longer
+     fights you: reverse is an escape, not a lap, and it always gets to the
+     35 kph it is limited to. Forwards nothing changes at all. */
+  if(st.speed<0) return;
   const k = surf.loose ? surf.looseFrac
           : surf.grass ? 0.125*surf.grassFrac : 0;
   if(!k) return;
@@ -12765,7 +12791,7 @@ function collisionWall(C,dt){
      Everything below scales with how hard it was. */
   BARR_HIT=Math.max(BARR_HIT,Math.min(1,severity/45));
   BARR_SHAKE=Math.max(BARR_SHAKE,Math.min(6,severity*.16));
-  crashSound(severity);
+  crashSound(severity, arriving);
   if(severity>2&&BARR_SPARK<=0){spawnSparks(point.x,(C.groundY||0)+.2,point.z,Math.min(.6,severity/60));BARR_SPARK=.1;}
   /* And if it arrived fast enough, and a tyre got there first, that corner of
      the car leaves. */
@@ -14269,6 +14295,15 @@ window.SIM={
              at: pts?at(pts[0][0], pts[0][1]):null };
   },
   aiRoomAt(i,side){ return aiRoom(i,side); },
+  /* The crash, as it is heard: play one at a given speed and read what it did
+     to the engine underneath it. */
+  crashHeard(kph){ crashSound(45, kph); return {master:engineAudio.renderer?+engineAudio.renderer.master.gain.value.toFixed(3):null}; },
+  /* Hand the car to the retirement route on demand, and read what it is
+     doing with it: the drive home used to crawl and there was no way to see
+     that without collecting seven track-limits offences first. */
+  retireNow(){ retirementBegin(); return this.retireState(); },
+  retireState(){ return {on:RETIRE.on, parked:RETIRE.parked, declined:RETIRE.declined,
+                         route:!!RETIRE.route, kph:+(Math.abs(carState.speed)*3.6).toFixed(0)}; },
   /* The pad, from outside: what it is asking for and where its cursor is. */
   padState(){ return {pad:!!controllerPad, polls:PAD_POLLS, thr:+controllerThr.toFixed(2), brk:+controllerBrk.toFixed(2),
                       steer:+controllerSteer.toFixed(2), back:controllerBack, lookBack:LOOKBACK,
@@ -14772,6 +14807,7 @@ window.SIM={
   speed(v){ carState.speed=v; },
   /* Reverse state for browser driving diagnostics. */
   revState(){ return {enabled:true, speed:+carState.speed.toFixed(2),
+                      retire:!!RETIRE.on, declined:!!RETIRE.declined,
                       surf:PLAYER.surf?{grass:!!PLAYER.surf.grass,loose:!!PLAYER.surf.loose,
                                         ok:!!PLAYER.surf.ok}:null,
                       n:+carState.n.toFixed(2), gridded:startPhase!=='go'}; },
@@ -14795,6 +14831,7 @@ window.SIM={
     const r=engineAudio.renderer, m=engineAudio.model;
     return { clips:r?Object.keys(r.buffers):[], errors:engineAudio.errors.slice(),
              mode:m?m.mode:'-', rate:m?+m.rate.toFixed(3):0,
+             master:r?+r.master.gain.value.toFixed(3):null,
              state:engineAudio.context?engineAudio.context.state:'none' };
   },
   weather(w){ if(w!==undefined){ WEATHER.wet=!!w; WEATHER.level=w?(typeof w==='number'?w:0.8):0;
@@ -16705,7 +16742,7 @@ Array.prototype.slice.call(pickEl.querySelectorAll('button')).forEach(btn=>{
 
 
 let sessionLapInvalid=false,careerRewardPending=false,raceRestartSave=null;
-const RETIRE={on:false,parked:false,route:null,cursor:0,elapsed:0};
+const RETIRE={on:false,parked:false,route:null,cursor:0,elapsed:0,declined:false};
 const decisionEl=document.createElement('div');decisionEl.id='career-decision';decisionEl.setAttribute('role','dialog');decisionEl.setAttribute('aria-modal','true');document.body.appendChild(decisionEl);
 function decisionClose(){decisionEl.classList.remove('on');decisionEl.innerHTML='';}
 function decisionShow(kicker,title,copy,actions){
@@ -16743,7 +16780,7 @@ function careerShowRewards(){
  const tick=now=>{if(!decisionEl.classList.contains('on'))return;const p=reduced?1:Math.min(1,(now-start)/1100),ease=1-Math.pow(1-p,3);const cr=document.getElementById('reward-credit-count'),up=document.getElementById('reward-up-count');if(!cr||!up)return;cr.textContent='+'+Math.round(total*ease).toLocaleString();up.textContent='+'+Math.round((r.upgradePoints||0)*ease).toLocaleString();if(p<1)requestAnimationFrame(tick);};requestAnimationFrame(tick);
 }
 function retirementBegin(){
- if(RETIRE.on)return;
+ if(RETIRE.on||RETIRE.declined)return;
  TT.live=false;careerSessionRunning=false;sessionLapInvalid=true;
  if(CAREER.active){CareerSeason.recordLap(careerSlot(),TT.t,false,'Disqualified',careerSlot().weekend.stage);careerSave();}
  if(!AI.n)aiBuild();
@@ -16764,6 +16801,13 @@ function retirementDrive(dt){
     is enough to give the car back. */
  if(keys['s']||keys['arrowdown']||controllerBrake){
   RETIRE.on=false; RETIRE.parked=false; RETIRE.route=null;
+  /* And it stays given back. Taking the car and then losing it again on the
+     next offence is what produced the famous one kilometre an hour: control
+     came back for a frame, the car was still off the circuit, the ladder
+     handed it straight back to the route, and the speedo sat on whatever it
+     held. Asking for reverse says you are driving it out yourself, and that
+     answer holds for the rest of the session. */
+  RETIRE.declined=true;
   if(typeof decisionClose==='function') decisionClose();
   return;
  }
@@ -16779,7 +16823,12 @@ function retirementDrive(dt){
   let angle=Math.atan2(dx,dz)-carState.hdg;angle=Math.atan2(Math.sin(angle),Math.cos(angle));
   steerInput=clamp(-Math.atan(WHEELBASE*2*Math.sin(angle)/d)*STEER_RATIO/(STEER_LOCK*Math.max(.05,PLAYER.lockF)),-1,1);
   const remaining=Math.hypot(route.target.x-carState.wx,route.target.z-carState.wz),gravel=PLAYER.surf.loose&&PLAYER.surf.looseFrac>.75&&nearest>=route.exitAt;
-  const desired=gravel?0:Math.min(nearest>=route.exitAt?7:22,Math.max(5,18/(1+Math.abs(angle)*4)),Math.sqrt(2*3*Math.max(0,remaining-2)));
+  /* Quicker on the way home. It used to plan for 22 m/s and then hold itself
+     to 18 through anything with an angle on it, which is 65 kph -- a car being
+     driven back by somebody who has given up, not a racing car leaving the
+     circuit. The shape is unchanged: a cruise, a corner term, and a braking
+     term that still lands it softly on the target. */
+  const desired=gravel?0:Math.min(nearest>=route.exitAt?12:34,Math.max(8,36/(1+Math.abs(angle)*4)),Math.sqrt(2*4.5*Math.max(0,remaining-2)));
   thr=carState.speed<desired-.5?.42:0;brk=carState.speed>desired?clamp((carState.speed-desired)/5,0,1):0;
   if(gravel&&carState.speed<.15){retirementParked();return;}
  }
@@ -16805,6 +16854,16 @@ function retirementParked(){
 // Menus cannot be bypassed by driving/reset shortcuts, and Tab stays inside decisions.
 window.addEventListener('keydown',e=>{
  if(!RETIRE.on&&!decisionEl.classList.contains('on'))return;
+ /* EXCEPT REVERSE, WHICH IS HOW YOU TAKE THE CAR BACK.
+
+    This listener runs in the capture phase and stops everything below it, so
+    while the retirement route had the car the driving handler never saw a key
+    at all -- including the one key retirementDrive is sitting there waiting
+    for. Holding S did nothing, the route kept driving, and the speedo sat on
+    whatever it held. It is let through now whenever there is no dialog on
+    screen to protect. */
+ const k=(e.key||'').toLowerCase();
+ if(RETIRE.on && !decisionEl.classList.contains('on') && (k==='s'||k==='arrowdown')) return;
  if(e.code==='Tab'&&decisionEl.classList.contains('on')){const buttons=Array.from(decisionEl.querySelectorAll('button'));const i=buttons.indexOf(document.activeElement);e.preventDefault();buttons[(i+(e.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}
  e.stopImmediatePropagation();
 },true);

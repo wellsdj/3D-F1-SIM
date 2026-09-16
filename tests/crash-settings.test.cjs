@@ -93,3 +93,15 @@ test('the run down from La Source is biased left, and eased in and out',()=>{
   /* And it is applied to the line the cars actually drive. */
   assert.match(source,/const base=\(d\.field\?d\.field\.race\[d\.i\]:0\)\+aiExitBias\(d\);/);
 });
+
+test('a big hit is louder than the engine, and the engine makes room for it',()=>{
+  assert.match(source,/const CRASH_LOUD_KPH=300;/);
+  /* The wall passes how fast you were going, not just how square the hit was. */
+  assert.match(source,/crashSound\(severity, arriving\);/);
+  assert.match(source,/const fast=clamp\(\(\(\+kph\|\|0\)-CRASH_LOUD_KPH\)\/120,0,1\);/);
+  assert.match(source,/g\.gain\.value=0\.12\+hard\*0\.85\+fast\*0\.95;/);
+  /* Past one it would clip, so it gets its own limiter rather than a ceiling. */
+  assert.match(source,/lim=ctx\.createDynamicsCompressor\(\)/);
+  /* And the engine steps out from under it, but only for the big ones. */
+  assert.match(source,/if\(fast>0 && engineAudio && typeof engineAudio\.duck==='function'\)/);
+});

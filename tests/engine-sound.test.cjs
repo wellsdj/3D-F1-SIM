@@ -117,3 +117,26 @@ test('preparation retains the original recording except its final wrap fade',()=
  assert.equal(p.loop,16.2);assert.equal(p.end,23.4);
  assert.deepEqual(p.buffer.getChannelData(0).slice(0,23340),original.slice(0,23340));assert.deepEqual(d,original);
 });
+
+test('the engine gets out from under a big impact and comes back',()=>{
+  /* A minimal audio graph: enough of one for the renderer to schedule on. */
+  const events=[];
+  const param=()=>({value:.65,
+    cancelScheduledValues(t){events.push(['cancel',t]);},
+    setValueAtTime(v,t){events.push(['set',+v.toFixed(3),t]); this.value=v;},
+    linearRampToValueAtTime(v,t){events.push(['ramp',+v.toFixed(3),+t.toFixed(2)]); this.value=v;}});
+  const node=()=>({gain:param(),frequency:{value:0},type:'',threshold:{value:0},knee:{value:0},
+                   ratio:{value:0},attack:{value:0},release:{value:0},connect(){},disconnect(){}});
+  const ctx={currentTime:10,createGain:node,createBiquadFilter:node,createDynamicsCompressor:node,
+             createBufferSource:()=>({buffer:null,playbackRate:param(),connect(){},start(){},stop(){},disconnect(){}})};
+  const r=new Renderer(ctx,{});
+  const floor=r.duck(.25,.9);
+  assert.ok(floor>0 && floor<.2, 'it drops well under the engine: '+floor);
+  const ramps=events.filter(e=>e[0]==='ramp');
+  assert.equal(ramps[0][1], +floor.toFixed(3), 'down first');
+  assert.equal(ramps[ramps.length-1][1], .65, 'and all the way back up');
+  assert.ok(ramps[ramps.length-1][2]>=10.9, 'over the time it was given');
+  /* Muted stays muted: a crash does not turn the engine back on. */
+  r.muted=true;
+  assert.equal(r.duck(.25,.9), 0);
+});

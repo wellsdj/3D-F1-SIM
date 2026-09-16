@@ -41,16 +41,18 @@ test('the two pools are built with the opacity each one needs',()=>{
   assert.ok(drySize>wetSize, 'and sand throws a bigger particle than water');
 });
 
-test('sand is yellow, and dark enough to stay yellow through the tone curve',()=>{
+test('sand is warm but only just, and dark enough not to blow out',()=>{
   const {ctx,hsl}=lift();
   ctx.spawnDust(50, null, false, false);
   const sand=hsl[hsl.length-1];
-  /* Hue in the yellow band -- 0.08 is orange, 0.19 is lime. */
+  /* Hue in the warm band -- 0.08 is orange, 0.19 is lime. */
   assert.ok(sand.h>0.09 && sand.h<0.15, 'hue '+sand.h);
-  assert.ok(sand.s>=0.65, 'saturated enough to read as a colour: '+sand.s);
+  /* A tint and not a colour: enough to read as sand, not enough to read as
+     paint, which is what three quarters saturation looked like. */
+  assert.ok(sand.s>0.2 && sand.s<0.5, 'a tint, not a colour: '+sand.s);
   /* The renderer is ACES filmic on linear vertex colours, so a "sand" picked
-     by eye arrives white. This is the constraint that keeps it yellow. */
-  assert.ok(sand.l<=0.46, 'light enough to blow out: '+sand.l);
+     by eye arrives white. This is the ceiling that keeps any warmth at all. */
+  assert.ok(sand.l<=0.58, 'light enough to blow out: '+sand.l);
   /* Grass stays green and dark, and spray stays all but colourless. */
   ctx.spawnDust(50, null, true, false);
   const grass=hsl[hsl.length-1];

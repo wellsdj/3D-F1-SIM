@@ -175,6 +175,21 @@
    this.master.gain.cancelScheduledValues(now);this.master.gain.setValueAtTime(current,now);
    this.master.gain.linearRampToValueAtTime(target,now+.06);
   }
+  /* Get out of the way of something louder. A big impact has to be the
+     loudest thing in the room, and the honest way to do that is not to push
+     the crash past what the output can take but to take the engine down under
+     it for a moment and let it come back. */
+  duck(amount=.25,seconds=.9,now=this.ctx.currentTime){
+   if(this.muted) return 0;
+   const full=.65, floor=Math.max(0,Math.min(full,full*amount));
+   const g=this.master.gain;
+   g.cancelScheduledValues(now);
+   g.setValueAtTime(g.value,now);
+   g.linearRampToValueAtTime(floor,now+.03);
+   g.setValueAtTime(floor,now+Math.max(.05,seconds*.35));
+   g.linearRampToValueAtTime(full,now+Math.max(.1,seconds));
+   return floor;
+  }
   remove(v){v.source.disconnect();v.gain.disconnect();this.voices.delete(v);if(this.current===v)this.current=null;}
   applyKerb(plan,now){
    const clip=this.buffers.kerb,volume=plan.kerbVolume||0;
@@ -238,6 +253,7 @@
    this.renderer=new Renderer(this.context,buffers);this.renderer.setMuted(this.muted);
   }
   setMuted(muted){this.muted=!!muted;if(this.renderer)this.renderer.setMuted(this.muted);return this.muted;}
+  duck(amount,seconds){ return this.renderer?this.renderer.duck(amount,seconds):0; }
   toggleMute(){return this.setMuted(!this.muted);}
   update(input){
    if(!this.renderer||this.context.state!=='running')return;
