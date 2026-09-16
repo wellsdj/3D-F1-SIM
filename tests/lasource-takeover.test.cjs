@@ -98,15 +98,15 @@ test('G draws barriers again, whenever the circuit is up',()=>{
 });
 
 /* ------------------------------------------------------------- the takeover */
-test('the takeover races first, then lifts and pulls over',()=>{
-  assert.match(source,/const COOL_RACE_T=([\d.]+);/);
-  const [,race]=source.match(/const COOL_RACE_T=([\d.]+);/);
-  assert.ok(+race>=3 && +race<=8, 'a few seconds of racing, not a whole lap');
-  /* Phase one is the rival brain's own pedals, unaltered. */
-  assert.match(source,/if\(COOL\.t < COOL_RACE_T\)\{[\s\S]*?return \{ thr:p\.thr, brk:p\.brk/);
-  /* Phase two never touches the throttle again, keeps the braking the corners
-     need, walks across to the edge and stops. */
-  assert.match(source,/d\.lat \+= clamp\(park-d\.lat, -COOL_PULL_RATE\*dt, COOL_PULL_RATE\*dt\);/);
-  assert.match(source,/let brk=p\.brk;[\s\S]*?if\(v < COOL_STOP_V\) brk=Math\.max\(brk, v>0\.5 \? 0\.24 : 1\);/);
-  assert.match(source,/return \{ thr:0, brk, steer:aiSteer\(d, C, dt\) \};/);
+test('the takeover keeps racing at normal AI pace after the flag',()=>{
+  assert.match(source,/const p=aiPedals\(d, C\);[\s\S]*?return \{ thr:p\.thr, brk:p\.brk, steer:aiSteer\(d, C, dt\) \};/);
+  assert.doesNotMatch(source,/COOL_RACE_T|COOL_PARK_OFF|COOL_PULL_RATE|COOL_STOP_V/);
+  assert.doesNotMatch(source,/const cap=100\/3\.6/);
+  const cool=source.match(/function coolInputs\(dt\)\{[\s\S]*?\n\}\nfunction coolStep/)[0];
+  assert.doesNotMatch(cool,/rev:/);
+});
+
+test('the opening hairpin uses compact passing offsets',()=>{
+  assert.match(source,/const spread=\(first>-90&&first<120\)\?1\.1:2\.5;/);
+  assert.match(source,/base-spread,base\+spread/);
 });
