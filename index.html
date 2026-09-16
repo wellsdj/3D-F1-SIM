@@ -17257,7 +17257,7 @@ function setupDraw(){
   else if(step==='colours'){
     body='<p class="newnote">The colour goes on the bodywork, the badge and your row in '
         +'the standings. You can change it in the garage whenever you like.</p>'
-        +'<div class="setup-car">'+apexCarSide({body:NEW.body,wing:NEW.trim,ring:NEW.trim,rims:'#b6babd'})+'</div>'
+        +'<div class="setup-car gview" aria-label="3D car preview"></div>'
         +'<div class="slabel2">Body</div>'
         +'<div class="setup-grid swatches">'
         +TEAM_COLOURS.map(c=>'<button type="button" class="sw'+(c===NEW.body?' on':'')
@@ -17344,6 +17344,15 @@ function setupDraw(){
     +(NEW.step?'<button type="button" class="sback">&lsaquo; Back</button>':'<span></span>')
     +'<button type="button" class="newgo">'+(last?'Start the season':'Next')+' <i>&rsaquo;</i></button>'
     +'</div></div>';
+
+  /* Career paint uses the actual loaded car, just like the garage. It is a
+     separate rendered clone, so trying colours here cannot alter a saved car
+     if the setup is cancelled halfway through. */
+  if(step==='colours'){
+    const preview=el.querySelector('.setup-car');
+    const look={body:NEW.body,wing:NEW.trim,ring:NEW.trim,rims:'#b6babd'};
+    if(!apexCarView(preview,look)) preview.innerHTML=apexCarSide(look);
+  }
 
   el.querySelector('.fullx').onclick=setupClose;
   el.onclick=e=>{ if(e.target===el) setupClose(); };
@@ -17456,9 +17465,6 @@ const APEX_TILES=[
   {k:'livery', icon:'livery', name:'Livery',  meta:'Change design'},
 ];
 
-/* The car, from the side, in your colours. Not a photograph and not the 3D
-   model -- a drawing that takes the four colours you actually chose, so the
-   panel shows your car rather than a car. */
 /* The real car, not a drawing of one.
 
    A second small renderer with its own scene and a clone of the loaded model.
@@ -17467,7 +17473,7 @@ const APEX_TILES=[
    sync -- and it is rendered once, on demand, not animated: a photograph of
    your car, side on. */
 let apexShotR=null, apexShotS=null, apexShotC=null, apexShotCar=null;
-function apexCarView(host){
+function apexCarView(host,override){
   if(typeof carObj==='undefined' || !carObj || typeof THREE==='undefined') return false;
   try{
     if(!apexShotR){
@@ -17492,6 +17498,38 @@ function apexCarView(host){
     }
     if(apexShotCar){ apexShotS.remove(apexShotCar); apexShotCar=null; }
     apexShotCar=carObj.clone(true);
+    /* A setup preview needs colours that have not been saved yet. Give the
+       clone its own materials before tinting it, or a swatch in this modal
+       would repaint the live garage car and remain changed after Cancel. */
+    if(override){
+      const copies=new Map();
+      apexShotCar.traverse(o=>{
+        if(!o.isMesh||!o.material)return;
+        const source=Array.isArray(o.material)?o.material:[o.material];
+        const mats=source.map(m=>{
+          if(!m)return m;
+          if(!copies.has(m))copies.set(m,m.clone());
+          return copies.get(m);
+        });
+        o.material=Array.isArray(o.material)?mats:mats[0];
+        let bodyish=false,a=o.parent;
+        while(a){if(/body/i.test(a.name||'')){bodyish=true;break;}a=a.parent;}
+        mats.forEach(m=>{
+          if(!m)return;
+          const n=(m.name||'').toLowerCase(),on=(o.name||'').toLowerCase();
+          let kind=/paint/.test(n)?'body':/halo|ring/.test(n)?'ring'
+                   :/mcl39_wheels|discs|chrome/.test(n)?'rims':null;
+          if((bodyish&&/mcl39_carbon1|mcl39_carbon2/.test(n))||/rear.?wing|wing.?rear/.test(on))kind='wing';
+          if(!kind||!override[kind])return;
+          m.map=null;if(m.color)m.color.copy(sRGB(override[kind]));
+          if(kind==='rims'){m.metalness=.72;m.roughness=.24;}
+          else if(kind==='ring'){m.metalness=.18;m.roughness=.31;}
+          else if(kind==='wing'){m.metalness=.28;m.roughness=.36;}
+          else{m.metalness=.12;m.roughness=.42;}
+          m.needsUpdate=true;
+        });
+      });
+    }
     apexShotCar.position.set(0,0,0);
     apexShotCar.rotation.set(0,0,0);
     apexShotS.add(apexShotCar);
