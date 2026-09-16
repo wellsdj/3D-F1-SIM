@@ -1031,6 +1031,10 @@ if('serviceWorker' in navigator){
 }
 </script>
 <link rel="stylesheet" href="career-menu.css">
+<!-- The gate. Loaded before the game so the sign-in box is the first thing
+     painted, and so a save that comes down with an account is in localStorage
+     before anything reads it. -->
+<script defer src="account.js"></script>
 <link rel="stylesheet" href="home-apex.css">
 </head>
 <body>

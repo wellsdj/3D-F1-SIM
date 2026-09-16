@@ -1,0 +1,9 @@
+{
+  "name": "slipstream",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Slipstream — a browser F1 simulator. Static front end, one serverless function behind it for accounts and saves.",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
+  }
+}
