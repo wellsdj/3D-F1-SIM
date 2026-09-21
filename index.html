@@ -12770,6 +12770,58 @@ function aiExitBias(d){
                          : 1-(p-T1_EXIT.peak)/(T1_EXIT.to-T1_EXIT.peak);
   return T1_EXIT.metres*(0.5-0.5*Math.cos(Math.PI*clamp(t,0,1)));   // smooth both ends
 }
+/* NOT INTO THE BACK OF YOU.
+
+   Everything else in here moves a car sideways and leaves the pace to the
+   reference lap, which is right for nine cars racing each other: they are all
+   driving the same speeds, so nobody arrives at anybody. You are not. Sit in
+   front of the field at half their pace and the reference lap says carry on,
+   and they arrive at your gearbox at a hundred kph of closing speed.
+
+   So one car on the circuit gets treated differently, and it is yours. A
+   rival that is behind you, closing, and lined up with you gets a ceiling on
+   its speed: the speed it could still slow from without hitting you, given
+   how far away it is and how fast you are going. Far away it does nothing.
+   Closing on you it eases. Right behind you it settles at your pace and sits
+   there until the road opens.
+
+   THE NUMBERS. A car length and a bit is the buffer -- the distance it wants
+   to keep -- and the easing is planned at 11 m/s², a quarter of what these
+   brakes can do. Deliberately gentle: a rival that has to stand on the brakes
+   behind you has left it far too late, and the point of starting early is
+   that it has time to look for a way round rather than a place to stop. At a
+   hundred metres it is allowed 172 kph on a stationary car, at sixty 125, at
+   twenty 65.
+
+   It is deliberately only about you. Between themselves they are as hard as
+   they ever were, which is the difference between a field that is worth
+   racing and nine cars queuing. */
+const DUEL_LOOK=110;         // metres up the road worth caring about
+const DUEL_WIDE=3.0;         // metres of lateral separation that counts as lined up
+const DUEL_CONE=0.06;        // and that window widens with distance, because a
+                             // car forty metres back on a different line is
+                             // still pointed at where you are
+const DUEL_BUFFER=5.5;       // a car length and a bit
+const DUEL_EASE=11;          // m/s² planned to lose the difference in
+function aiPlayerCap(d){
+  if(!d || !d.car || d.car===PLAYER) return Infinity;
+  if(typeof carState==='undefined' || !carState) return Infinity;
+  if(RESULT.on || (typeof CRASH!=='undefined' && CRASH.on)) return Infinity;
+  const r=aiRelTo(d, carState.wx, carState.wz, carState.speed*3.6, 'player');
+  if(!r) return Infinity;
+  /* Only what is ahead of this car, and only while it is close enough to
+     matter. Behind is somebody else's problem. */
+  if(r.gap<=0 || r.gap>DUEL_LOOK) return Infinity;
+  /* Lined up: the gap between the two cars across the road, not across the
+     line. A rival already alongside is racing, not queuing. */
+  const side=Math.abs(r.lat-(d.off||0));
+  if(side>DUEL_WIDE+r.gap*DUEL_CONE) return Infinity;
+  const you=Math.max(0, carState.speed);
+  const room=Math.max(0, r.gap-DUEL_BUFFER);
+  /* The fastest it could be going and still lose the difference in the road
+     it has left. Never below your speed: matching you is the floor. */
+  return Math.max(you, Math.sqrt(you*you + 2*DUEL_EASE*room));
+}
 function aiTraffic(d,dt){
   const base=(d.field?d.field.race[d.i]:0)+aiExitBias(d);
   const first=aiFirstProgress(d),span=first>-180&&first<90?55:30;
@@ -12809,13 +12861,19 @@ function aiTraffic(d,dt){
   /* Keep the opening hairpin compact. A full passing offset here put a row of
      cars beyond the outside kerb while the field was still bunched together. */
   const spread=(first>-90&&first<120)?1.1:2.5;
-  const candidates=[base,d.lat||base,base-spread,base+spread].map(x=>clamp(x,-left,right));
+  /* Stuck behind you and slower than it wants to be: it may look further
+     across the road than it otherwise would, and it stops being precious
+     about the racing line while it does. Going round is the point. */
+  const stuck=(d.youCap!==undefined && d.youCap<Infinity);
+  const wide=stuck?Math.max(spread,4.2):spread;
+  const candidates=(stuck?[base,d.lat||base,base-spread,base+spread,base-wide,base+wide]
+                         :[base,d.lat||base,base-spread,base+spread]).map(x=>clamp(x,-left,right));
   const current=d.lat||0;
   let want=clamp(current,-left,right),best=Infinity;
   for(const lat of candidates){
     // Do not sweep across a car alongside or immediately ahead.
     if(Math.abs(lat-current)>.15&&obstacles.some(o=>o.gap<12&&o.gap>-6&&o.lat>Math.min(current,lat)-2.4&&o.lat<Math.max(current,lat)+2.4))continue;
-    let score=Math.abs(lat-base)*.3+Math.abs(lat-(d.lat||0))*.5;
+    let score=Math.abs(lat-base)*(stuck?.12:.3)+Math.abs(lat-(d.lat||0))*.5;
     for(const o of obstacles){
       /* Half a car more room around you than around each other, and when you
          have a run it is weighted hard enough to actually move them. */
@@ -12834,6 +12892,8 @@ function aiTraffic(d,dt){
   if(pushL>0) want=clamp(Math.max(want, pushL),-left,right);
   d.line='race';d.mode=Math.abs(want-base)>.4?'pass':'clear';d.want=want;
   d.speedK=1;d.capV=Infinity;d.vAct=d.v;d.pinned=false;
+  /* And what it may do about the car in front, if that car is yours. */
+  d.youCap=aiPlayerCap(d);
   const grid=d._gridT===undefined?1:clamp(.25+d._gridT/2,.25,1);
   d.lat+=clamp(want-d.lat,-1.8*grid*dt,1.8*grid*dt);
   d.lat=clamp(d.lat,-aiRoom(d.i,-1),aiRoom(d.i,1));
@@ -12992,8 +13052,9 @@ function aiPedals(d, C){
      generated profile would. Nothing is capped until one is applied. */
   const cap=(typeof AI!=='undefined')?AI.cap:null;
   const boost=(typeof aiFirstBoost==='function')?aiFirstBoost:()=>1;
-  const target=q=>Math.min(V[q]*boost(d,q), aiFirstLimit(d,q),
-                           cap?cap[q]:Infinity)*K;
+  const you=(d.youCap===undefined)?Infinity:d.youCap;
+  const target=q=>Math.min(Math.min(V[q]*boost(d,q), aiFirstLimit(d,q),
+                           cap?cap[q]:Infinity)*K, you);
   let finalProgress=AI.lastApex==null?Infinity:(d.i-AI.lastApex)*d.ds;
   if(finalProgress>d.len/2)finalProgress-=d.len;
   if(finalProgress<-d.len/2)finalProgress+=d.len;
@@ -15012,6 +15073,8 @@ window.SIM={
   speed(v){ carState.speed=v; },
   /* Reverse state for browser driving diagnostics. */
   revState(){ return {enabled:true, speed:+carState.speed.toFixed(2),
+                      x:+carState.wx.toFixed(1), z:+carState.wz.toFixed(1),
+                      touched:(PLAYER.touchT||0)>0,
                       retire:!!RETIRE.on, declined:!!RETIRE.declined,
                       surf:PLAYER.surf?{grass:!!PLAYER.surf.grass,loose:!!PLAYER.surf.loose,
                                         ok:!!PLAYER.surf.ok}:null,
